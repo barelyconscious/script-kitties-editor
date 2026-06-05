@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import "./App.css";
 import { NavRail, type NavRailTool } from "./components/NavRail";
@@ -8,18 +7,7 @@ import DataTables from "./pages/DataTables";
 import Workbench from "./pages/Workbench";
 
 function App() {
-  const [_greetMsg, setGreetMsg] = useState("");
-  const [name, _setName] = useState("");
-  const [_abilities, _setAbilities] = useState([]);
   const [activeTool, setActiveTool] = useState<NavRailTool>("workbench");
-
-  async function _greet() {
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
-  async function _loadAbilities() {
-    _setAbilities(await invoke("get_abilities_api"));
-  }
 
   return (
     <TooltipProvider>

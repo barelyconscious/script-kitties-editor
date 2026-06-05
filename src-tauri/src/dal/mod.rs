@@ -1,0 +1,261 @@
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, RwLock},
+};
+
+use moka::sync::Cache;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::Serialize;
+
+use crate::{
+    config::EditorConfig,
+    model::{Ability, AssetEntry, Biogram, Charm, Creature, Dlc, Effect, Item, ItemDrop},
+};
+
+pub mod abilities;
+pub mod assets;
+pub mod biograms;
+pub mod charms;
+pub mod creatures;
+pub mod dlc;
+pub mod effects;
+pub mod item_drops;
+pub mod items;
+pub mod sprites;
+
+pub struct Dal {
+    // Config is mutable at runtime via `update_config`; readers take a snapshot
+    // through a short-lived read lock so they don't hold it across file I/O.
+    config: RwLock<EditorConfig>,
+    pub(crate) abilities: Cache<(), Arc<Vec<Ability>>>,
+    pub(crate) biograms: Cache<(), Arc<Vec<Biogram>>>,
+    pub(crate) charms: Cache<(), Arc<Vec<Charm>>>,
+    pub(crate) creatures: Cache<(), Arc<Vec<Creature>>>,
+    pub(crate) dlcs: Cache<(), Arc<Vec<Dlc>>>,
+    pub(crate) effects: Cache<(), Arc<Vec<Effect>>>,
+    pub(crate) items: Cache<(), Arc<Vec<Item>>>,
+    pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
+    // The game's assets.json manifest (logical name -> on-disk path).
+    pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
+    // Resolved sprite data URLs, keyed by logical sprite name.
+    pub(crate) sprites: Cache<String, Arc<Option<String>>>,
+    // Swapped out by `update_config` so a new install path starts watching the
+    // new Data dir and the old watcher (dropped here) stops firing.
+    watcher: Mutex<RecommendedWatcher>,
+}
+
+impl Dal {
+    pub fn new(config: EditorConfig) -> Result<Self, String> {
+        let abilities: Cache<(), Arc<Vec<Ability>>> = Cache::builder().max_capacity(1).build();
+        let biograms: Cache<(), Arc<Vec<Biogram>>> = Cache::builder().max_capacity(1).build();
+        let charms: Cache<(), Arc<Vec<Charm>>> = Cache::builder().max_capacity(1).build();
+        let creatures: Cache<(), Arc<Vec<Creature>>> = Cache::builder().max_capacity(1).build();
+        let dlcs: Cache<(), Arc<Vec<Dlc>>> = Cache::builder().max_capacity(1).build();
+        let effects: Cache<(), Arc<Vec<Effect>>> = Cache::builder().max_capacity(1).build();
+        let items: Cache<(), Arc<Vec<Item>>> = Cache::builder().max_capacity(1).build();
+        let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
+        let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
+            Cache::builder().max_capacity(1).build();
+        let sprites: Cache<String, Arc<Option<String>>> =
+            Cache::builder().max_capacity(1024).build();
+
+        let game_root = PathBuf::from(&config.game_install_path);
+        let watcher = build_watcher(
+            &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
+            &item_drops, &manifest, &sprites,
+        )?;
+
+        Ok(Self {
+            config: RwLock::new(config),
+            abilities,
+            biograms,
+            charms,
+            creatures,
+            dlcs,
+            effects,
+            items,
+            item_drops,
+            manifest,
+            sprites,
+            watcher: Mutex::new(watcher),
+        })
+    }
+
+    /// Replace the in-memory config and rewire the filesystem watcher to the
+    /// new Data directory. All domain caches are invalidated because their
+    /// contents were loaded from the old path.
+    pub fn update_config(&self, new_config: EditorConfig) -> Result<(), String> {
+        // Build the new watcher BEFORE touching state — if it fails (e.g. the
+        // new game_install_path doesn't exist) we leave the Dal as it was.
+        let new_root = PathBuf::from(&new_config.game_install_path);
+        let new_watcher = build_watcher(
+            &new_root,
+            &self.abilities,
+            &self.biograms,
+            &self.charms,
+            &self.creatures,
+            &self.dlcs,
+            &self.effects,
+            &self.items,
+            &self.item_drops,
+            &self.manifest,
+            &self.sprites,
+        )?;
+
+        *self.config.write().unwrap() = new_config;
+        // Dropping the old watcher here stops it from firing on the old dir.
+        *self.watcher.lock().unwrap() = new_watcher;
+
+        self.abilities.invalidate_all();
+        self.biograms.invalidate_all();
+        self.charms.invalidate_all();
+        self.creatures.invalidate_all();
+        self.dlcs.invalidate_all();
+        self.effects.invalidate_all();
+        self.items.invalidate_all();
+        self.item_drops.invalidate_all();
+        self.manifest.invalidate_all();
+        self.sprites.invalidate_all();
+
+        Ok(())
+    }
+
+    pub fn config(&self) -> EditorConfig {
+        self.config.read().unwrap().clone()
+    }
+
+    pub(crate) fn data_dir(&self) -> PathBuf {
+        Path::new(&self.config.read().unwrap().game_install_path).join("Data")
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_watcher(
+    game_root: &Path,
+    abilities: &Cache<(), Arc<Vec<Ability>>>,
+    biograms: &Cache<(), Arc<Vec<Biogram>>>,
+    charms: &Cache<(), Arc<Vec<Charm>>>,
+    creatures: &Cache<(), Arc<Vec<Creature>>>,
+    dlcs: &Cache<(), Arc<Vec<Dlc>>>,
+    effects: &Cache<(), Arc<Vec<Effect>>>,
+    items: &Cache<(), Arc<Vec<Item>>>,
+    item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
+    manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
+    sprites: &Cache<String, Arc<Option<String>>>,
+) -> Result<RecommendedWatcher, String> {
+    let data_dir = game_root.join("Data");
+
+    // (path the watcher reacts to, closure that invalidates the matching cache).
+    // To register a new domain: clone its cache handle and push a row here.
+    type Invalidator = Box<dyn Fn() + Send + Sync + 'static>;
+    let invalidators: Vec<(PathBuf, Invalidator)> = vec![
+        (data_dir.join("abilities.json"), {
+            let c = abilities.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("biograms.json"), {
+            let c = biograms.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("charms.json"), {
+            let c = charms.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("creatures.json"), {
+            let c = creatures.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("dlc.json"), {
+            let c = dlcs.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("effects.json"), {
+            let c = effects.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("items.json"), {
+            let c = items.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("itemDropTable.json"), {
+            let c = item_drops.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        // assets.json lives at the game root. When it changes, both the manifest
+        // and every resolved sprite (paths derived from it) may be stale.
+        (game_root.join("assets.json"), {
+            let manifest = manifest.clone();
+            let sprites = sprites.clone();
+            Box::new(move || {
+                manifest.invalidate(&());
+                sprites.invalidate_all();
+            })
+        }),
+    ];
+
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+        let Ok(event) = res else { return };
+        // Ignore access-only events; only react when the file's bytes change.
+        match event.kind {
+            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {}
+            _ => return,
+        }
+        for path in &event.paths {
+            for (watched_path, invalidate) in &invalidators {
+                if path == watched_path {
+                    invalidate();
+                }
+            }
+        }
+    })
+    .map_err(|e| format!("failed to create filesystem watcher: {}", e))?;
+
+    // Watch Data/ for the domain JSON files, and the game root (non-recursively)
+    // for assets.json. Two shallow watches rather than one recursive watch over
+    // the whole install (which would also cover the large Sprites/ tree).
+    watcher
+        .watch(&data_dir, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("failed to watch {}: {}", data_dir.display(), e))?;
+    watcher
+        .watch(game_root, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("failed to watch {}: {}", game_root.display(), e))?;
+
+    Ok(watcher)
+}
+
+/// Pretty-print a serializable value with 4-space indent and a trailing newline,
+/// matching the game's existing JSON file style so saves produce minimal diffs.
+pub(crate) fn serialize_pretty<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+    let mut buf = Vec::new();
+    let mut serializer = serde_json::Serializer::with_formatter(&mut buf, formatter);
+    value
+        .serialize(&mut serializer)
+        .map_err(|e| format!("failed to serialize: {}", e))?;
+    buf.push(b'\n');
+    Ok(buf)
+}
+
+/// Write `buf` to `path` atomically: write to a sibling temp file then rename
+/// over the destination. `fs::rename` is atomic on POSIX, and on Windows when
+/// source and destination sit on the same volume — which is always the case
+/// here because the temp file lives in the same directory.
+pub(crate) fn atomic_write(path: &Path, buf: &[u8]) -> Result<(), String> {
+    let tmp_path = path.with_extension("json.tmp");
+
+    fs::write(&tmp_path, buf)
+        .map_err(|e| format!("failed to write {}: {}", tmp_path.display(), e))?;
+
+    fs::rename(&tmp_path, path).map_err(|e| {
+        // Best-effort cleanup so a failed rename doesn't leave the .tmp around.
+        let _ = fs::remove_file(&tmp_path);
+        format!(
+            "failed to rename {} to {}: {}",
+            tmp_path.display(),
+            path.display(),
+            e
+        )
+    })
+}

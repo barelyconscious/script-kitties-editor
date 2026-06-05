@@ -188,22 +188,38 @@ function FieldControl<T extends { id: string }>({
           onChange={(e) => setValue(e.currentTarget.value as V)}
         />
       );
-    case "number":
+    case "number": {
+      // A number field is integer unless it opts into decimals via step "any"
+      // (e.g. ability cost). Integer fields reject fractional input outright.
+      const isInteger = field.step !== "any";
       return (
         <Input
           id={id}
           type="number"
-          step={field.step}
+          inputMode={isInteger ? "numeric" : "decimal"}
+          step={field.step ?? (isInteger ? 1 : undefined)}
           // Optional numeric fields can be undefined (e.g. a missing level);
           // display 0 without mutating the underlying value until edited.
           value={(value ?? 0) as number}
           disabled={readOnly}
+          onKeyDown={
+            isInteger
+              ? (e) => {
+                  // Block the keys that would introduce a fractional/exponent
+                  // value so an integer field can never hold a decimal.
+                  if (e.key === "." || e.key === "e" || e.key === "E") e.preventDefault();
+                }
+              : undefined
+          }
           onChange={(e) => {
             const n = e.currentTarget.valueAsNumber;
-            setValue((Number.isNaN(n) ? 0 : n) as V);
+            // Truncate as a backstop for pasted values that slip past keydown.
+            const safe = Number.isNaN(n) ? 0 : isInteger ? Math.trunc(n) : n;
+            setValue(safe as V);
           }}
         />
       );
+    }
     case "select":
       return (
         <Select value={value as string} disabled={readOnly} onValueChange={(v) => setValue(v as V)}>

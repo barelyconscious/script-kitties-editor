@@ -32,7 +32,17 @@ impl Dal {
     /// in the manifest — e.g. art that doesn't exist yet.
     pub fn resolve_asset(&self, name: &str) -> Result<Option<PathBuf>, String> {
         let manifest = self.get_asset_manifest()?;
-        let Some(entry) = manifest.get(name) else {
+        // Most data references a sprite by its full filename (e.g. "bitlynx.png"),
+        // but creatures store the bare stem ("bitlynx"). Fall back to "<name>.png"
+        // so both conventions resolve to the same manifest entry.
+        let entry = manifest.get(name).or_else(|| {
+            if name.is_empty() || name.contains('.') {
+                None
+            } else {
+                manifest.get(&format!("{name}.png"))
+            }
+        });
+        let Some(entry) = entry else {
             return Ok(None);
         };
         // Manifest paths use Windows separators; normalize for the host OS.

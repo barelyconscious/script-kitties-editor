@@ -1,22 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Brain,
-  Clover,
-  Droplet,
-  Flame,
-  Heart,
-  type LucideIcon,
-  PlusIcon,
-  Shield,
-  ShieldHalf,
-  Skull,
-  Snowflake,
-  Sparkles,
-  Sword,
-  Wind,
-  XIcon,
-  Zap,
-} from "lucide-react";
+import { PlusIcon, Sparkles, XIcon } from "lucide-react";
 import { type Column, EntityDataTable } from "@/components/data-tables/EntityDataTable";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { Sprite } from "@/components/Sprite";
@@ -29,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { nonZeroStats, STAT_KEYS, STAT_META, signed } from "@/lib/stats";
 import { cn } from "@/lib/utils";
 
 type Charm = {
@@ -38,42 +22,6 @@ type Charm = {
   description: string;
   stats: Record<string, number>;
 };
-
-// Every stat key used across charms.json, paired with a glyph + color so the
-// table reads at a glance ("+3 ⚔"). Defenses share the shield, tinted by their
-// element; offenses get the element's own icon. Insertion order also drives the
-// editor's stat dropdown, so it's grouped sensibly (core → element pairs).
-const STAT_META: Record<string, { label: string; Icon: LucideIcon; color: string }> = {
-  attack: { label: "Attack", Icon: Sword, color: "text-red-400" },
-  defense: { label: "Defense", Icon: Shield, color: "text-slate-400" },
-  specialAttack: { label: "Special Attack", Icon: Sparkles, color: "text-violet-400" },
-  specialDefense: { label: "Special Defense", Icon: ShieldHalf, color: "text-violet-300" },
-  health: { label: "Health", Icon: Heart, color: "text-rose-400" },
-  speed: { label: "Speed", Icon: Wind, color: "text-cyan-400" },
-  luck: { label: "Luck", Icon: Clover, color: "text-green-400" },
-  memory: { label: "Memory", Icon: Brain, color: "text-fuchsia-400" },
-  fireDamage: { label: "Fire Damage", Icon: Flame, color: "text-orange-400" },
-  fireDefense: { label: "Fire Defense", Icon: Shield, color: "text-orange-300" },
-  frostDamage: { label: "Frost Damage", Icon: Snowflake, color: "text-sky-400" },
-  frostDefense: { label: "Frost Defense", Icon: Shield, color: "text-sky-300" },
-  lightningDamage: { label: "Lightning Damage", Icon: Zap, color: "text-amber-400" },
-  lightningDefense: { label: "Lightning Defense", Icon: Shield, color: "text-amber-300" },
-  poisonDamage: { label: "Poison Damage", Icon: Skull, color: "text-green-500" },
-  poisonDefense: { label: "Poison Defense", Icon: Shield, color: "text-emerald-400" },
-  waterDamage: { label: "Water Damage", Icon: Droplet, color: "text-blue-400" },
-};
-
-const STAT_KEYS = Object.keys(STAT_META);
-
-// "+3" / "-1" — signed so buffs vs. debuffs read at a glance.
-function signed(n: number): string {
-  return n > 0 ? `+${n}` : `${n}`;
-}
-
-// Drop the zero-valued stats — a +0 conveys nothing and just clutters the row.
-function nonZeroStats(stats: Record<string, number>): [string, number][] {
-  return Object.entries(stats).filter(([, v]) => v !== 0);
-}
 
 /** Compact icon badges for a charm's non-zero stats, e.g. "+3 ⚔  -1 🛡". */
 function StatBadges({ stats }: { stats: Record<string, number> }) {

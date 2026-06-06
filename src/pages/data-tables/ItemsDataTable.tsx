@@ -1,5 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-import { type Column, EntityDataTable } from "@/components/data-tables/EntityDataTable";
+import {
+  Compass,
+  Crosshair,
+  HeartPulse,
+  Layers,
+  type LucideIcon,
+  Pill,
+  Skull,
+  Swords,
+  Tag,
+} from "lucide-react";
+import {
+  type Column,
+  type ColumnContext,
+  EntityDataTable,
+} from "@/components/data-tables/EntityDataTable";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { Sprite } from "@/components/Sprite";
 import { cn } from "@/lib/utils";
@@ -26,15 +41,51 @@ type ItemDrop = {
 // One table row = an item joined with its loot/economy entry from itemDropTable.
 type ItemRow = Item & Omit<ItemDrop, "id">;
 
-const ITEM_TAGS = [
-  "CONSUMABLE",
-  "HARMFUL",
-  "HELPFUL",
-  "REQUIRES_TARGET",
-  "STACKABLE",
-  "USABLE_IN_COMBAT",
-  "USABLE_OUTSIDE_COMBAT",
-];
+// Each item tag gets an evocative glyph + color for the table, plus a human
+// label for its tooltip. Insertion order drives the edit dialog's tag list too.
+const ITEM_TAG_META: Record<string, { label: string; Icon: LucideIcon; color: string }> = {
+  CONSUMABLE: { label: "Consumable", Icon: Pill, color: "text-teal-400" },
+  HARMFUL: { label: "Harmful", Icon: Skull, color: "text-red-400" },
+  HELPFUL: { label: "Helpful", Icon: HeartPulse, color: "text-green-400" },
+  REQUIRES_TARGET: { label: "Requires Target", Icon: Crosshair, color: "text-amber-400" },
+  STACKABLE: { label: "Stackable", Icon: Layers, color: "text-sky-400" },
+  USABLE_IN_COMBAT: { label: "Usable in Combat", Icon: Swords, color: "text-orange-400" },
+  USABLE_OUTSIDE_COMBAT: {
+    label: "Usable Outside Combat",
+    Icon: Compass,
+    color: "text-violet-400",
+  },
+};
+
+const ITEM_TAGS = Object.keys(ITEM_TAG_META);
+
+/** Item tags as clickable glyphs; clicking one searches the table for that tag. */
+function TagBadges({ tags, setQuery }: { tags: string[]; setQuery: ColumnContext["setQuery"] }) {
+  if (tags.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex items-center gap-1">
+      {tags.map((tag) => {
+        const meta = ITEM_TAG_META[tag];
+        const Icon = meta?.Icon ?? Tag;
+        return (
+          <button
+            key={tag}
+            type="button"
+            title={meta?.label ?? tag}
+            // Stop the row's edit-on-click; just drive the search box.
+            onClick={(e) => {
+              e.stopPropagation();
+              setQuery(tag);
+            }}
+            className="rounded p-1 transition-colors hover:bg-muted"
+          >
+            <Icon className={cn("size-4", meta?.color)} />
+          </button>
+        );
+      })}
+    </span>
+  );
+}
 
 const RARITIES = ["POOR", "COMMON", "UNCOMMON", "RARE", "EPIC", "UNIQUE"];
 const BIOMES = ["DESERT", "FOREST", "MOUNTAINS", "PLAINS", "SWAMP"];
@@ -122,9 +173,7 @@ const COLUMNS: Column<ItemRow>[] = [
   },
   {
     header: "Tags",
-    className: "text-muted-foreground text-xs",
-    truncate: true,
-    render: (i) => i.itemTags.join(", "),
+    render: (i, { setQuery }) => <TagBadges tags={i.itemTags} setQuery={setQuery} />,
   },
   {
     header: "Level",

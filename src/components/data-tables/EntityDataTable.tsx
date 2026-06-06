@@ -13,6 +13,12 @@ import {
 import { cn } from "@/lib/utils";
 import { EntityEditDialog, type EntityField } from "./EntityEditDialog";
 
+/** Handed to a column's render so cells can drive the table — e.g. a tag chip
+ * that puts its tag into the search box. */
+export type ColumnContext = {
+  setQuery: (query: string) => void;
+};
+
 export type Column<T> = {
   header: string;
   /** Exactly one column should be sticky — the left-pinned identity column. */
@@ -25,7 +31,7 @@ export type Column<T> = {
    * (descriptions, joined tags) so content-sizing the table doesn't make it huge.
    */
   truncate?: boolean;
-  render: (row: T) => ReactNode;
+  render: (row: T, ctx: ColumnContext) => ReactNode;
 };
 
 // Width cap applied to truncating columns.
@@ -73,6 +79,8 @@ export function EntityDataTable<T extends { id: string }>({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<T | null>(null);
+  // setQuery is a stable state setter, so this context never needs to change.
+  const columnCtx = useMemo<ColumnContext>(() => ({ setQuery }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,7 +186,9 @@ export function EntityDataTable<T extends { id: string }>({
                         key={col.header}
                         className="sticky left-0 z-10 bg-background font-medium shadow-[inset_-1px_0_0_0_var(--border)] before:pointer-events-none before:absolute before:inset-0 before:bg-muted/50 before:opacity-0 before:transition-opacity group-hover:before:opacity-100"
                       >
-                        <span className="relative flex items-center">{col.render(row)}</span>
+                        <span className="relative flex items-center">
+                          {col.render(row, columnCtx)}
+                        </span>
                       </TableCell>
                     ) : (
                       <TableCell
@@ -189,9 +199,11 @@ export function EntityDataTable<T extends { id: string }>({
                         )}
                       >
                         {col.truncate ? (
-                          <div className={cn(TRUNCATE_WIDTH, "truncate")}>{col.render(row)}</div>
+                          <div className={cn(TRUNCATE_WIDTH, "truncate")}>
+                            {col.render(row, columnCtx)}
+                          </div>
                         ) : (
-                          col.render(row)
+                          col.render(row, columnCtx)
                         )}
                       </TableCell>
                     ),

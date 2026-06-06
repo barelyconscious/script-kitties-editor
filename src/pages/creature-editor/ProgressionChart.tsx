@@ -49,17 +49,14 @@ export function ProgressionChart({
     [creature, population, stat],
   );
 
-  const Icon = STAT_META[stat]?.Icon;
-
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <Select value={stat} onValueChange={setStat}>
+          {/* SelectValue mirrors the chosen item (icon + label), so the trigger
+              needs no icon of its own. */}
           <SelectTrigger className="w-56">
-            <span className="flex items-center gap-2">
-              {Icon && <Icon className={STAT_META[stat]?.color} />}
-              <SelectValue />
-            </span>
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {CREATURE_STATS.map((s) => {
@@ -97,14 +94,22 @@ export function ProgressionChart({
           <ChartTooltip
             content={
               <ChartTooltipContent
-                labelFormatter={(label) => `Level ${label}`}
+                // shadcn derives the header from the first series' config, so use
+                // the raw datum to show the actual level being hovered.
+                labelFormatter={(_, payload) => `Level ${payload?.[0]?.payload?.level ?? ""}`}
+                // Re-render each row with its series color + a rounded value
+                // (the default formatter would print raw, sometimes-fractional averages).
                 formatter={(value, name) => {
                   const n = typeof value === "number" ? value : Number(value);
                   const label = CHART_CONFIG[name as keyof typeof CHART_CONFIG]?.label ?? name;
                   return (
-                    <span className="flex w-full items-center justify-between gap-3">
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className="font-medium font-mono tabular-nums">
+                    <span className="flex w-full items-center gap-2">
+                      <span
+                        className="size-2 shrink-0 rounded-[2px]"
+                        style={{ backgroundColor: `var(--color-${name})` }}
+                      />
+                      <span className="flex-1 text-muted-foreground">{label}</span>
+                      <span className="font-medium font-mono text-foreground tabular-nums">
                         {Math.round(n).toLocaleString()}
                       </span>
                     </span>

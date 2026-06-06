@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { SearchIcon } from "lucide-react";
+import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { type Creature, loadCreatures, saveCreature } from "@/lib/creature";
 import { cn } from "@/lib/utils";
 import type { AbilityOption } from "./creature-editor/AbilityPicker";
+import { CreatureDetailsDialog } from "./creature-editor/CreatureDetailsDialog";
 import { CreatureForm } from "./creature-editor/CreatureForm";
 
 type Ability = { id: string; name: string };
@@ -25,6 +26,7 @@ export default function CreatureEditor() {
   const [draft, setDraft] = useState<Creature | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +154,15 @@ export default function CreatureEditor() {
               </div>
               {saveError && <span className="text-destructive text-sm">{saveError}</span>}
               <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setDetailsOpen(true)}
+                title="Edit name, sprite, script & description"
+                aria-label="Creature details"
+              >
+                <SlidersHorizontalIcon className="size-4" />
+              </Button>
+              <Button
                 variant="outline"
                 disabled={!dirty || saving}
                 onClick={() => saved && select(saved)}
@@ -171,6 +182,13 @@ export default function CreatureEditor() {
                 disabled={saving}
               />
             </div>
+            <CreatureDetailsDialog
+              creature={draft}
+              onChange={setDraft}
+              open={detailsOpen}
+              onOpenChange={setDetailsOpen}
+              disabled={saving}
+            />
           </>
         ) : (
           <div className="grid flex-1 place-items-center text-muted-foreground text-sm">

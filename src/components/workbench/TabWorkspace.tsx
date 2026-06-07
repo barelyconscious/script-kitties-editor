@@ -25,6 +25,12 @@ export interface TabWorkspaceProps {
    */
   scriptReach: number;
   /**
+   * Whether another currently-OPEN tab shows the same script file. Distinct from
+   * `scriptReach` (a static game-object count): this drives the dynamic "also
+   * open in another tab" header signal. Derived in the shell from the open tabs.
+   */
+  alsoOpenElsewhere: boolean;
+  /**
    * Report this tab's aggregate dirtiness UP to the shell so it can derive
    * "any tab dirty" for the leave-the-tool / before-unload guards and gate the
    * close-tab guard. Fires whenever the flag flips.
@@ -48,7 +54,13 @@ const SAVED_CLEAR_MS = 2500;
  * DIRTY target of THIS tab in order (data before script), then surfaces a single
  * summary. A partial failure NEVER reads as success.
  */
-export function TabWorkspace({ tab, hidden, scriptReach, onDirtyChange }: TabWorkspaceProps) {
+export function TabWorkspace({
+  tab,
+  hidden,
+  scriptReach,
+  alsoOpenElsewhere,
+  onDirtyChange,
+}: TabWorkspaceProps) {
   // For CREATURES the data pane (the full creature form) is the primary editing
   // surface, so it opens wide by default — a creature tab that showed only the
   // aiController script with the form hidden would be a poor default. Flat types
@@ -186,7 +198,11 @@ export function TabWorkspace({ tab, hidden, scriptReach, onDirtyChange }: TabWor
             {/* Script pane owns its own header (names the file + reach) and a
                 full-bleed editor, so it bypasses the generic Pane chrome. */}
             <section className="flex min-w-0 flex-1 flex-col bg-background" aria-label="Script">
-              <ScriptPane scriptName={tab.scriptName} reach={scriptReach} />
+              <ScriptPane
+                scriptName={tab.scriptName}
+                reach={scriptReach}
+                alsoOpenElsewhere={alsoOpenElsewhere}
+              />
             </section>
 
             {/* The API pane owns its own header, search, and scroll region (built

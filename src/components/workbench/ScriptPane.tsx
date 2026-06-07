@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { FileWarning, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { FileWarning, Loader2, Users } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { useRequestSave, useSaveTarget } from "./saveBus";
+import { useScriptSync } from "./scriptSync";
 
 /**
  * The SCRIPT pane for one Workbench tab: loads the tab's script by name and
@@ -27,6 +28,12 @@ export interface ScriptPaneProps {
   scriptName: string;
   /** How many game objects point at `scriptName` (incl. this one). >1 ⇒ shared. */
   reach: number;
+  /**
+   * Whether ANOTHER currently-open tab shows the SAME script file. Distinct from
+   * `reach` (static count of game objects): this is the dynamic "also open in
+   * another tab" signal. When true a save here may refresh the sibling tab.
+   */
+  alsoOpenElsewhere: boolean;
 }
 
 type LoadState =
@@ -35,7 +42,12 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "contents" };
 
-export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
+export function ScriptPane({ scriptName, reach, alsoOpenElsewhere }: ScriptPaneProps) {
+  // A stable identity for THIS pane instance, used as the publish `originId` so a
+  // pane can skip reacting to its own save.
+  const originId = useId();
+  const sync = useScriptSync();
+
   const [load, setLoad] = useState<LoadState>(() =>
     scriptName.trim().length === 0 ? { kind: "scriptless" } : { kind: "loading" },
   );
@@ -90,6 +102,8 @@ export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
   // keeps re-registration scoped to dirty toggling.
   const valueRef = useRef(value);
   valueRef.current = value;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const scriptNameRef = useRef(scriptName);
   scriptNameRef.current = scriptName;
 
@@ -100,7 +114,36 @@ export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
     await invoke("save_script", { name, contents: draft });
     // Persist succeeded → the draft is the new baseline; clears dirty.
     setLoaded(draft);
-  }, []);
+    // Fan out to any SIBLING tab showing the same file so it refreshes to the
+    // just-saved contents (no re-fetch — the draft IS the new disk state).
+    sync.publish(name, draft, originId);
+  }, [sync, originId]);
+
+  // Subscribe to sibling saves of THIS file. The listener reads live state via
+  // refs so it never needs to re-subscribe per keystroke — only when the file
+  // (scriptName) or the bus/origin identity changes.
+  useEffect(() => {
+    if (scriptName.trim().length === 0) return; // script-less: nothing to sync
+    const unsubscribe = sync.subscribe(scriptName, (contents, sourceId) => {
+      if (sourceId === originId) return; // our own save — already applied locally
+      if (contents === valueRef.current) return; // already in sync — no-op
+      const refresh = () => {
+        setLoaded(contents);
+        setValue(contents);
+      };
+      if (!dirtyRef.current) {
+        // Clean pane: silently adopt the sibling's saved contents.
+        refresh();
+        return;
+      }
+      // Dirty pane: never silently lose work — warn before clobbering.
+      const ok = window.confirm(
+        `${scriptName} was saved in another tab. Discard your unsaved edits and load the new version?`,
+      );
+      if (ok) refresh();
+    });
+    return unsubscribe;
+  }, [scriptName, sync, originId]);
 
   useSaveTarget({
     id: "script",
@@ -119,7 +162,7 @@ export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScriptHeader scriptName={scriptName} reach={reach} />
+      <ScriptHeader scriptName={scriptName} reach={reach} alsoOpenElsewhere={alsoOpenElsewhere} />
       <div className="min-h-0 flex-1">
         {load.kind === "contents" ? (
           <ScriptEditor value={value} onChange={setValue} onSave={handleEditorSave} />
@@ -135,7 +178,15 @@ export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
   );
 }
 
-function ScriptHeader({ scriptName, reach }: { scriptName: string; reach: number }) {
+function ScriptHeader({
+  scriptName,
+  reach,
+  alsoOpenElsewhere,
+}: {
+  scriptName: string;
+  reach: number;
+  alsoOpenElsewhere: boolean;
+}) {
   return (
     <div className="flex items-center gap-2 border-b px-3 py-1.5">
       <span className="truncate font-mono text-sm" title={scriptName || undefined}>
@@ -147,6 +198,15 @@ function ScriptHeader({ scriptName, reach }: { scriptName: string; reach: number
           title={`This script is shared by ${reach} game objects — edits affect all of them.`}
         >
           shared by {reach} objects
+        </span>
+      )}
+      {alsoOpenElsewhere && (
+        <span
+          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-600 text-xs dark:text-amber-400"
+          title="This file is also open in another tab. Saving here will refresh that tab (you'll be warned if it has unsaved edits)."
+        >
+          <Users className="size-3" />
+          also open in another tab
         </span>
       )}
     </div>

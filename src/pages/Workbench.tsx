@@ -4,6 +4,11 @@ import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirt
 import type { GameObject } from "@/components/workbench/gameObjects";
 import { scriptReach } from "@/components/workbench/gameObjects";
 import { ObjectList } from "@/components/workbench/ObjectList";
+import {
+  openScriptCounts,
+  ScriptSyncProvider,
+  useScriptSyncRegistry,
+} from "@/components/workbench/scriptSync";
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
 import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workbench/tabs";
@@ -75,6 +80,15 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
     return map;
   }, [objects]);
 
+  // The ONE script-sync registry for this Workbench, shared by every tab's
+  // script pane so a save in one tab can fan out to its siblings.
+  const scriptSync = useScriptSyncRegistry();
+
+  // How many OPEN tabs reference each script file (dynamic, unlike reachByScript
+  // which counts game objects). A count > 1 means the file is "also open in
+  // another tab" for each of those tabs.
+  const openCounts = useMemo(() => openScriptCounts(tabs), [tabs]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -142,19 +156,22 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
               Select an object to open it.
             </div>
           ) : (
-            tabs.map((tab) => {
-              const key = tabKey(tab);
-              return (
-                <div key={key} className="absolute inset-0">
-                  <TabWorkspace
-                    tab={tab}
-                    hidden={key !== activeKey}
-                    scriptReach={reachByScript.get(tab.scriptName) ?? 0}
-                    onDirtyChange={(dirty) => handleTabDirtyChange(key, dirty)}
-                  />
-                </div>
-              );
-            })
+            <ScriptSyncProvider value={scriptSync}>
+              {tabs.map((tab) => {
+                const key = tabKey(tab);
+                return (
+                  <div key={key} className="absolute inset-0">
+                    <TabWorkspace
+                      tab={tab}
+                      hidden={key !== activeKey}
+                      scriptReach={reachByScript.get(tab.scriptName) ?? 0}
+                      alsoOpenElsewhere={(openCounts.get(tab.scriptName) ?? 0) > 1}
+                      onDirtyChange={(dirty) => handleTabDirtyChange(key, dirty)}
+                    />
+                  </div>
+                );
+              })}
+            </ScriptSyncProvider>
           )}
         </div>
       </div>

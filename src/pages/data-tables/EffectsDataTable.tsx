@@ -1,26 +1,6 @@
 import { type Column, EntityDataTable } from "@/components/data-tables/EntityDataTable";
-import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { Sprite } from "@/components/Sprite";
-
-type Effect = {
-  id: string;
-  name: string;
-  sprite: string;
-  script: string;
-  description: string;
-  tags: string[];
-};
-
-const EFFECT_TAGS = [
-  "BENEFICIAL",
-  "BLEED",
-  "BUFF",
-  "BURN",
-  "DEBUFF",
-  "ELECTRIFIED",
-  "HARMFUL",
-  "HELPFUL",
-];
+import { EFFECT_FIELDS, type Effect } from "@/lib/entities/effects";
 
 const COLUMNS: Column<Effect>[] = [
   {
@@ -47,15 +27,6 @@ const COLUMNS: Column<Effect>[] = [
   },
 ];
 
-const FIELDS: EntityField<Effect>[] = [
-  { key: "id", label: "ID", kind: "text", readOnly: true },
-  { key: "name", label: "Name", kind: "text" },
-  { key: "sprite", label: "Sprite", kind: "sprite" },
-  { key: "script", label: "Script", kind: "text" },
-  { key: "description", label: "Description", kind: "textarea", full: true },
-  { key: "tags", label: "Tags", kind: "tags", options: EFFECT_TAGS, full: true },
-];
-
 export default function EffectsDataTable() {
   return (
     <EntityDataTable<Effect>
@@ -65,7 +36,7 @@ export default function EffectsDataTable() {
       entityLabel="effect"
       searchPlaceholder="Filter by name or tag…"
       columns={COLUMNS}
-      fields={FIELDS}
+      fields={EFFECT_FIELDS}
       title={(e) => `Edit ${e.name}`}
       saveDescription="Changes are written to effects.json."
       filter={(e, q) =>

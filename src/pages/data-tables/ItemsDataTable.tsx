@@ -14,9 +14,8 @@ import {
   type ColumnContext,
   EntityDataTable,
 } from "@/components/data-tables/EntityDataTable";
-import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { Sprite } from "@/components/Sprite";
-import { type ItemRow, loadItemRows, saveItemRow } from "@/lib/items";
+import { ITEM_FIELDS, type ItemRow, loadItemRows, saveItemRow } from "@/lib/items";
 import { cn } from "@/lib/utils";
 
 // Each item tag gets an evocative glyph + color for the table, plus a human
@@ -34,8 +33,6 @@ const ITEM_TAG_META: Record<string, { label: string; Icon: LucideIcon; color: st
     color: "text-violet-400",
   },
 };
-
-const ITEM_TAGS = Object.keys(ITEM_TAG_META);
 
 /** Item tags as clickable glyphs; clicking one searches the table for that tag. */
 function TagBadges({ tags, setQuery }: { tags: string[]; setQuery: ColumnContext["setQuery"] }) {
@@ -64,9 +61,6 @@ function TagBadges({ tags, setQuery }: { tags: string[]; setQuery: ColumnContext
     </span>
   );
 }
-
-const RARITIES = ["POOR", "COMMON", "UNCOMMON", "RARE", "EPIC", "UNIQUE"];
-const BIOMES = ["DESERT", "FOREST", "MOUNTAINS", "PLAINS", "SWAMP"];
 
 // Frontend-owned so the palette can change freely. Tuned to the game's colors.
 const RARITY_COLOR: Record<string, string> = {
@@ -117,20 +111,6 @@ const COLUMNS: Column<ItemRow>[] = [
   },
 ];
 
-const FIELDS: EntityField<ItemRow>[] = [
-  { key: "id", label: "ID", kind: "text", readOnly: true },
-  { key: "name", label: "Name", kind: "text" },
-  { key: "sprite", label: "Sprite", kind: "sprite" },
-  { key: "rarity", label: "Rarity", kind: "select", options: RARITIES },
-  { key: "value", label: "Value", kind: "number" },
-  { key: "minLevel", label: "Min Level", kind: "number" },
-  { key: "maxLevel", label: "Max Level", kind: "number" },
-  { key: "script", label: "Script", kind: "text" },
-  { key: "description", label: "Description", kind: "textarea", full: true },
-  { key: "itemTags", label: "Item Tags", kind: "tags", options: ITEM_TAGS, full: true },
-  { key: "biomes", label: "Biomes", kind: "tags", options: BIOMES, full: true },
-];
-
 export default function ItemsDataTable() {
   return (
     <EntityDataTable<ItemRow>
@@ -139,7 +119,7 @@ export default function ItemsDataTable() {
       entityLabel="item"
       searchPlaceholder="Filter by name, tag, rarity, or biome…"
       columns={COLUMNS}
-      fields={FIELDS}
+      fields={ITEM_FIELDS}
       title={(i) => `Edit ${i.name}`}
       saveDescription="Changes are written to items.json and itemDropTable.json."
       filter={(i, q) =>

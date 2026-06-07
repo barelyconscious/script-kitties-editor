@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 
 export type Item = {
   id: string;
@@ -69,3 +70,34 @@ export async function saveItemRow(row: ItemRow): Promise<void> {
   await invoke("save_item", { item });
   await invoke("save_item_drop", { itemDrop });
 }
+
+// Option lists, frontend-owned so the palette can change without a data
+// migration. Order drives the edit dialog's tag/select lists.
+export const RARITIES = ["POOR", "COMMON", "UNCOMMON", "RARE", "EPIC", "UNIQUE"];
+export const BIOMES = ["DESERT", "FOREST", "MOUNTAINS", "PLAINS", "SWAMP"];
+export const ITEM_TAGS = [
+  "CONSUMABLE",
+  "HARMFUL",
+  "HELPFUL",
+  "REQUIRES_TARGET",
+  "STACKABLE",
+  "USABLE_IN_COMBAT",
+  "USABLE_OUTSIDE_COMBAT",
+];
+
+// SINGLE SOURCE OF TRUTH for the item edit schema (the joined ItemRow).
+// Consumed by both the Data Tables page (ItemsDataTable) and the Workbench DATA
+// pane. The split into two records on save lives in `saveItemRow`.
+export const ITEM_FIELDS: EntityField<ItemRow>[] = [
+  { key: "id", label: "ID", kind: "text", readOnly: true },
+  { key: "name", label: "Name", kind: "text" },
+  { key: "sprite", label: "Sprite", kind: "sprite" },
+  { key: "rarity", label: "Rarity", kind: "select", options: RARITIES },
+  { key: "value", label: "Value", kind: "number" },
+  { key: "minLevel", label: "Min Level", kind: "number" },
+  { key: "maxLevel", label: "Max Level", kind: "number" },
+  { key: "script", label: "Script", kind: "text" },
+  { key: "description", label: "Description", kind: "textarea", full: true },
+  { key: "itemTags", label: "Item Tags", kind: "tags", options: ITEM_TAGS, full: true },
+  { key: "biomes", label: "Biomes", kind: "tags", options: BIOMES, full: true },
+];

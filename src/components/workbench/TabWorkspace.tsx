@@ -2,8 +2,9 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Save } 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { DataPane } from "./DataPane";
 import { ScriptPane } from "./ScriptPane";
-import { SaveBusProvider, useSaveBus, useSaveTarget } from "./saveBus";
+import { SaveBusProvider, useSaveBus } from "./saveBus";
 import type { WorkbenchTab } from "./tabs";
 
 export interface TabWorkspaceProps {
@@ -23,9 +24,8 @@ export interface TabWorkspaceProps {
  * center, API right) defaulting to SCRIPT-ONLY. Owns its own save bus so panes
  * register against this tab instance and nothing leaks across tabs.
  *
- * Panes are PLACEHOLDER SLOTS in this task. The real DATA/SCRIPT/API panes plug
- * into the bus via later tasks. One placeholder registers a dummy save target so
- * the bus is demonstrably wired end-to-end.
+ * The DATA pane (left) and SCRIPT pane (center) are real and register with the
+ * bus; the API pane (right) is still a placeholder slot for a later task.
  */
 export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
   // Default SCRIPT-ONLY: both flanks collapsed.
@@ -85,7 +85,7 @@ export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
         <div className="flex min-h-0 flex-1">
           {dataOpen && (
             <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
-              <DataPanePlaceholder tab={tab} />
+              <DataPane objectType={tab.objectType} id={tab.id} />
             </Pane>
           )}
 
@@ -127,51 +127,16 @@ function Pane({
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder panes. Real panes land in later tasks (423/424/425/etc).
+// Placeholder panes. The real DATA/SCRIPT panes are wired above; the API pane
+// lands in a later task.
 // ---------------------------------------------------------------------------
 
-function Placeholder({ children }: { children: React.ReactNode }) {
+function ApiPanePlaceholder() {
   return (
     <div className="flex h-full items-center justify-center text-center text-muted-foreground text-sm">
-      <span>{children}</span>
+      <span>API reference</span>
     </div>
   );
-}
-
-function DataPanePlaceholder({ tab }: { tab: WorkbenchTab }) {
-  // PLACEHOLDER: registers a dummy DATA save target to prove the bus is wired.
-  // The real data pane (later task) replaces this with actual edit state.
-  const [dirty, setDirty] = useState(false);
-  useSaveTarget({
-    id: "data",
-    order: 0, // DATA / pointer saves run BEFORE the script.
-    dirty,
-    save: async () => {
-      // Placeholder save: no-op. Real persistence arrives with the data pane.
-      setDirty(false);
-    },
-  });
-
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground text-sm">
-      <span>Data pane</span>
-      <span className="text-muted-foreground/60 text-xs">
-        Editing {tab.objectType} “{tab.id}”
-      </span>
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={() => setDirty((v) => !v)}
-        className="not-sr-only"
-      >
-        {dirty ? "Mark clean (placeholder)" : "Mark dirty (placeholder)"}
-      </Button>
-    </div>
-  );
-}
-
-function ApiPanePlaceholder() {
-  return <Placeholder>API reference</Placeholder>;
 }
 
 export default TabWorkspace;

@@ -8,4 +8,5 @@ pub mod effects;
 pub mod game_objects;
 pub mod item_drops;
 pub mod items;
+pub mod scripts;
 pub mod sprites;

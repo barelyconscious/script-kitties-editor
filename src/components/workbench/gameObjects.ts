@@ -108,3 +108,12 @@ export function groupObjects(objects: readonly GameObject[], query: string): Gam
   }
   return groups;
 }
+
+/**
+ * Flatten grouped objects into a single ordered list, preserving group order
+ * (and the within-group name sort). Used by the collapsed Workbench rail, which
+ * renders sprites in the same order as the expanded list but without headers.
+ */
+export function flattenGroups(groups: readonly GameObjectGroup[]): GameObject[] {
+  return groups.flatMap((group) => group.objects);
+}

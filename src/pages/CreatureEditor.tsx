@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { type Creature, loadCreatures } from "@/lib/creature";
+import { type Creature, loadCreatures, populationWithDraft } from "@/lib/creature";
 import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import { cn } from "@/lib/utils";
 import type { AbilityOption } from "./creature-editor/AbilityPicker";
@@ -58,11 +58,7 @@ export default function CreatureEditor() {
 
   // The chart's average/max should reflect in-progress edits to the selected
   // creature, so swap the live draft into the population.
-  const population = useMemo(() => {
-    if (!creatures) return [];
-    if (!draft) return creatures;
-    return creatures.map((c) => (c.id === draft.id ? draft : c));
-  }, [creatures, draft]);
+  const population = useMemo(() => populationWithDraft(creatures ?? [], draft), [creatures, draft]);
 
   const filtered = useMemo(() => {
     if (!creatures) return [];
@@ -155,7 +151,7 @@ export default function CreatureEditor() {
               <Button variant="outline" disabled={!dirty || saving} onClick={revert}>
                 Revert
               </Button>
-              <Button disabled={!dirty || saving} onClick={save}>
+              <Button disabled={!dirty || saving} onClick={() => void save().catch(() => {})}>
                 {saving ? "Saving…" : "Save"}
               </Button>
             </div>

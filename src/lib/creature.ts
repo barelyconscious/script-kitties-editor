@@ -84,6 +84,18 @@ export async function loadCreatures(): Promise<Creature[]> {
 }
 
 /**
+ * The population used for the progression chart's average/max, with the live
+ * `draft` swapped in for its persisted counterpart (matched by id) so the
+ * reference lines reflect in-progress edits. A `null` draft (nothing selected)
+ * returns the population unchanged. Pure so both the standalone editor and the
+ * Workbench pane share one definition and stay in sync.
+ */
+export function populationWithDraft(population: Creature[], draft: Creature | null): Creature[] {
+  if (!draft) return population;
+  return population.map((c) => (c.id === draft.id ? draft : c));
+}
+
+/**
  * Persist a creature. Mirrors the source data's conventions: `baseStats` keeps
  * its full ordered block (zeros included) while `statGainsPerLevel` carries only
  * the non-zero gains, so untouched stats don't churn the file.

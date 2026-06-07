@@ -28,8 +28,12 @@ export interface TabWorkspaceProps {
  * bus; the API pane (right) is still a placeholder slot for a later task.
  */
 export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
-  // Default SCRIPT-ONLY: both flanks collapsed.
-  const [dataOpen, setDataOpen] = useState(false);
+  // For CREATURES the data pane (the full creature form) is the primary editing
+  // surface, so it opens wide by default — a creature tab that showed only the
+  // aiController script with the form hidden would be a poor default. Flat types
+  // stay SCRIPT-ONLY (both flanks collapsed).
+  const isCreature = tab.objectType === "Creature";
+  const [dataOpen, setDataOpen] = useState(isCreature);
   const [apiOpen, setApiOpen] = useState(false);
 
   const bus = useSaveBus();
@@ -84,7 +88,13 @@ export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
 
         <div className="flex min-h-0 flex-1">
           {dataOpen && (
-            <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
+            <Pane
+              label="Data"
+              side="left"
+              // The creature form (stat grids, chart, unlocks) is much taller
+              // and wider than the flat-type field grid, so give it more room.
+              className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
+            >
               <DataPane objectType={tab.objectType} id={tab.id} />
             </Pane>
           )}

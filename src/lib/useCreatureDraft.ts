@@ -72,7 +72,13 @@ export function useCreatureDraft(
       // the standalone editor's post-save list update.
       onSavedRef.current(draft);
     } catch (e) {
+      // Set the local error for in-pane display, then RE-THROW so callers see the
+      // failure. This honors the Workbench save-bus contract: a `SaveTarget.save`
+      // MUST throw on failure so the router records `ok: false` and partial
+      // failures never look like success. Standalone call sites swallow the
+      // rejection at their own boundary (they already render `saveError`).
       setSaveError(String(e));
+      throw e;
     } finally {
       setSaving(false);
     }

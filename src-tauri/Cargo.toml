@@ -27,3 +27,11 @@ notify = "6"
 base64 = "0.22"
 rfd = "0.15"
 
+# Windows-only: reach the CoreWebView2 settings to disable the native "Saved
+# info" form autofill app-wide (see disable_webview_autofill in lib.rs). Versions
+# pinned to match what Tauri already resolves so no duplicate crate versions are
+# pulled in.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+

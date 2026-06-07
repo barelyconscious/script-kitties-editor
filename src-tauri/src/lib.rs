@@ -76,6 +76,40 @@ fn build_macos_menu(
         .build()
 }
 
+/// WebView2 (the Windows webview runtime) ships its own "Saved info" form
+/// autofill — a native popup over our text inputs that we neither control nor
+/// style. Disable it for the WHOLE app by flipping the per-webview settings once
+/// at startup. A DOM `autocomplete="off"` is unreliable here (Chromium-based
+/// engines ignore it for general autofill), so we reach the CoreWebView2
+/// settings directly. Best-effort: any failure just leaves the (cosmetic) popup.
+#[cfg(windows)]
+fn disable_webview_autofill(app: &tauri::App) {
+    use tauri::Manager;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    // `with_webview` hands us the platform webview on its own thread.
+    let _ = window.with_webview(|webview| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings4;
+        use windows_core::Interface;
+
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        let Ok(settings) = core.Settings() else {
+            return;
+        };
+        // IsGeneralAutofillEnabled (form data like the "asdf" popup) and
+        // IsPasswordAutosaveEnabled live on the Settings4 revision of the
+        // interface; cast up to reach them.
+        if let Ok(settings) = settings.cast::<ICoreWebView2Settings4>() {
+            let _ = settings.SetIsGeneralAutofillEnabled(false);
+            let _ = settings.SetIsPasswordAutosaveEnabled(false);
+        }
+    });
+}
+
 /// A path is a usable install when it exists and contains the `Data/` directory
 /// the DAL reads from (and hard-watches at startup). We check `Data/` rather than
 /// just the root because that's the subdir whose absence makes `Dal::new` fail.
@@ -147,6 +181,12 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .manage(dal)
+        .setup(|_app| {
+            // Kill WebView2's native form autofill ("Saved info") app-wide.
+            #[cfg(windows)]
+            disable_webview_autofill(_app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,

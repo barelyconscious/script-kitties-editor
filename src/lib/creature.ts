@@ -20,6 +20,11 @@ export type Creature = {
   abilitiesByLevel: CreatureLevelUp[];
 };
 
+/** Structural equality for two creatures — the dirty check compares un-normalized drafts. */
+export function sameCreature(a: Creature, b: Creature): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Highest level we project to in the progression chart / previews. */
 export const MAX_LEVEL = 25;
 

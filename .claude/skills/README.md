@@ -1,0 +1,5 @@
+This directory holds the SystemOS skills Claude Code loads when you run them — `git-commit`, `task-runner`, `pr-creator`, and the rest alongside this README. Each skill is a folder containing a `SKILL.md` (the manifest) plus any supporting files that `SKILL.md` references. There is no manifest file outside `SKILL.md` and no sidecar metadata.
+
+Skills are self-contained. A skill at `.claude/skills/<name>/` reads only from files inside its own folder — never from a sibling skill, never from `~/.claude/`, never from an absolute path elsewhere on disk. Shared content is duplicated into each skill verbatim; the duplication is the price of keeping every bundle stand-alone.
+
+Customizing a skill — touching any file inside its folder — opts that skill out of all future SystemOS updates, including bug fixes. Upgrades are bundle-granular: SystemOS leaves the folder alone once you have it, or materializes the whole folder fresh if you don't. To re-enter the upgrade flow on a skill you've customized, delete its folder and let SystemOS re-materialize it on the next launch. Edit consciously.

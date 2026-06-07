@@ -11,19 +11,17 @@ type Ability = { id: string; name: string };
 
 /**
  * The DATA pane for a CREATURE tab: embeds the SAME {@link CreatureForm} the
- * standalone Creature Editor uses (stat grids, per-level unlocks, and the
- * progression chart) and plugs it into the per-tab save bus via the lifted
- * {@link useCreatureDraft} hook.
+ * standalone Creature Editor uses (stat grids, per-level unlocks, base
+ * abilities) and plugs it into the per-tab save bus via the lifted
+ * {@link useCreatureDraft} hook. The Workbench is the code-and-data lens, so
+ * this pane passes `showProgressionChart={false}` — the balance chart belongs
+ * to the standalone Creature Editor, not here.
  *
  * One source of truth: there is NO bespoke field editor and NO second
  * normalization path here — the zero-stripping save lives only in
  * `saveCreature` (called inside the hook). Editing marks the bus's "data"
  * target dirty; saving routes through that same path and advances the local
  * baseline so dirty clears.
- *
- * Double-render guard: CreatureForm renders the ProgressionChart INSIDE its own
- * body, so the chart renders EXACTLY ONCE — this pane adds no separate
- * progression view, and the tab's right pane stays the API reference.
  */
 export interface CreatureDataPaneProps {
   /** Primary key of the creature being edited. */
@@ -144,6 +142,7 @@ function CreatureDataEditor({ id }: { id: string }) {
         abilityOptions={abilities}
         onChange={setDraft}
         disabled={saving}
+        showProgressionChart={false}
       />
     </div>
   );

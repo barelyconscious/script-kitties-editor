@@ -35,24 +35,34 @@ export function CreatureForm({
   abilityOptions,
   onChange,
   disabled,
+  showProgressionChart = true,
 }: {
   creature: Creature;
   population: Creature[];
   abilityOptions: AbilityOption[];
   onChange: (next: Creature) => void;
   disabled?: boolean;
+  /**
+   * Whether to render the progression chart section. Defaults to `true` so the
+   * standalone Creature Editor (the balance surface) keeps it. The Workbench's
+   * creature DATA pane passes `false` — that pane is the code-and-data lens, not
+   * the balance surface.
+   */
+  showProgressionChart?: boolean;
 }) {
   const set = <K extends keyof Creature>(key: K, value: Creature[K]) =>
     onChange({ ...creature, [key]: value });
 
   return (
     <div className="flex flex-col gap-8">
-      <Section
-        title="Progression"
-        description="Projected growth versus the average and max across all creatures."
-      >
-        <ProgressionChart creature={creature} population={population} />
-      </Section>
+      {showProgressionChart && (
+        <Section
+          title="Progression"
+          description="Projected growth versus the average and max across all creatures."
+        >
+          <ProgressionChart creature={creature} population={population} />
+        </Section>
+      )}
 
       <Section
         title="Stats & growth"

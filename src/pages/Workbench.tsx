@@ -1,11 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirtyMap";
 import type { GameObject } from "@/components/workbench/gameObjects";
 import { scriptReach } from "@/components/workbench/gameObjects";
 import { ObjectList } from "@/components/workbench/ObjectList";
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
 import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workbench/tabs";
+
+export interface WorkbenchProps {
+  /**
+   * Report whether ANY open tab has unsaved changes. The shell ({@link App})
+   * uses this to guard leaving the Workbench tool — Workbench UNMOUNTS on a tool
+   * switch, so the guard must live above it.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
+}
 
 /**
  * The Workbench: a code-and-data workspace over game objects.
@@ -15,16 +25,42 @@ import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workb
  * tabs stay MOUNTED and inactive ones are HIDDEN via CSS so their dirty/draft
  * state survives tab switches (and, later, cross-tab shared-script refresh).
  *
- * Panes within a tab are placeholder slots today; the real DATA/SCRIPT/API panes
- * plug into the per-tab save bus in later tasks.
+ * The shell tracks per-tab dirtiness (reported up by each TabWorkspace) to gate
+ * three unsaved-changes guards: closing a dirty tab, leaving the Workbench tool
+ * (handled in {@link App} via `onDirtyChange`), and closing/reloading the app.
  */
-export default function Workbench() {
+export default function Workbench({ onDirtyChange }: WorkbenchProps) {
   const [objects, setObjects] = useState<GameObject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [tabs, setTabs] = useState<WorkbenchTab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+
+  // Per-tab dirtiness, reported up by each TabWorkspace and keyed by tabKey.
+  const [dirtyByTab, setDirtyByTab] = useState<Record<string, boolean>>({});
+  const anyDirty = anyTabDirty(dirtyByTab);
+
+  const handleTabDirtyChange = useCallback((key: string, dirty: boolean) => {
+    setDirtyByTab((prev) => setTabDirty(prev, key, dirty));
+  }, []);
+
+  // Surface aggregate dirtiness to the shell (leave-the-tool guard lives there).
+  useEffect(() => {
+    onDirtyChange?.(anyDirty);
+  }, [anyDirty, onDirtyChange]);
+
+  // Warn on app close / reload while any tab is dirty. Registered only while
+  // dirty so a clean Workbench never blocks an intentional reload.
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [anyDirty]);
 
   // Reach per script file, derived once from the already-loaded object list so
   // each tab's script pane can show "shared by N" without re-fetching. Computed
@@ -70,13 +106,19 @@ export default function Workbench() {
 
   const handleClose = useCallback(
     (key: string) => {
+      // Guard: a dirty tab prompts before discarding its unsaved drafts.
+      if (dirtyByTab[key] && !window.confirm("This tab has unsaved changes. Close it anyway?")) {
+        return;
+      }
       setTabs((prev) => {
         const result = closeTab(prev, key, activeKey);
         setActiveKey(result.activeKey);
         return result.tabs;
       });
+      // Drop the closed tab's dirty entry so it can't keep anyDirty pinned true.
+      setDirtyByTab((prev) => removeTab(prev, key));
     },
-    [activeKey],
+    [activeKey, dirtyByTab],
   );
 
   return (
@@ -108,6 +150,7 @@ export default function Workbench() {
                     tab={tab}
                     hidden={key !== activeKey}
                     scriptReach={reachByScript.get(tab.scriptName) ?? 0}
+                    onDirtyChange={(dirty) => handleTabDirtyChange(key, dirty)}
                   />
                 </div>
               );

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
-import { useSaveTarget } from "./saveBus";
+import { useRequestSave, useSaveTarget } from "./saveBus";
 
 /**
  * The SCRIPT pane for one Workbench tab: loads the tab's script by name and
@@ -109,11 +109,13 @@ export function ScriptPane({ scriptName, reach }: ScriptPaneProps) {
     save,
   });
 
-  // ⌘S inside Monaco persists the script target. Full unified cross-target ⌘S
-  // is task 427; here it simply triggers this pane's save.
+  // ⌘S inside Monaco triggers the tab's UNIFIED save (data before script, all
+  // dirty targets) — the same path as the toolbar Save — so an in-editor save
+  // can never persist the script while leaving a dirty data record behind.
+  const requestSave = useRequestSave();
   const handleEditorSave = useCallback(() => {
-    void save();
-  }, [save]);
+    requestSave();
+  }, [requestSave]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

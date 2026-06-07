@@ -1,11 +1,17 @@
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Save } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiReferencePane } from "./ApiReferencePane";
 import { DataPane } from "./DataPane";
 import { ScriptPane } from "./ScriptPane";
-import { SaveBusProvider, useSaveBus } from "./saveBus";
+import {
+  RequestSaveProvider,
+  SaveBusProvider,
+  type SaveSummary,
+  summarizeOutcomes,
+  useSaveBus,
+} from "./saveBus";
 import type { WorkbenchTab } from "./tabs";
 
 export interface TabWorkspaceProps {
@@ -18,7 +24,16 @@ export interface TabWorkspaceProps {
    * "shared by N" without re-fetching. 0/1 ⇒ not shared.
    */
   scriptReach: number;
+  /**
+   * Report this tab's aggregate dirtiness UP to the shell so it can derive
+   * "any tab dirty" for the leave-the-tool / before-unload guards and gate the
+   * close-tab guard. Fires whenever the flag flips.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
+
+/** How long a "Saved" confirmation lingers before auto-clearing. */
+const SAVED_CLEAR_MS = 2500;
 
 /**
  * The workspace for ONE open tab: a collapsible 3-pane layout (DATA left, SCRIPT
@@ -27,8 +42,13 @@ export interface TabWorkspaceProps {
  *
  * The DATA pane (left) and SCRIPT pane (center) register with the bus; the API
  * pane (right) is a self-contained reference browser that holds no bus state.
+ *
+ * SAVE TRUST MODEL (task 427): one Save action — the toolbar button, the
+ * window-level ⌘S (active tab only), or Monaco's in-editor ⌘S — persists every
+ * DIRTY target of THIS tab in order (data before script), then surfaces a single
+ * summary. A partial failure NEVER reads as success.
  */
-export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
+export function TabWorkspace({ tab, hidden, scriptReach, onDirtyChange }: TabWorkspaceProps) {
   // For CREATURES the data pane (the full creature form) is the primary editing
   // surface, so it opens wide by default — a creature tab that showed only the
   // aiController script with the form hidden would be a poor default. Flat types
@@ -39,84 +59,148 @@ export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
 
   const bus = useSaveBus();
 
+  // Inline save status: a quiet "Saved" on success (auto-clears) or a legible,
+  // persistent error on failure (cleared on the next edit/save).
+  const [status, setStatus] = useState<SaveSummary | null>(null);
+
+  // Report dirtiness up. Fire only on transitions to avoid redundant parent
+  // setState churn.
+  const lastDirtyRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (lastDirtyRef.current === bus.dirty) return;
+    lastDirtyRef.current = bus.dirty;
+    onDirtyChange?.(bus.dirty);
+  }, [bus.dirty, onDirtyChange]);
+
+  // A fresh edit invalidates any lingering status (esp. a stale error).
+  useEffect(() => {
+    if (bus.dirty) setStatus(null);
+  }, [bus.dirty]);
+
+  // Auto-clear a success confirmation after a couple seconds. Errors persist.
+  useEffect(() => {
+    if (!status?.ok || status.message.length === 0) return;
+    const timer = setTimeout(() => setStatus(null), SAVED_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  // The single unified save. Runs the bus (dirty targets, in order), then maps
+  // the outcomes to one summary. Empty (nothing dirty) is a true no-op: don't
+  // flash "Saved".
+  const saveAllRef = useRef(bus.saveAll);
+  saveAllRef.current = bus.saveAll;
+  const handleSave = useCallback(async () => {
+    const outcomes = await saveAllRef.current();
+    const summary = summarizeOutcomes(outcomes);
+    if (summary.message.length === 0) return; // no-op (nothing was dirty)
+    setStatus(summary);
+  }, []);
+
+  // Window-level ⌘S / Ctrl+S — but ONLY for the active (non-hidden) tab. Every
+  // open tab is mounted, so without this guard every tab's listener would fire.
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.key === "s" || e.key === "S")) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (hiddenRef.current) return; // inactive tab: let the active one handle it
+      e.preventDefault();
+      void handleSave();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave]);
+
   return (
     <SaveBusProvider value={bus.registry}>
-      <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
-        {/* Per-tab toolbar: flank toggles + dirty dot + save. ⌘S wiring is task 427. */}
-        <div className="flex items-center gap-1 border-b px-2 py-1.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title={dataOpen ? "Hide data pane" : "Show data pane"}
-            aria-pressed={dataOpen}
-            onClick={() => setDataOpen((v) => !v)}
-          >
-            {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-          </Button>
-          <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
-          {bus.dirty && (
-            <span
-              role="status"
-              className="size-2 shrink-0 rounded-full bg-amber-500"
-              title="Unsaved changes"
-              aria-label="Unsaved changes"
-            />
-          )}
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!bus.dirty}
-              onClick={() => {
-                // Basic Save button. Full partial-failure UX is task 427.
-                void bus.saveAll();
-              }}
-            >
-              <Save />
-              Save
-            </Button>
+      <RequestSaveProvider value={handleSave}>
+        <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
+          {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
+          <div className="flex items-center gap-1 border-b px-2 py-1.5">
             <Button
               variant="ghost"
               size="icon-sm"
-              title={apiOpen ? "Hide API reference" : "Show API reference"}
-              aria-pressed={apiOpen}
-              onClick={() => setApiOpen((v) => !v)}
+              title={dataOpen ? "Hide data pane" : "Show data pane"}
+              aria-pressed={dataOpen}
+              onClick={() => setDataOpen((v) => !v)}
             >
-              {apiOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
             </Button>
+            <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
+            {bus.dirty && (
+              <span
+                role="status"
+                className="size-2 shrink-0 rounded-full bg-amber-500"
+                title="Unsaved changes"
+                aria-label="Unsaved changes"
+              />
+            )}
+            {status && status.message.length > 0 && (
+              <span
+                role="status"
+                className={cn(
+                  "ml-2 truncate text-xs",
+                  status.ok ? "text-muted-foreground" : "font-medium text-destructive",
+                )}
+                title={status.message}
+              >
+                {status.message}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!bus.dirty}
+                onClick={() => void handleSave()}
+              >
+                <Save />
+                Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title={apiOpen ? "Hide API reference" : "Show API reference"}
+                aria-pressed={apiOpen}
+                onClick={() => setApiOpen((v) => !v)}
+              >
+                {apiOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1">
+            {dataOpen && (
+              <Pane
+                label="Data"
+                side="left"
+                // The creature form (stat grids, chart, unlocks) is much taller
+                // and wider than the flat-type field grid, so give it more room.
+                className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
+              >
+                <DataPane objectType={tab.objectType} id={tab.id} />
+              </Pane>
+            )}
+
+            {/* Script pane owns its own header (names the file + reach) and a
+                full-bleed editor, so it bypasses the generic Pane chrome. */}
+            <section className="flex min-w-0 flex-1 flex-col bg-background" aria-label="Script">
+              <ScriptPane scriptName={tab.scriptName} reach={scriptReach} />
+            </section>
+
+            {/* The API pane owns its own header, search, and scroll region (built
+                h-full with a left border), so it bypasses the generic Pane chrome.
+                collapsible={false}: TabWorkspace owns expand/collapse via apiOpen,
+                so the component must not render its own rail toggle (double toggle). */}
+            {apiOpen && (
+              <section className="w-80 shrink-0" aria-label="API Reference">
+                <ApiReferencePane collapsible={false} />
+              </section>
+            )}
           </div>
         </div>
-
-        <div className="flex min-h-0 flex-1">
-          {dataOpen && (
-            <Pane
-              label="Data"
-              side="left"
-              // The creature form (stat grids, chart, unlocks) is much taller
-              // and wider than the flat-type field grid, so give it more room.
-              className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
-            >
-              <DataPane objectType={tab.objectType} id={tab.id} />
-            </Pane>
-          )}
-
-          {/* Script pane owns its own header (names the file + reach) and a
-              full-bleed editor, so it bypasses the generic Pane chrome. */}
-          <section className="flex min-w-0 flex-1 flex-col bg-background" aria-label="Script">
-            <ScriptPane scriptName={tab.scriptName} reach={scriptReach} />
-          </section>
-
-          {/* The API pane owns its own header, search, and scroll region (built
-              h-full with a left border), so it bypasses the generic Pane chrome.
-              collapsible={false}: TabWorkspace owns expand/collapse via apiOpen,
-              so the component must not render its own rail toggle (double toggle). */}
-          {apiOpen && (
-            <section className="w-80 shrink-0" aria-label="API Reference">
-              <ApiReferencePane collapsible={false} />
-            </section>
-          )}
-        </div>
-      </div>
+      </RequestSaveProvider>
     </SaveBusProvider>
   );
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { aggregateDirty, type SaveTarget, saveAllTargets } from "./saveBus";
+import {
+  aggregateDirty,
+  type SaveOutcome,
+  type SaveTarget,
+  saveAllTargets,
+  summarizeOutcomes,
+} from "./saveBus";
 
 function target(over: Partial<SaveTarget> & Pick<SaveTarget, "id">): SaveTarget {
   return {
@@ -104,5 +110,70 @@ describe("aggregateDirty", () => {
 
   it("is false for an empty target set", () => {
     expect(aggregateDirty([])).toBe(false);
+  });
+});
+
+describe("summarizeOutcomes", () => {
+  const ok = (id: string): SaveOutcome => ({ id, ok: true });
+  const fail = (id: string, error: string): SaveOutcome => ({ id, ok: false, error });
+
+  it("treats an empty outcome list as a no-op (ok, no message)", () => {
+    expect(summarizeOutcomes([])).toEqual({ ok: true, message: "" });
+  });
+
+  it("reports a plain 'Saved' when every target succeeded", () => {
+    expect(summarizeOutcomes([ok("data"), ok("script")])).toEqual({
+      ok: true,
+      message: "Saved",
+    });
+  });
+
+  it("reports 'Saved' for a single successful target", () => {
+    expect(summarizeOutcomes([ok("script")])).toEqual({ ok: true, message: "Saved" });
+  });
+
+  it("names the partial split when data saved but script failed", () => {
+    const summary = summarizeOutcomes([ok("data"), fail("script", "disk full")]);
+    expect(summary.ok).toBe(false);
+    expect(summary.message).toBe("Data saved, but script: disk full");
+  });
+
+  it("names the partial split when script saved but data failed", () => {
+    const summary = summarizeOutcomes([fail("data", "permission denied"), ok("script")]);
+    expect(summary.ok).toBe(false);
+    expect(summary.message).toBe("Script saved, but data: permission denied");
+  });
+
+  it("reports a total failure when nothing landed", () => {
+    const summary = summarizeOutcomes([fail("data", "permission denied"), fail("script", "oops")]);
+    expect(summary.ok).toBe(false);
+    expect(summary.message).toBe("Save failed: data: permission denied; script: oops");
+  });
+
+  it("reports a total failure for a single failing target", () => {
+    const summary = summarizeOutcomes([fail("script", "boom")]);
+    expect(summary.ok).toBe(false);
+    expect(summary.message).toBe("Save failed: script: boom");
+  });
+
+  it("a partial failure is NEVER reported as success", () => {
+    // The trust core: any failure forces ok:false even when some saves landed.
+    for (const outcomes of [
+      [ok("data"), fail("script", "x")],
+      [fail("data", "x"), ok("script")],
+      [ok("data"), ok("itemDrop"), fail("script", "x")],
+    ]) {
+      expect(summarizeOutcomes(outcomes).ok).toBe(false);
+    }
+  });
+
+  it("falls back to the raw id for an unknown target label", () => {
+    const summary = summarizeOutcomes([ok("data"), fail("itemDrop", "nope")]);
+    expect(summary.message).toBe("Data saved, but itemdrop: nope");
+  });
+
+  it("includes a failed target with no error message gracefully", () => {
+    const summary = summarizeOutcomes([{ id: "script", ok: false }]);
+    expect(summary).toEqual({ ok: false, message: "Save failed: script" });
   });
 });

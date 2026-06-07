@@ -50,11 +50,6 @@ export type GameObjectGroup = {
   objects: GameObject[];
 };
 
-/** Whether a row should show the script affordance — purely data-driven. */
-export function hasScript(obj: GameObject): boolean {
-  return obj.script.trim().length > 0;
-}
-
 /**
  * How many game objects point at a given script file. Scripts are SHARED, not
  * 1:1 with objects, so a controller script may back several creatures/items at

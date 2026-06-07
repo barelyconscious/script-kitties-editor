@@ -3,7 +3,6 @@ import {
   type GameObject,
   type GameObjectType,
   groupObjects,
-  hasScript,
   matchesQuery,
   scriptReach,
 } from "./gameObjects";
@@ -17,20 +16,6 @@ function obj(over: Partial<GameObject> & Pick<GameObject, "objectType" | "id">):
     ...over,
   };
 }
-
-describe("hasScript", () => {
-  it("is true for a non-empty script", () => {
-    expect(hasScript(obj({ objectType: "Ability", id: "a", script: "x.lua" }))).toBe(true);
-  });
-
-  it("is false for an empty script", () => {
-    expect(hasScript(obj({ objectType: "Charm", id: "c", script: "" }))).toBe(false);
-  });
-
-  it("is false for a whitespace-only script", () => {
-    expect(hasScript(obj({ objectType: "Item", id: "i", script: "   " }))).toBe(false);
-  });
-});
 
 describe("scriptReach", () => {
   const objects: GameObject[] = [

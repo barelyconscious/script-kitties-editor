@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileCode, Plus, SearchIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
 import {
@@ -11,13 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  type GameObject,
-  type GameObjectType,
-  GROUP_ORDER,
-  groupObjects,
-  hasScript,
-} from "./gameObjects";
+import { type GameObject, type GameObjectType, GROUP_ORDER, groupObjects } from "./gameObjects";
 
 export interface ObjectListProps {
   objects: GameObject[];
@@ -119,33 +113,22 @@ export function ObjectList({
           groups.map((group) => {
             const isCollapsed = collapsed.has(group.type);
             return (
-              <div key={group.type} className="group/grp mb-1">
-                <div className="flex items-center pr-1">
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(group.type)}
-                    className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
-                  >
-                    {isCollapsed ? (
-                      <ChevronRight className="size-3.5" />
-                    ) : (
-                      <ChevronDown className="size-3.5" />
-                    )}
-                    <span>{group.label}</span>
-                    <span className="ml-auto text-muted-foreground/60 tabular-nums">
-                      {group.objects.length}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onNew(group.type)}
-                    title={`New ${group.label.replace(/s$/, "").toLowerCase()}`}
-                    aria-label={`New ${group.label.replace(/s$/, "").toLowerCase()}`}
-                    className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/grp:opacity-100"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
+              <div key={group.type} className="mb-1">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.type)}
+                  className="flex w-full min-w-0 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
+                >
+                  {isCollapsed ? (
+                    <ChevronRight className="size-3.5" />
+                  ) : (
+                    <ChevronDown className="size-3.5" />
+                  )}
+                  <span>{group.label}</span>
+                  <span className="ml-auto text-muted-foreground/60 tabular-nums">
+                    {group.objects.length}
+                  </span>
+                </button>
                 {!isCollapsed && (
                   <ul>
                     {group.objects.map((obj) => (
@@ -176,7 +159,6 @@ function ObjectRow({
   active: boolean;
   onOpen: (obj: GameObject) => void;
 }) {
-  const scripted = hasScript(obj);
   return (
     <li>
       <button
@@ -194,9 +176,6 @@ function ObjectRow({
           <span className="size-5 shrink-0" aria-hidden="true" />
         )}
         <span className="min-w-0 flex-1 truncate">{obj.name}</span>
-        {scripted && (
-          <FileCode className="size-3.5 shrink-0 text-muted-foreground" aria-label="Has script" />
-        )}
       </button>
     </li>
   );

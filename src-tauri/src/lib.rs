@@ -18,11 +18,73 @@ mod config;
 mod dal;
 mod model;
 
+// macOS owns Cmd+W via the default menu's "Close Window" item, and that native
+// accelerator fires before the webview ever sees the keystroke — so the only way
+// to stop Cmd+W from closing the window is to ship a menu that never binds it.
+// This rebuilds the standard macOS menu (App / Edit / View / Window) minus the
+// Close item. Cmd+Q (quit) and all the clipboard/edit accelerators are kept.
+//
+// Only macOS has a default app menu, so we only override there. Windows/Linux
+// keep their default (no app menu); the frontend keydown guard covers Ctrl+W
+// for those webviews.
+#[cfg(target_os = "macos")]
+fn build_macos_menu(
+    handle: &tauri::AppHandle,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
+
+    // The first submenu is the app/about menu; its title is shown as the app name.
+    let app_menu = SubmenuBuilder::new(handle, "Script Kitties Editor")
+        .about(Some(AboutMetadata::default()))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit() // keeps Cmd+Q
+        .build()?;
+
+    // Powers copy/paste/undo/redo/select-all in the webview and Monaco.
+    let edit_menu = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(handle, "View")
+        .fullscreen()
+        .build()?;
+
+    // Deliberately omits close_window — that item is what carries Cmd+W.
+    let window_menu = SubmenuBuilder::new(handle, "Window")
+        .minimize()
+        .maximize() // "Zoom"
+        .build()?;
+
+    MenuBuilder::new(handle)
+        .item(&app_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .item(&window_menu)
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let dal = Dal::new(get_or_create_config()).expect("failed to initialize DAL");
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_macos_menu);
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .manage(dal)
         .invoke_handler(tauri::generate_handler![

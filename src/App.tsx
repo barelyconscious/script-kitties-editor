@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -12,6 +12,23 @@ function App() {
   // Workbench reports aggregate dirtiness up because it UNMOUNTS on a tool
   // switch — so the leave-the-tool guard has to live here, above it.
   const [workbenchDirty, setWorkbenchDirty] = useState(false);
+
+  // Safety net for Ctrl+W on Windows/Linux webviews (WebView2 / WebKitGTK),
+  // where the close shortcut can be delivered to the page rather than a native
+  // menu. On macOS the custom Rust menu already drops Cmd+W; this is harmless
+  // there. Capture phase + stopPropagation so nothing downstream re-triggers a
+  // close. Only swallows the W-with-modifier combo — every other shortcut
+  // (copy/paste/undo/reload/quit) passes through untouched.
+  useEffect(() => {
+    const swallowCloseWindow = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", swallowCloseWindow, { capture: true });
+    return () => window.removeEventListener("keydown", swallowCloseWindow, { capture: true });
+  }, []);
 
   const handleSelectTool = useCallback(
     (tool: NavRailTool) => {

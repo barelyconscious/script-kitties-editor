@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// BTreeMap (not HashMap) for stat maps: it iterates keys in sorted order, so
+// serde emits them alphabetically and deterministically. HashMap's randomized
+// iteration order churned the whole stats block on every save.
+use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize)]
 pub enum GameObjectType {
@@ -67,7 +70,7 @@ pub struct Charm {
     pub name: String,
     pub sprite: String,
     pub description: String,
-    pub stats: HashMap<String, i32>,
+    pub stats: BTreeMap<String, i32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -115,10 +118,10 @@ pub struct Creature {
     pub sprite: String,
     pub description: String,
     pub ai_controller: String, // shoulda been script
-    pub base_stats: HashMap<String, i32>,
+    pub base_stats: BTreeMap<String, i32>,
     pub base_abilities: Vec<String>,
     #[serde(default)]
-    pub stat_gains_per_level: HashMap<String, i32>,
+    pub stat_gains_per_level: BTreeMap<String, i32>,
     #[serde(default)]
     pub abilities_by_level: Vec<CreatureLevelUp>,
 }

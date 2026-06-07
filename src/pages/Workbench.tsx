@@ -13,6 +13,7 @@ import {
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
 import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workbench/tabs";
+import { cn } from "@/lib/utils";
 
 export interface WorkbenchProps {
   /**
@@ -164,7 +165,12 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
               {tabs.map((tab) => {
                 const key = tabKey(tab);
                 return (
-                  <div key={key} className="absolute inset-0">
+                  // Hide the WRAPPER (not just the inner workspace): every tab is
+                  // an `absolute inset-0` layer, so an only-inner-hidden inactive
+                  // tab still leaves its full-area wrapper on top of earlier tabs,
+                  // intercepting wheel/pointer events. display:none on the wrapper
+                  // stops it painting and capturing, so the active tab scrolls.
+                  <div key={key} className={cn("absolute inset-0", key !== activeKey && "hidden")}>
                     <TabWorkspace
                       tab={tab}
                       hidden={key !== activeKey}

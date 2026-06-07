@@ -157,6 +157,7 @@ function CreatureDataEditor({ id }: { id: string }) {
           onChange={setDraft}
           disabled={saving}
           showProgressionChart={false}
+          singleColumnStats
         />
       </div>
     </div>

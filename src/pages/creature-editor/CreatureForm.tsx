@@ -3,6 +3,7 @@ import { AbilitiesByLevelEditor } from "./AbilitiesByLevelEditor";
 import { type AbilityOption, AbilityPicker } from "./AbilityPicker";
 import { ProgressionChart } from "./ProgressionChart";
 import { StatGrowthTable } from "./StatGrowthTable";
+import { StatGrowthTableSingle } from "./StatGrowthTableSingle";
 
 function Section({
   title,
@@ -36,6 +37,7 @@ export function CreatureForm({
   onChange,
   disabled,
   showProgressionChart = true,
+  singleColumnStats = false,
 }: {
   creature: Creature;
   population: Creature[];
@@ -49,6 +51,12 @@ export function CreatureForm({
    * the balance surface.
    */
   showProgressionChart?: boolean;
+  /**
+   * Render the stats & growth grid as ONE full-width table instead of the
+   * two-up split. The standalone editor is wide enough for the split; the
+   * Workbench's fixed-width DATA pane passes `true` so the rows aren't squished.
+   */
+  singleColumnStats?: boolean;
 }) {
   const set = <K extends keyof Creature>(key: K, value: Creature[K]) =>
     onChange({ ...creature, [key]: value });
@@ -68,7 +76,11 @@ export function CreatureForm({
         title="Stats & growth"
         description="Level-1 base value and the flat amount each stat gains per level."
       >
-        <StatGrowthTable creature={creature} onChange={onChange} disabled={disabled} />
+        {singleColumnStats ? (
+          <StatGrowthTableSingle creature={creature} onChange={onChange} disabled={disabled} />
+        ) : (
+          <StatGrowthTable creature={creature} onChange={onChange} disabled={disabled} />
+        )}
       </Section>
 
       <Section title="Base abilities" description="Abilities the creature knows from level 1.">

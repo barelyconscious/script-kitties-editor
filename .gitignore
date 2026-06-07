@@ -15,6 +15,9 @@ dist-ssr
 # Local app config — machine-specific game install path, created at runtime
 editor.conf.json
 
+# Agent persistent memory — local, not shared via version control
+.claude/agent-memory/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

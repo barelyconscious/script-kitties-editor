@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApiReferencePane } from "@/components/workbench/ApiReferencePane";
 import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirtyMap";
 import type { GameObject } from "@/components/workbench/gameObjects";
 import { scriptReach } from "@/components/workbench/gameObjects";
@@ -29,6 +30,9 @@ export interface WorkbenchProps {
  * ARE objects). Each open tab is rendered as a {@link TabWorkspace}; all open
  * tabs stay MOUNTED and inactive ones are HIDDEN via CSS so their dirty/draft
  * state survives tab switches (and, later, cross-tab shared-script refresh).
+ * Right: a SINGLE {@link ApiReferencePane} spanning all tabs — GAME_API is
+ * static and identical for every tab, so it lives here (one shared collapse
+ * toggle) rather than inside each tab. It holds no save-bus state.
  *
  * The shell tracks per-tab dirtiness (reported up by each TabWorkspace) to gate
  * three unsaved-changes guards: closing a dirty tab, leaving the Workbench tool
@@ -174,6 +178,14 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
             </ScriptSyncProvider>
           )}
         </div>
+      </div>
+
+      {/* ONE shared API reference for the whole Workbench. GAME_API is static and
+          identical for every tab, so it lives at the shell level (its native
+          collapsible rail is the single global toggle) rather than per-tab. It
+          touches no save-bus state. h-full bounds its internal scroll. */}
+      <div className="h-full min-h-0 shrink-0">
+        <ApiReferencePane defaultCollapsed />
       </div>
     </div>
   );

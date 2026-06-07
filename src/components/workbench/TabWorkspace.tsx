@@ -1,8 +1,7 @@
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Save } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ApiReferencePane } from "./ApiReferencePane";
 import { DataPane } from "./DataPane";
 import { ScriptPane } from "./ScriptPane";
 import {
@@ -42,12 +41,14 @@ export interface TabWorkspaceProps {
 const SAVED_CLEAR_MS = 2500;
 
 /**
- * The workspace for ONE open tab: a collapsible 3-pane layout (DATA left, SCRIPT
- * center, API right) defaulting to SCRIPT-ONLY. Owns its own save bus so panes
- * register against this tab instance and nothing leaks across tabs.
+ * The workspace for ONE open tab: a collapsible 2-pane layout (DATA left, SCRIPT
+ * center) defaulting to SCRIPT-ONLY. Owns its own save bus so panes register
+ * against this tab instance and nothing leaks across tabs.
  *
- * The DATA pane (left) and SCRIPT pane (center) register with the bus; the API
- * pane (right) is a self-contained reference browser that holds no bus state.
+ * The DATA pane (left) and SCRIPT pane (center) both register with the bus. The
+ * API reference is NOT here — it is a single static pane lifted to the Workbench
+ * shell (one shared toggle across all tabs), since GAME_API is identical for
+ * every tab and holds no bus state.
  *
  * SAVE TRUST MODEL (task 427): one Save action — the toolbar button, the
  * window-level ⌘S (active tab only), or Monaco's in-editor ⌘S — persists every
@@ -67,7 +68,6 @@ export function TabWorkspace({
   // stay SCRIPT-ONLY (both flanks collapsed).
   const isCreature = tab.objectType === "Creature";
   const [dataOpen, setDataOpen] = useState(isCreature);
-  const [apiOpen, setApiOpen] = useState(false);
 
   const bus = useSaveBus();
 
@@ -170,15 +170,6 @@ export function TabWorkspace({
                 <Save />
                 Save
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title={apiOpen ? "Hide API reference" : "Show API reference"}
-                aria-pressed={apiOpen}
-                onClick={() => setApiOpen((v) => !v)}
-              >
-                {apiOpen ? <PanelRightClose /> : <PanelRightOpen />}
-              </Button>
             </div>
           </div>
 
@@ -196,24 +187,20 @@ export function TabWorkspace({
             )}
 
             {/* Script pane owns its own header (names the file + reach) and a
-                full-bleed editor, so it bypasses the generic Pane chrome. */}
-            <section className="flex min-w-0 flex-1 flex-col bg-background" aria-label="Script">
+                full-bleed editor, so it bypasses the generic Pane chrome.
+                min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
+                document scrolls INSIDE the editor instead of growing the section
+                (flex items default to min-height:auto). */}
+            <section
+              className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+              aria-label="Script"
+            >
               <ScriptPane
                 scriptName={tab.scriptName}
                 reach={scriptReach}
                 alsoOpenElsewhere={alsoOpenElsewhere}
               />
             </section>
-
-            {/* The API pane owns its own header, search, and scroll region (built
-                h-full with a left border), so it bypasses the generic Pane chrome.
-                collapsible={false}: TabWorkspace owns expand/collapse via apiOpen,
-                so the component must not render its own rail toggle (double toggle). */}
-            {apiOpen && (
-              <section className="w-80 shrink-0" aria-label="API Reference">
-                <ApiReferencePane collapsible={false} />
-              </section>
-            )}
           </div>
         </div>
       </RequestSaveProvider>

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  flattenGroups,
   type GameObject,
   type GameObjectType,
   groupObjects,
@@ -129,29 +128,5 @@ describe("groupObjects", () => {
       name: "X",
     });
     expect(groupObjects([...objects, weird], "")).toHaveLength(3);
-  });
-});
-
-describe("flattenGroups", () => {
-  const objects: GameObject[] = [
-    obj({ objectType: "Ability", id: "z", name: "Zeta" }),
-    obj({ objectType: "Ability", id: "a", name: "Alpha" }),
-    obj({ objectType: "Creature", id: "bitlynx", name: "Bit Lynx" }),
-    obj({ objectType: "Charm", id: "luck", name: "Lucky Charm" }),
-  ];
-
-  it("flattens groups into one list, preserving group then within-group order", () => {
-    const flat = flattenGroups(groupObjects(objects, ""));
-    // Creature group first, then Abilities sorted by name, then Charm.
-    expect(flat.map((o) => o.id)).toEqual(["bitlynx", "a", "z", "luck"]);
-  });
-
-  it("is empty for no groups", () => {
-    expect(flattenGroups([])).toEqual([]);
-  });
-
-  it("only includes objects surviving the search filter", () => {
-    const flat = flattenGroups(groupObjects(objects, "bit"));
-    expect(flat.map((o) => o.id)).toEqual(["bitlynx"]);
   });
 });

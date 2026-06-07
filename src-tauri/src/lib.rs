@@ -10,8 +10,9 @@ use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
 use crate::commands::scripts::{create_script, get_script, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
-use crate::config::get_or_create_config;
+use crate::config::{get_or_create_config, write_to_disk, EditorConfig};
 use crate::dal::Dal;
+use std::path::Path;
 
 mod commands;
 mod config;
@@ -75,9 +76,68 @@ fn build_macos_menu(
         .build()
 }
 
+/// A path is a usable install when it exists and contains the `Data/` directory
+/// the DAL reads from (and hard-watches at startup). We check `Data/` rather than
+/// just the root because that's the subdir whose absence makes `Dal::new` fail.
+fn install_path_is_valid(path: &str) -> bool {
+    !path.is_empty() && Path::new(path).join("Data").is_dir()
+}
+
+/// Run before the Tauri runtime starts. If the configured install path is unset
+/// or no longer points at a real install, block on a native folder picker until
+/// the user selects a valid one (persisting it to config) or dismisses the
+/// picker — in which case we exit, since there's nothing to edit without it.
+fn ensure_valid_install_path(config: &mut EditorConfig) {
+    if install_path_is_valid(&config.game_install_path) {
+        return;
+    }
+
+    // Explain what we're asking for before the bare OS folder picker appears, so
+    // the user knows which folder to point us at rather than guessing.
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title("Locate your game install")
+        .set_description(
+            "Script Kitties Editor needs your worlds-cpp game install folder.\n\n\
+             Pick the folder that contains the 'Data' directory.",
+        )
+        .show();
+
+    loop {
+        let Some(dir) = rfd::FileDialog::new()
+            .set_title("Select your worlds-cpp game install folder")
+            .pick_folder()
+        else {
+            std::process::exit(0);
+        };
+
+        let path = dir.to_string_lossy().into_owned();
+        if install_path_is_valid(&path) {
+            config.game_install_path = path;
+            if let Err(e) = write_to_disk(config) {
+                // Non-fatal: the Dal still runs against the path this session; the
+                // user just won't have it remembered on next launch.
+                eprintln!("failed to persist install path: {}", e);
+            }
+            return;
+        }
+
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Invalid install folder")
+            .set_description(
+                "That folder doesn't contain a 'Data' directory.\n\nPlease choose the \
+                 root of your worlds-cpp game install.",
+            )
+            .show();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let dal = Dal::new(get_or_create_config()).expect("failed to initialize DAL");
+    let mut config = get_or_create_config();
+    ensure_valid_install_path(&mut config);
+    let dal = Dal::new(config).expect("failed to initialize DAL");
 
     let builder = tauri::Builder::default();
 

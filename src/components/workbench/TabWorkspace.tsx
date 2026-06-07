@@ -62,12 +62,11 @@ export function TabWorkspace({
   alsoOpenElsewhere,
   onDirtyChange,
 }: TabWorkspaceProps) {
-  // For CREATURES the data pane (the full creature form) is the primary editing
-  // surface, so it opens wide by default — a creature tab that showed only the
-  // aiController script with the form hidden would be a poor default. Flat types
-  // stay SCRIPT-ONLY (both flanks collapsed).
+  // Every type opens with the DATA pane visible by default so an object's fields
+  // are immediately editable. Creatures additionally get a wider pane (the full
+  // creature form is much larger than the flat-type field grid).
   const isCreature = tab.objectType === "Creature";
-  const [dataOpen, setDataOpen] = useState(isCreature);
+  const [dataOpen, setDataOpen] = useState(true);
 
   const bus = useSaveBus();
 

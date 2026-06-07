@@ -1,20 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { type Creature, loadCreatures, saveCreature } from "@/lib/creature";
+import { type Creature, loadCreatures, populationWithDraft } from "@/lib/creature";
+import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import { cn } from "@/lib/utils";
 import type { AbilityOption } from "./creature-editor/AbilityPicker";
 import { CreatureDetailsDialog } from "./creature-editor/CreatureDetailsDialog";
 import { CreatureForm } from "./creature-editor/CreatureForm";
 
 type Ability = { id: string; name: string };
-
-function sameCreature(a: Creature, b: Creature): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
 
 export default function CreatureEditor() {
   const [creatures, setCreatures] = useState<Creature[] | null>(null);
@@ -23,9 +20,6 @@ export default function CreatureEditor() {
   const [query, setQuery] = useState("");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Creature | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
@@ -37,7 +31,6 @@ export default function CreatureEditor() {
         setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
         if (loaded.length > 0) {
           setSelectedId(loaded[0].id);
-          setDraft(loaded[0]);
         }
       })
       .catch((e) => !cancelled && setError(String(e)));
@@ -50,15 +43,22 @@ export default function CreatureEditor() {
     () => creatures?.find((c) => c.id === selectedId) ?? null,
     [creatures, selectedId],
   );
-  const dirty = !!draft && !!saved && !sameCreature(draft, saved);
+
+  // Advance the baseline (our creature list) to the just-saved draft so `saved`
+  // follows and `dirty` clears. The draft is un-normalized; the persisted
+  // normalization (stripped zero gains) rides along inside `saveCreature`.
+  const onSaved = useCallback((savedDraft: Creature) => {
+    setCreatures((prev) => prev?.map((c) => (c.id === savedDraft.id ? savedDraft : c)) ?? prev);
+  }, []);
+
+  const { draft, setDraft, dirty, saving, saveError, save, revert } = useCreatureDraft(
+    saved,
+    onSaved,
+  );
 
   // The chart's average/max should reflect in-progress edits to the selected
   // creature, so swap the live draft into the population.
-  const population = useMemo(() => {
-    if (!creatures) return [];
-    if (!draft) return creatures;
-    return creatures.map((c) => (c.id === draft.id ? draft : c));
-  }, [creatures, draft]);
+  const population = useMemo(() => populationWithDraft(creatures ?? [], draft), [creatures, draft]);
 
   const filtered = useMemo(() => {
     if (!creatures) return [];
@@ -69,24 +69,10 @@ export default function CreatureEditor() {
   }, [creatures, query]);
 
   function select(creature: Creature) {
-    setSelectedId(creature.id);
-    setDraft(creature);
-    setSaveError(null);
-  }
-
-  async function handleSave() {
-    if (!draft) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await saveCreature(draft);
-      // Reflect the persisted normalization (stripped zero gains) locally.
-      setCreatures((prev) => prev?.map((c) => (c.id === draft.id ? draft : c)) ?? prev);
-    } catch (e) {
-      setSaveError(String(e));
-    } finally {
-      setSaving(false);
-    }
+    // Re-selecting the already-selected creature discards edits (the id is
+    // unchanged, so the hook won't re-seed on its own) — preserve that.
+    if (creature.id === selectedId) revert();
+    else setSelectedId(creature.id);
   }
 
   if (error) {
@@ -162,14 +148,10 @@ export default function CreatureEditor() {
               >
                 <SlidersHorizontalIcon className="size-4" />
               </Button>
-              <Button
-                variant="outline"
-                disabled={!dirty || saving}
-                onClick={() => saved && select(saved)}
-              >
+              <Button variant="outline" disabled={!dirty || saving} onClick={revert}>
                 Revert
               </Button>
-              <Button disabled={!dirty || saving} onClick={handleSave}>
+              <Button disabled={!dirty || saving} onClick={() => void save().catch(() => {})}>
                 {saving ? "Saving…" : "Save"}
               </Button>
             </div>

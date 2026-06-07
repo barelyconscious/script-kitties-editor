@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -8,53 +8,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-import { SpritePicker } from "./SpritePicker";
-import { TagsInput } from "./TagsInput";
-import { TagsSelect } from "./TagsSelect";
+import { type EntityField, EntityFieldsForm } from "./EntityFieldsForm";
 
-/**
- * A single editable field in an entity edit form.
- *
- * `kind` drives which control renders. `custom` is the escape hatch for shapes
- * the built-in kinds don't cover (e.g. a charm's stats map) — supply `render`.
- */
-export type EntityField<T> = {
-  key: Extract<keyof T, string>;
-  label: string;
-  kind: "text" | "textarea" | "number" | "tags" | "sprite" | "select" | "custom";
-  /** Read-only fields (e.g. the id, which is the primary key) render disabled. */
-  readOnly?: boolean;
-  /** Span both columns of the form grid (good for textareas / tags). */
-  full?: boolean;
-  /** Choices for `select`, and the allowed set for `tags` (free-form if omitted). */
-  options?: string[];
-  /** Step for `number` fields. Use "any" to allow decimals (e.g. cost). */
-  step?: number | "any";
-  /** Required when `kind` is "custom". */
-  render?: (args: {
-    value: T[Extract<keyof T, string>];
-    setValue: (v: T[Extract<keyof T, string>]) => void;
-    draft: T;
-    disabled: boolean;
-  }) => ReactNode;
-};
+// Re-exported so existing callers can keep importing the schema type from here.
+export type { EntityField } from "./EntityFieldsForm";
 
 /**
  * Generic, schema-driven edit dialog. Owns draft state, dirty tracking, the
- * save lifecycle (in-flight + error), and cancel. Entity-specific knowledge
- * lives entirely in the `fields` schema passed by the caller, so the same
- * dialog edits abilities, items, biograms, etc.
+ * save lifecycle (in-flight + error), and cancel. The field grid itself is the
+ * controlled `EntityFieldsForm`; entity-specific knowledge lives entirely in the
+ * `fields` schema passed by the caller, so the same dialog edits abilities,
+ * items, biograms, etc.
  */
 export function EntityEditDialog<T extends { id: string }>({
   entity,
@@ -76,10 +40,6 @@ export function EntityEditDialog<T extends { id: string }>({
   const [draft, setDraft] = useState<T | null>(entity);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Portal target for nested pickers (sprite picker). Pointing their popovers
-  // here — inside DialogContent — keeps them within the dialog's scroll-lock
-  // subtree so their internal scrolling works.
-  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
   // Reset the draft whenever a different entity is opened.
   useEffect(() => {
@@ -112,37 +72,10 @@ export function EntityEditDialog<T extends { id: string }>({
         </DialogHeader>
 
         {draft && (
-          <div className="grid max-h-[60vh] grid-cols-2 gap-x-4 gap-y-3 overflow-y-auto px-1 py-1">
-            {fields.map((field) => {
-              const value = draft[field.key];
-              const setValue = (v: T[typeof field.key]) => setDraft({ ...draft, [field.key]: v });
-              return (
-                <div
-                  key={field.key}
-                  className={cn("flex flex-col gap-1.5", field.full && "col-span-2")}
-                >
-                  <Label htmlFor={`field-${field.key}`} className="text-xs">
-                    {field.label}
-                  </Label>
-                  <FieldControl
-                    id={`field-${field.key}`}
-                    field={field}
-                    value={value}
-                    setValue={setValue}
-                    draft={draft}
-                    disabled={saving}
-                    container={portalContainer}
-                  />
-                </div>
-              );
-            })}
-          </div>
+          <EntityFieldsForm fields={fields} value={draft} onChange={setDraft} disabled={saving} />
         )}
 
         {error && <p className="px-1 text-destructive text-sm">{error}</p>}
-
-        {/* Portal target for nested pickers — see portalContainer above. */}
-        <div ref={setPortalContainer} />
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
@@ -155,122 +88,6 @@ export function EntityEditDialog<T extends { id: string }>({
       </DialogContent>
     </Dialog>
   );
-}
-
-function FieldControl<T extends { id: string }>({
-  id,
-  field,
-  value,
-  setValue,
-  draft,
-  disabled,
-  container,
-}: {
-  id: string;
-  field: EntityField<T>;
-  value: T[Extract<keyof T, string>];
-  setValue: (v: T[Extract<keyof T, string>]) => void;
-  draft: T;
-  disabled: boolean;
-  container?: HTMLElement | null;
-}) {
-  const readOnly = disabled || field.readOnly;
-  type V = T[Extract<keyof T, string>];
-
-  switch (field.kind) {
-    case "textarea":
-      return (
-        <Textarea
-          id={id}
-          value={value as string}
-          disabled={readOnly}
-          rows={3}
-          onChange={(e) => setValue(e.currentTarget.value as V)}
-        />
-      );
-    case "number": {
-      // A number field is integer unless it opts into decimals via step "any"
-      // (e.g. ability cost). Integer fields reject fractional input outright.
-      const isInteger = field.step !== "any";
-      return (
-        <Input
-          id={id}
-          type="number"
-          inputMode={isInteger ? "numeric" : "decimal"}
-          step={field.step ?? (isInteger ? 1 : undefined)}
-          // Optional numeric fields can be undefined (e.g. a missing level);
-          // display 0 without mutating the underlying value until edited.
-          value={(value ?? 0) as number}
-          disabled={readOnly}
-          onKeyDown={
-            isInteger
-              ? (e) => {
-                  // Block the keys that would introduce a fractional/exponent
-                  // value so an integer field can never hold a decimal.
-                  if (e.key === "." || e.key === "e" || e.key === "E") e.preventDefault();
-                }
-              : undefined
-          }
-          onChange={(e) => {
-            const n = e.currentTarget.valueAsNumber;
-            // Truncate as a backstop for pasted values that slip past keydown.
-            const safe = Number.isNaN(n) ? 0 : isInteger ? Math.trunc(n) : n;
-            setValue(safe as V);
-          }}
-        />
-      );
-    }
-    case "select":
-      return (
-        <Select value={value as string} disabled={readOnly} onValueChange={(v) => setValue(v as V)}>
-          <SelectTrigger id={id} className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(field.options ?? []).map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
-    case "tags":
-      return field.options ? (
-        <TagsSelect
-          value={value as string[]}
-          options={field.options}
-          disabled={readOnly}
-          onChange={(next) => setValue(next as V)}
-        />
-      ) : (
-        <TagsInput
-          value={value as string[]}
-          disabled={readOnly}
-          onChange={(next) => setValue(next as V)}
-        />
-      );
-    case "sprite":
-      return (
-        <SpritePicker
-          value={value as string}
-          disabled={readOnly}
-          container={container}
-          onChange={(name) => setValue(name as V)}
-        />
-      );
-    case "custom":
-      return <>{field.render?.({ value, setValue, draft, disabled: !!readOnly })}</>;
-    default:
-      return (
-        <Input
-          id={id}
-          value={value as string}
-          disabled={readOnly}
-          onChange={(e) => setValue(e.currentTarget.value as V)}
-        />
-      );
-  }
 }
 
 function shallowEqual<T extends object>(a: T, b: T): boolean {

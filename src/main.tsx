@@ -1,6 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { setupMonaco } from "./lib/monaco/setup";
+
+// Register Monaco's self-hosted workers and the Lua language exactly once,
+// before any editor mounts.
+setupMonaco();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

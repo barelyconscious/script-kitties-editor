@@ -19,7 +19,7 @@ pub fn get_or_create_config() -> EditorConfig {
         let mut file = File::create_new(filepath).expect("it to have been created");
         let conf = get_default_config();
         let contents = serde_json::to_string(&conf).unwrap();
-        file.write(contents.as_bytes())
+        file.write_all(contents.as_bytes())
             .expect("it to have written the json");
     }
 

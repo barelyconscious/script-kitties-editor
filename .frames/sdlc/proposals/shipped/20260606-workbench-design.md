@@ -1,7 +1,7 @@
 ---
 name: "Workbench: a code-and-data workspace for game objects"
 description: "The Workbench is a tabbed workspace of game objects — an object-list explorer plus per-object tabs, each with a DATA pane, a Monaco Lua script editor, and an API reference — where editing an object's data and its script feel like one tool with one per-tab save."
-status: planned
+status: shipped
 author: ux-designer
 date_created: 2026-06-06
 reviewers:

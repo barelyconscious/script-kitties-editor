@@ -23,6 +23,7 @@ pub mod dlc;
 pub mod effects;
 pub mod item_drops;
 pub mod items;
+pub mod scripts;
 pub mod sprites;
 
 pub struct Dal {
@@ -41,6 +42,9 @@ pub struct Dal {
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
     // Resolved sprite data URLs, keyed by logical sprite name.
     pub(crate) sprites: Cache<String, Arc<Option<String>>>,
+    // Script file contents, keyed by logical script name. `None` = script-less
+    // (name absent from the manifest); `Some` = file contents.
+    pub(crate) scripts: Cache<String, Arc<Option<String>>>,
     // Swapped out by `update_config` so a new install path starts watching the
     // new Data dir and the old watcher (dropped here) stops firing.
     watcher: Mutex<RecommendedWatcher>,
@@ -60,11 +64,13 @@ impl Dal {
             Cache::builder().max_capacity(1).build();
         let sprites: Cache<String, Arc<Option<String>>> =
             Cache::builder().max_capacity(1024).build();
+        let scripts: Cache<String, Arc<Option<String>>> =
+            Cache::builder().max_capacity(1024).build();
 
         let game_root = PathBuf::from(&config.game_install_path);
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &manifest, &sprites,
+            &item_drops, &manifest, &sprites, &scripts,
         )?;
 
         Ok(Self {
@@ -79,6 +85,7 @@ impl Dal {
             item_drops,
             manifest,
             sprites,
+            scripts,
             watcher: Mutex::new(watcher),
         })
     }
@@ -102,6 +109,7 @@ impl Dal {
             &self.item_drops,
             &self.manifest,
             &self.sprites,
+            &self.scripts,
         )?;
 
         *self.config.write().unwrap() = new_config;
@@ -118,6 +126,7 @@ impl Dal {
         self.item_drops.invalidate_all();
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
+        self.scripts.invalidate_all();
 
         Ok(())
     }
@@ -144,8 +153,10 @@ fn build_watcher(
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
+    scripts: &Cache<String, Arc<Option<String>>>,
 ) -> Result<RecommendedWatcher, String> {
     let data_dir = game_root.join("Data");
+    let scripts_dir = game_root.join("Scripts");
 
     // (path the watcher reacts to, closure that invalidates the matching cache).
     // To register a new domain: clone its cache handle and push a row here.
@@ -195,6 +206,12 @@ fn build_watcher(
         }),
     ];
 
+    // Scripts/ holds ~134 `.lua` files; we can't cheaply map a changed file back
+    // to its logical name, so any `.lua` change invalidates the whole scripts cache
+    // (wholesale, like sprites on an assets.json change). Captured separately from
+    // the exact-path invalidators above.
+    let scripts_cache = scripts.clone();
+    let scripts_dir_match = scripts_dir.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
         // Ignore access-only events; only react when the file's bytes change.
@@ -207,6 +224,11 @@ fn build_watcher(
                 if path == watched_path {
                     invalidate();
                 }
+            }
+            if path.starts_with(&scripts_dir_match)
+                && path.extension().and_then(|e| e.to_str()) == Some("lua")
+            {
+                scripts_cache.invalidate_all();
             }
         }
     })
@@ -221,6 +243,10 @@ fn build_watcher(
     watcher
         .watch(game_root, RecursiveMode::NonRecursive)
         .map_err(|e| format!("failed to watch {}: {}", game_root.display(), e))?;
+    // Best-effort: a valid install has Scripts/, but an install missing it should
+    // still start (Data Tables / Creature Editor don't need scripts). If the watch
+    // can't be set up, the scripts cache simply won't auto-freshen on external edits.
+    let _ = watcher.watch(&scripts_dir, RecursiveMode::NonRecursive);
 
     Ok(watcher)
 }
@@ -238,12 +264,22 @@ pub(crate) fn serialize_pretty<T: Serialize>(value: &T) -> Result<Vec<u8>, Strin
     Ok(buf)
 }
 
+/// The temp sibling an atomic write stages bytes in before renaming over `path`.
+/// Appends `.tmp` to the full filename rather than replacing the extension, so the
+/// temp reflects the real target: `charms.json` -> `charms.json.tmp` (unchanged
+/// from the old behavior) and `bite.lua` -> `bite.lua.tmp` (not a `.json.tmp`).
+fn tmp_sibling(path: &Path) -> PathBuf {
+    let mut os = path.as_os_str().to_owned();
+    os.push(".tmp");
+    PathBuf::from(os)
+}
+
 /// Write `buf` to `path` atomically: write to a sibling temp file then rename
 /// over the destination. `fs::rename` is atomic on POSIX, and on Windows when
 /// source and destination sit on the same volume — which is always the case
 /// here because the temp file lives in the same directory.
 pub(crate) fn atomic_write(path: &Path, buf: &[u8]) -> Result<(), String> {
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = tmp_sibling(path);
 
     fs::write(&tmp_path, buf)
         .map_err(|e| format!("failed to write {}: {}", tmp_path.display(), e))?;
@@ -258,4 +294,25 @@ pub(crate) fn atomic_write(path: &Path, buf: &[u8]) -> Result<(), String> {
             e
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tmp_sibling_preserves_full_filename_for_json() {
+        // Existing .json writes must stage in the identical temp path as before.
+        let p = Path::new("/games/install/Data/charms.json");
+        assert_eq!(tmp_sibling(p), PathBuf::from("/games/install/Data/charms.json.tmp"));
+    }
+
+    #[test]
+    fn tmp_sibling_uses_lua_extension_for_scripts() {
+        // A .lua write must NOT produce a misleading .json.tmp sidecar.
+        let p = Path::new("/games/install/Scripts/bite.lua");
+        let tmp = tmp_sibling(p);
+        assert_eq!(tmp, PathBuf::from("/games/install/Scripts/bite.lua.tmp"));
+        assert!(!tmp.to_string_lossy().contains("json"));
+    }
 }

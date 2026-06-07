@@ -20,6 +20,11 @@ export type Creature = {
   abilitiesByLevel: CreatureLevelUp[];
 };
 
+/** Structural equality for two creatures — the dirty check compares un-normalized drafts. */
+export function sameCreature(a: Creature, b: Creature): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Highest level we project to in the progression chart / previews. */
 export const MAX_LEVEL = 25;
 
@@ -76,6 +81,18 @@ export function buildProgression(
 
 export async function loadCreatures(): Promise<Creature[]> {
   return invoke<Creature[]>("get_creatures");
+}
+
+/**
+ * The population used for the progression chart's average/max, with the live
+ * `draft` swapped in for its persisted counterpart (matched by id) so the
+ * reference lines reflect in-progress edits. A `null` draft (nothing selected)
+ * returns the population unchanged. Pure so both the standalone editor and the
+ * Workbench pane share one definition and stay in sync.
+ */
+export function populationWithDraft(population: Creature[], draft: Creature | null): Creature[] {
+  if (!draft) return population;
+  return population.map((c) => (c.id === draft.id ? draft : c));
 }
 
 /**

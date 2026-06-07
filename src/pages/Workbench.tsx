@@ -186,7 +186,13 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {tabs.length > 0 && (
-          <TabBar tabs={tabs} activeKey={activeKey} onSelect={setActiveKey} onClose={handleClose} />
+          <TabBar
+            tabs={tabs}
+            activeKey={activeKey}
+            dirtyByTab={dirtyByTab}
+            onSelect={setActiveKey}
+            onClose={handleClose}
+          />
         )}
 
         <div className="relative min-h-0 flex-1">

@@ -69,6 +69,12 @@ pub struct Charm {
     pub id: String,
     pub name: String,
     pub sprite: String,
+    // Charms MAY carry a script, but it is optional: `default` lets pre-existing
+    // charms.json entries (which have no script key) deserialize, and
+    // `skip_serializing_if` keeps script-less charms from gaining an empty
+    // `"script": ""` on save — so untouched files stay byte-identical.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub script: String,
     pub description: String,
     pub stats: BTreeMap<String, i32>,
 }

@@ -5,9 +5,11 @@ import {
   hasScriptField,
   ID_PATTERN,
   initialFormState,
+  isScriptOptional,
   isValid,
   type NewObjectFormState,
   reduceForm,
+  showScriptName,
   validateNewObject,
 } from "./newObjectForm";
 
@@ -45,26 +47,59 @@ describe("initialFormState", () => {
     expect(initialFormState("Creature").script).toBe("ai_default.lua");
   });
 
-  it("seeds a none-policy (Charm) script to empty", () => {
-    expect(initialFormState("Charm").script).toBe("");
+  it("seeds the staged charm script name even though it starts un-attached", () => {
+    const s = initialFormState("Charm");
+    expect(s.script).toBe("charm_.lua");
+    expect(s.attachScript).toBe(false);
+  });
+
+  it("defaults attachScript OFF for optional types and ON for intrinsic ones", () => {
+    for (const t of ["Item", "Charm", "Creature"] as GameObjectType[]) {
+      expect(initialFormState(t).attachScript, t).toBe(false);
+    }
+    for (const t of ["Ability", "Biogram", "Effect"] as GameObjectType[]) {
+      expect(initialFormState(t).attachScript, t).toBe(true);
+    }
   });
 });
 
-describe("deriveScript / hasScriptField", () => {
+describe("deriveScript / hasScriptField / isScriptOptional", () => {
   it("derives <type>_<id>.lua for create-policy types", () => {
     expect(deriveScript("Effect", "burn")).toBe("effect_burn.lua");
     expect(deriveScript("Item", "bandage")).toBe("item_bandage.lua");
+    expect(deriveScript("Charm", "luck")).toBe("charm_luck.lua");
   });
 
   it("returns the shared default for Creature regardless of id", () => {
     expect(deriveScript("Creature", "bitlynx")).toBe("ai_default.lua");
   });
 
-  it("returns empty for Charm and reports no script field", () => {
-    expect(deriveScript("Charm", "luck")).toBe("");
-    expect(hasScriptField("Charm")).toBe(false);
-    expect(hasScriptField("Ability")).toBe(true);
-    expect(hasScriptField("Creature")).toBe(true);
+  it("reports a script field for every (now script-bearing) type", () => {
+    for (const t of ["Ability", "Biogram", "Effect", "Item", "Charm", "Creature"] as const) {
+      expect(hasScriptField(t), t).toBe(true);
+    }
+  });
+
+  it("marks item/charm/creature optional and the intrinsic types not", () => {
+    for (const t of ["Item", "Charm", "Creature"] as GameObjectType[]) {
+      expect(isScriptOptional(t), t).toBe(true);
+    }
+    for (const t of ["Ability", "Biogram", "Effect"] as GameObjectType[]) {
+      expect(isScriptOptional(t), t).toBe(false);
+    }
+  });
+});
+
+describe("showScriptName", () => {
+  it("always shows the name field for intrinsic types", () => {
+    expect(showScriptName(initialFormState("Ability"))).toBe(true);
+  });
+
+  it("hides the name field for an optional type until the toggle is on", () => {
+    const off = initialFormState("Item");
+    expect(showScriptName(off)).toBe(false);
+    const on = reduceForm(off, { kind: "attachScript", value: true });
+    expect(showScriptName(on)).toBe(true);
   });
 });
 
@@ -111,12 +146,35 @@ describe("reduceForm — derivation chain", () => {
     expect(s.script).toBe("effect_burn.lua");
   });
 
-  it("changing to a shared-policy type seeds its default; to none-policy clears it", () => {
+  it("changing type re-derives the script under each new policy", () => {
     let s = reduceForm(initialFormState("Ability"), { kind: "name", value: "Thing" });
     s = reduceForm(s, { kind: "type", value: "Creature" });
     expect(s.script).toBe("ai_default.lua");
+    // Charm is a create-policy type now, so its name derives from the id.
     s = reduceForm(s, { kind: "type", value: "Charm" });
-    expect(s.script).toBe("");
+    expect(s.script).toBe("charm_thing.lua");
+  });
+
+  it("changing type re-seeds the attach default (optional OFF, intrinsic ON)", () => {
+    // Start intrinsic (attach on), switch to an optional type → attach resets off.
+    let s = reduceForm(initialFormState("Ability"), { kind: "type", value: "Item" });
+    expect(s.attachScript).toBe(false);
+    // ...and back to an intrinsic type → attach forced on.
+    s = reduceForm(s, { kind: "type", value: "Effect" });
+    expect(s.attachScript).toBe(true);
+  });
+
+  it("toggling attachScript on seeds the derived name; off leaves it for re-enabling", () => {
+    let s = reduceForm(initialFormState("Item"), { kind: "name", value: "Bandage" });
+    expect(s.attachScript).toBe(false);
+    s = reduceForm(s, { kind: "attachScript", value: true });
+    expect(s.attachScript).toBe(true);
+    expect(s.script).toBe("item_bandage.lua");
+    // A hand-edited name survives a toggle round-trip.
+    s = reduceForm(s, { kind: "script", value: "custom.lua" });
+    s = reduceForm(s, { kind: "attachScript", value: false });
+    s = reduceForm(s, { kind: "attachScript", value: true });
+    expect(s.script).toBe("custom.lua");
   });
 
   it("a hand-edited script survives a type change", () => {
@@ -133,6 +191,7 @@ describe("validateNewObject", () => {
     name: "Bite",
     id: "bite",
     script: "ability_bite.lua",
+    attachScript: true,
     idEdited: false,
     scriptEdited: false,
   };
@@ -178,6 +237,7 @@ describe("validateNewObject", () => {
       name: "Bitlynx",
       id: "bitlynx",
       script: "ai_default.lua",
+      attachScript: true,
       idEdited: false,
       scriptEdited: false,
     };
@@ -188,17 +248,38 @@ describe("validateNewObject", () => {
     expect(validateNewObject({ ...creature, script: "ai_default" }, []).script).toBeDefined();
   });
 
-  it("skips script validation entirely for a none-policy (Charm) type", () => {
+  it("skips script validation for an optional type with the toggle OFF", () => {
     const charm: NewObjectFormState = {
       type: "Charm",
       name: "Luck",
       id: "luck",
-      script: "",
+      // A junk script name is ignored while the script is not attached.
+      script: "not-a-lua",
+      attachScript: false,
       idEdited: false,
       scriptEdited: false,
     };
     expect(validateNewObject(charm, []).script).toBeUndefined();
     expect(isValid(validateNewObject(charm, []))).toBe(true);
+  });
+
+  it("validates the script for an optional type once the toggle is ON", () => {
+    const charm: NewObjectFormState = {
+      type: "Charm",
+      name: "Luck",
+      id: "luck",
+      script: "not-a-lua",
+      attachScript: true,
+      idEdited: false,
+      scriptEdited: false,
+    };
+    // Now the .lua rule bites...
+    expect(validateNewObject(charm, []).script).toBeDefined();
+    // ...and a create-policy charm collision is caught.
+    const objects = [obj({ objectType: "Item", id: "x", script: "charm_luck.lua" })];
+    expect(validateNewObject({ ...charm, script: "charm_luck.lua" }, objects).script).toContain(
+      "already used",
+    );
   });
 });
 

@@ -111,6 +111,17 @@ function Item:onUse(creature)
     -- your code here
 end${WS_BEFORE_RETURN}return Item\r\n`;
 
+// Charms had no script in the predecessor editor (the field is new), so there is
+// no byte-for-byte template to copy. This is a minimal, table-returning stub the
+// game can extend — deliberately free of invented method names so it never
+// implies a hook contract the runtime doesn't have. Only written when the user
+// opts a charm INTO a script.
+export const CHARM_SCRIPT_TEMPLATE = `local Charm = {}
+
+-- Charm behavior hooks go here.
+
+return Charm\r\n`;
+
 // ---------------------------------------------------------------------------
 // Script policy + creation descriptor.
 // ---------------------------------------------------------------------------
@@ -123,11 +134,23 @@ end${WS_BEFORE_RETURN}return Item\r\n`;
  *  - "shared": the object points at an existing shared script (`defaultName`);
  *    no new file is created.
  *  - "none": the type has no script at all.
+ *
+ * The `optional` flag (on the script-bearing kinds) marks a type whose script is
+ * USER-OPTIONAL — items, charms, and creatures. The modal shows an "attach a
+ * script" toggle for these (defaulting OFF), and {@link createObject} skips the
+ * script entirely (no file, empty pointer) unless the caller opts in. The
+ * script-FIRST types (abilities, biograms, effects) omit it: their script is
+ * intrinsic and always created.
  */
 export type ScriptPolicy =
-  | { kind: "create"; deriveName: (id: string) => string; template: string }
-  | { kind: "shared"; defaultName: string }
+  | { kind: "create"; deriveName: (id: string) => string; template: string; optional?: boolean }
+  | { kind: "shared"; defaultName: string; optional?: boolean }
   | { kind: "none" };
+
+/** Whether a type's script is user-optional (an "attach a script" toggle). */
+export function isOptionalScript(policy: ScriptPolicy): boolean {
+  return policy.kind !== "none" && policy.optional === true;
+}
 
 /** The seed a caller supplies to mint a record: the resolved id + display name. */
 export type CreationSeed = {
@@ -213,12 +236,14 @@ const ITEM_DESCRIPTOR: CreationDescriptor<ItemRow> = {
     kind: "create",
     deriveName: (id) => `${typeStem("Item", id)}.lua`,
     template: ITEM_SCRIPT_TEMPLATE,
+    optional: true,
   },
   makeDefault: ({ id, name, script }) => ({
     id,
     name,
     sprite: `${typeStem("Item", id)}.png`,
-    script: script ?? `${typeStem("Item", id)}.lua`,
+    // Empty when no script was attached; createObject resolves the name when one is.
+    script: script ?? "",
     description: "",
     itemTags: [],
     // Seed the joined drop fields from the SAME defaults loadItemRows uses for an
@@ -229,26 +254,38 @@ const ITEM_DESCRIPTOR: CreationDescriptor<ItemRow> = {
 };
 
 const CHARM_DESCRIPTOR: CreationDescriptor<Charm> = {
-  scriptPolicy: { kind: "none" },
-  makeDefault: ({ id, name }) => ({
+  // Charms are script-OPTIONAL: no script unless the user attaches one, in which
+  // case a fresh per-charm `.lua` is minted from the stub template.
+  scriptPolicy: {
+    kind: "create",
+    deriveName: (id) => `${typeStem("Charm", id)}.lua`,
+    template: CHARM_SCRIPT_TEMPLATE,
+    optional: true,
+  },
+  makeDefault: ({ id, name, script }) => ({
     id,
     name,
     sprite: `${typeStem("Charm", id)}.png`,
     description: "",
     stats: {},
+    // Empty/absent for a script-less charm; set when a script is attached.
+    script: script ?? "",
   }),
   save: saveCharm,
 };
 
 const CREATURE_DESCRIPTOR: CreationDescriptor<Creature> = {
-  scriptPolicy: { kind: "shared", defaultName: CREATURE_DEFAULT_SCRIPT },
+  // Creatures are script-OPTIONAL: attaching a script points the new creature at
+  // the shared AI default (creatures share AI scripts); skipping leaves it blank.
+  scriptPolicy: { kind: "shared", defaultName: CREATURE_DEFAULT_SCRIPT, optional: true },
   makeDefault: ({ id, name, script }) => ({
     id,
     name,
     // Creatures store the BARE sprite stem (no extension), unlike the flat types.
     sprite: id,
     description: "",
-    aiController: script ?? CREATURE_DEFAULT_SCRIPT,
+    // Empty when no script was attached; createObject resolves the shared default when one is.
+    aiController: script ?? "",
     baseStats: {},
     baseAbilities: [],
     statGainsPerLevel: {},
@@ -301,7 +338,7 @@ export type CreateResult =
   | { ok: false; type: GameObjectType; id: string; step: CreateStep; message: string };
 
 /**
- * Mint a new object of `type` from `seed` ({ name, id, script? }).
+ * Mint a new object of `type` from `seed` ({ name, id, script?, attachScript? }).
  *
  * The optional `seed.script` is a user-supplied override (the modal lets the user
  * edit the script name / shared-script pointer). It is resolved ONCE here,
@@ -309,42 +346,54 @@ export type CreateResult =
  * BOTH `makeDefault` (so the record's `script` field reflects it) and the
  * `create_script` call (so the created file name agrees with the record).
  *
+ * `seed.attachScript` gates the OPTIONAL-script types (items, charms, creatures):
+ * it defaults to FALSE, so those are created SCRIPT-LESS (no file, empty pointer)
+ * unless the caller opts in. Script-intrinsic types (abilities, biograms,
+ * effects) ignore it — their script is always created.
+ *
  * Ordering & partial failure (NOT a transaction — two files): for a "create"
- * policy, write the fresh script FIRST, then the record; if the script write
- * fails, ABORT before saving so we never leave a record pointing at a missing
- * script. For "shared"/"none", just save the record. The created file name and
- * the record's `script` field always agree because both flow from the same
- * resolved name.
+ * policy with a script attached, write the fresh script FIRST, then the record;
+ * if the script write fails, ABORT before saving so we never leave a record
+ * pointing at a missing script. Otherwise just save the record. The created file
+ * name and the record's `script` field always agree because both flow from the
+ * same resolved name.
  */
 export async function createObject(
   type: GameObjectType,
-  seed: { name: string; id: string; script?: string },
+  seed: { name: string; id: string; script?: string; attachScript?: boolean },
 ): Promise<CreateResult> {
   const descriptor = creationDescriptorFor(type);
   const policy = descriptor.scriptPolicy;
 
+  // Whether this creation gets a script: optional types follow the caller's
+  // opt-in (default OFF); intrinsic-script types always do; "none" never does.
+  const attach = isOptionalScript(policy) ? seed.attachScript === true : policy.kind !== "none";
+
   // Resolve the effective script name ONCE, preferring a non-blank user override
-  // over the policy default. "none" ignores any passed script entirely.
+  // over the policy default. Skipped entirely when no script is attached.
   const override = seed.script?.trim();
   let resolvedScript: string | undefined;
-  switch (policy.kind) {
-    case "create":
-      resolvedScript = override ? override : policy.deriveName(seed.id);
-      break;
-    case "shared":
-      resolvedScript = override ? override : policy.defaultName;
-      break;
-    case "none":
-      resolvedScript = undefined;
-      break;
+  if (attach) {
+    switch (policy.kind) {
+      case "create":
+        resolvedScript = override ? override : policy.deriveName(seed.id);
+        break;
+      case "shared":
+        resolvedScript = override ? override : policy.defaultName;
+        break;
+      case "none":
+        resolvedScript = undefined;
+        break;
+    }
   }
 
   // Build the record from the resolved script so its `script` field and (for the
-  // "create" branch) the created file name share a single source of truth.
+  // "create" branch) the created file name share a single source of truth. An
+  // un-attached script resolves to undefined → makeDefault leaves it empty.
   const record = descriptor.makeDefault({ id: seed.id, name: seed.name, script: resolvedScript });
 
-  if (policy.kind === "create") {
-    // resolvedScript is always defined for the "create" policy.
+  if (attach && policy.kind === "create") {
+    // resolvedScript is always defined here (attached + create policy).
     const name = resolvedScript as string;
     try {
       await invoke("create_script", { name, contents: policy.template });

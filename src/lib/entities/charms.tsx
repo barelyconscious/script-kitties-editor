@@ -19,6 +19,12 @@ export type Charm = {
   sprite: string;
   description: string;
   stats: Record<string, number>;
+  /**
+   * Optional script pointer. The backend omits the key for script-less charms
+   * (so it can be absent at runtime); creating a charm with the script toggle on
+   * sets it, otherwise it stays empty/absent and the charm has no script.
+   */
+  script?: string;
 };
 
 export function loadCharms(): Promise<Charm[]> {

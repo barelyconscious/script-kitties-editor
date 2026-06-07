@@ -49,8 +49,8 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             id: c.id.clone(),
             name: c.name.clone(),
             sprite: c.sprite.clone(),
-            // Charms have no script field in the source data.
-            script: String::new(),
+            // Charms carry an OPTIONAL script — empty when the charm is script-less.
+            script: c.script.clone(),
             description: c.description.clone(),
         });
     }

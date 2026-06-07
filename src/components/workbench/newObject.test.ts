@@ -31,6 +31,7 @@ import type { GameObjectType } from "./gameObjects";
 import {
   ABILITY_SCRIPT_TEMPLATE,
   BIOGRAM_SCRIPT_TEMPLATE,
+  CHARM_SCRIPT_TEMPLATE,
   createObject,
   creationDescriptorFor,
   deriveId,
@@ -175,7 +176,7 @@ describe("makeDefault shapes", () => {
     });
   });
 
-  it("Charm: no script field, empty stats", () => {
+  it("Charm: empty stats and an empty (un-attached) script", () => {
     const r = creationDescriptorFor("Charm").makeDefault({ id: "luck", name: "Luck" });
     expect(r).toEqual({
       id: "luck",
@@ -183,11 +184,21 @@ describe("makeDefault shapes", () => {
       sprite: "charm_luck.png",
       description: "",
       stats: {},
+      // Optional script: empty when no name is seeded.
+      script: "",
     });
-    expect(r).not.toHaveProperty("script");
   });
 
-  it("Creature: BARE-stem sprite and shared ai_default.lua controller", () => {
+  it("Charm: stamps an attached script name when one is supplied", () => {
+    const r = creationDescriptorFor("Charm").makeDefault({
+      id: "luck",
+      name: "Luck",
+      script: "charm_luck.lua",
+    });
+    expect(r).toMatchObject({ script: "charm_luck.lua" });
+  });
+
+  it("Creature: BARE-stem sprite and an empty (un-attached) controller", () => {
     const r = creationDescriptorFor("Creature").makeDefault({ id: "bitlynx", name: "Bitlynx" });
     expect(r).toEqual({
       id: "bitlynx",
@@ -195,7 +206,8 @@ describe("makeDefault shapes", () => {
       // bare stem — no .png extension, per the creature sprite convention.
       sprite: "bitlynx",
       description: "",
-      aiController: "ai_default.lua",
+      // Optional script: empty when none is attached.
+      aiController: "",
       baseStats: {},
       baseAbilities: [],
       statGainsPerLevel: {},
@@ -221,15 +233,29 @@ describe("script policy", () => {
     }
   });
 
-  it("Charm has the none policy", () => {
-    expect(creationDescriptorFor("Charm").scriptPolicy).toEqual({ kind: "none" });
+  it("Charm has an OPTIONAL create policy with the charm template", () => {
+    const policy = creationDescriptorFor("Charm").scriptPolicy;
+    expect(policy.kind).toBe("create");
+    expect(policy).toMatchObject({ optional: true });
+    if (policy.kind === "create") {
+      expect(policy.template).toBe(CHARM_SCRIPT_TEMPLATE);
+      expect(policy.deriveName("luck")).toBe("charm_luck.lua");
+    }
   });
 
-  it("Creature has the shared policy pointing at ai_default.lua", () => {
+  it("Creature has an OPTIONAL shared policy pointing at ai_default.lua", () => {
     expect(creationDescriptorFor("Creature").scriptPolicy).toEqual({
       kind: "shared",
       defaultName: "ai_default.lua",
+      optional: true,
     });
+  });
+
+  it("Item has an OPTIONAL create policy; intrinsic types are NOT optional", () => {
+    expect(creationDescriptorFor("Item").scriptPolicy).toMatchObject({ optional: true });
+    for (const t of ["Ability", "Biogram", "Effect"] as GameObjectType[]) {
+      expect(creationDescriptorFor(t).scriptPolicy).not.toMatchObject({ optional: true });
+    }
   });
 });
 
@@ -301,7 +327,12 @@ describe("createObject — create-fresh policy", () => {
   it("returns a record-step failure when the entity save fails (after the script succeeds)", async () => {
     saveItemRowMock.mockRejectedValueOnce(new Error("write denied"));
 
-    const result = await createObject("Item", { name: "Bandage", id: "bandage" });
+    // Item is script-optional — opt in so the script step runs before the record.
+    const result = await createObject("Item", {
+      name: "Bandage",
+      id: "bandage",
+      attachScript: true,
+    });
 
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
@@ -312,8 +343,8 @@ describe("createObject — create-fresh policy", () => {
   });
 });
 
-describe("createObject — shared policy (Creature)", () => {
-  it("saves the record only, never calling create_script", async () => {
+describe("createObject — shared policy (Creature, optional)", () => {
+  it("without attachScript: saves a SCRIPT-LESS record, never calling create_script", async () => {
     const result = await createObject("Creature", { name: "Bitlynx", id: "bitlynx" });
 
     expect(invokeMock).not.toHaveBeenCalled();
@@ -321,8 +352,21 @@ describe("createObject — shared policy (Creature)", () => {
     expect(saveCreatureMock.mock.calls[0][0]).toMatchObject({
       id: "bitlynx",
       sprite: "bitlynx",
-      aiController: "ai_default.lua",
+      // Optional script left OFF → empty controller, no shared default forced in.
+      aiController: "",
     });
+    expect(result.ok).toBe(true);
+  });
+
+  it("with attachScript: points at the shared ai_default.lua, still no create_script", async () => {
+    const result = await createObject("Creature", {
+      name: "Bitlynx",
+      id: "bitlynx",
+      attachScript: true,
+    });
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(saveCreatureMock.mock.calls[0][0]).toMatchObject({ aiController: "ai_default.lua" });
     expect(result.ok).toBe(true);
   });
 
@@ -330,6 +374,7 @@ describe("createObject — shared policy (Creature)", () => {
     const result = await createObject("Creature", {
       name: "Bitlynx",
       id: "bitlynx",
+      attachScript: true,
       script: "ai_stalker.lua",
     });
 
@@ -340,20 +385,61 @@ describe("createObject — shared policy (Creature)", () => {
     });
     expect(result.ok).toBe(true);
   });
-
-  it("falls back to ai_default.lua when no override is supplied", async () => {
-    await createObject("Creature", { name: "Bitlynx", id: "bitlynx" });
-    expect(saveCreatureMock.mock.calls[0][0]).toMatchObject({ aiController: "ai_default.lua" });
-  });
 });
 
-describe("createObject — none policy (Charm)", () => {
-  it("saves the record only, never calling create_script", async () => {
+describe("createObject — optional create policy (Charm)", () => {
+  it("without attachScript: saves a SCRIPT-LESS charm, never calling create_script", async () => {
     const result = await createObject("Charm", { name: "Luck", id: "luck" });
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(saveCharmMock).toHaveBeenCalledTimes(1);
-    expect(saveCharmMock.mock.calls[0][0]).toMatchObject({ id: "luck", stats: {} });
+    expect(saveCharmMock.mock.calls[0][0]).toMatchObject({ id: "luck", stats: {}, script: "" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("with attachScript: mints a fresh charm script BEFORE the record", async () => {
+    const order: string[] = [];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      order.push(`invoke:${cmd}`);
+    });
+    saveCharmMock.mockImplementation(async () => {
+      order.push("save");
+    });
+
+    const result = await createObject("Charm", { name: "Luck", id: "luck", attachScript: true });
+
+    expect(result.ok).toBe(true);
+    expect(order).toEqual(["invoke:create_script", "save"]);
+    expect(invokeMock).toHaveBeenCalledWith("create_script", {
+      name: "charm_luck.lua",
+      contents: CHARM_SCRIPT_TEMPLATE,
+    });
+    expect(saveCharmMock.mock.calls[0][0]).toMatchObject({ script: "charm_luck.lua" });
+  });
+});
+
+describe("createObject — optional types default to script-less", () => {
+  it("an Item created without attachScript writes no file and an empty script", async () => {
+    const result = await createObject("Item", { name: "Bandage", id: "bandage" });
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(saveItemRowMock).toHaveBeenCalledTimes(1);
+    expect(saveItemRowMock.mock.calls[0][0]).toMatchObject({ id: "bandage", script: "" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("an Item created WITH attachScript mints its derived .lua", async () => {
+    const result = await createObject("Item", {
+      name: "Bandage",
+      id: "bandage",
+      attachScript: true,
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("create_script", {
+      name: "item_bandage.lua",
+      contents: ITEM_SCRIPT_TEMPLATE,
+    });
+    expect(saveItemRowMock.mock.calls[0][0]).toMatchObject({ script: "item_bandage.lua" });
     expect(result.ok).toBe(true);
   });
 });

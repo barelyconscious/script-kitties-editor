@@ -13,7 +13,7 @@
  */
 
 import type { GameObject, GameObjectType } from "./gameObjects";
-import { creationDescriptorFor, deriveId } from "./newObject";
+import { creationDescriptorFor, deriveId, isOptionalScript } from "./newObject";
 
 /** Lower_snake_case id shape the backend expects (matches deriveId's output). */
 export const ID_PATTERN = /^[a-z0-9_]+$/;
@@ -28,6 +28,13 @@ export type NewObjectFormState = {
   id: string;
   /** The script name. Meaningless (and hidden) for a "none" policy type. */
   script: string;
+  /**
+   * Whether a script will be ATTACHED. Always true for script-intrinsic types
+   * (ability/biogram/effect); a user-toggled default-OFF flag for the optional
+   * types (item/charm/creature). When false, the script field is hidden and no
+   * script is created.
+   */
+  attachScript: boolean;
   /** Once true, `id` no longer auto-syncs from `name`. */
   idEdited: boolean;
   /** Once true, `script` no longer auto-derives from `id`/`type` (create policy only). */
@@ -45,7 +52,12 @@ export function initialFormState(type: GameObjectType): NewObjectFormState {
     type,
     name: "",
     id: "",
+    // Seed the name regardless of `attachScript` so toggling a script ON reveals
+    // a sensible default immediately; the field stays hidden until then.
     script: deriveScript(type, ""),
+    // Optional-script types default OFF (the user opts in); intrinsic types are
+    // always on.
+    attachScript: !isScriptOptional(type),
     idEdited: false,
     scriptEdited: false,
   };
@@ -68,9 +80,26 @@ export function deriveScript(type: GameObjectType, id: string): string {
   }
 }
 
-/** Whether the type shows a Script field at all (false for the "none" policy). */
+/** Whether the type can have a script at all (false only for the "none" policy). */
 export function hasScriptField(type: GameObjectType): boolean {
   return creationDescriptorFor(type).scriptPolicy.kind !== "none";
+}
+
+/**
+ * Whether the type's script is USER-OPTIONAL (item/charm/creature) — the modal
+ * shows an "attach a script" toggle for these. Script-intrinsic types
+ * (ability/biogram/effect) return false: their script is mandatory.
+ */
+export function isScriptOptional(type: GameObjectType): boolean {
+  return isOptionalScript(creationDescriptorFor(type).scriptPolicy);
+}
+
+/**
+ * Whether the modal should show the script-NAME input for the given state: the
+ * type must support a script AND (be intrinsic OR have its optional toggle on).
+ */
+export function showScriptName(state: NewObjectFormState): boolean {
+  return hasScriptField(state.type) && (!isScriptOptional(state.type) || state.attachScript);
 }
 
 /** Whether the Script field auto-derives from id/type (only the "create" policy). */
@@ -87,6 +116,7 @@ export type FormAction =
   | { kind: "name"; value: string }
   | { kind: "id"; value: string }
   | { kind: "script"; value: string }
+  | { kind: "attachScript"; value: boolean }
   | { kind: "type"; value: GameObjectType };
 
 /**
@@ -116,10 +146,23 @@ export function reduceForm(state: NewObjectFormState, action: FormAction): NewOb
     }
     case "script":
       return { ...state, script: action.value, scriptEdited: true };
+    case "attachScript": {
+      const attachScript = action.value;
+      // Turning a script ON seeds the name from the current id/type (unless the
+      // user already hand-edited it); turning OFF leaves the (now-hidden) name
+      // untouched so re-enabling restores it.
+      const script =
+        attachScript && !state.scriptEdited ? deriveScript(state.type, state.id) : state.script;
+      return { ...state, attachScript, script };
+    }
     case "type": {
       const type = action.value;
       const script = nextScript(state, type, state.id);
-      return { ...state, type, script };
+      // Each type carries its own attach default (optional ⇒ OFF, intrinsic ⇒
+      // ON). Re-seed it on a type change so switching INTO an optional type
+      // doesn't silently inherit the previous type's "on".
+      const attachScript = !isScriptOptional(type);
+      return { ...state, type, script, attachScript };
     }
   }
 }
@@ -188,8 +231,11 @@ export function validateNewObject(
     errors.id = `A ${type.toLowerCase()} with id "${id}" already exists.`;
   }
 
+  // Validate the script only when one will actually be attached: an optional
+  // type with the toggle OFF carries no script, so its (hidden) name is moot.
   const policy = creationDescriptorFor(type).scriptPolicy;
-  if (policy.kind !== "none") {
+  const attaching = isScriptOptional(type) ? state.attachScript : policy.kind !== "none";
+  if (policy.kind !== "none" && attaching) {
     if (script.length === 0) {
       errors.script = "Script name is required.";
     } else if (!script.toLowerCase().endsWith(".lua")) {

@@ -17,13 +17,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { type GameObject, type GameObjectType, GROUP_LABELS, GROUP_ORDER } from "./gameObjects";
 import { createObject } from "./newObject";
 import {
-  hasScriptField,
   initialFormState,
+  isScriptOptional,
   isValid,
   reduceForm,
+  showScriptName,
   validateNewObject,
 } from "./newObjectForm";
 
@@ -79,7 +81,10 @@ export function NewObjectModal({
 
   const errors = useMemo(() => validateNewObject(form, objects), [form, objects]);
   const canSubmit = isValid(errors) && !busy;
-  const showScript = hasScriptField(form.type);
+  // Optional-script types (item/charm/creature) get an "attach a script" toggle;
+  // the script-NAME input shows for intrinsic types or once the toggle is on.
+  const scriptOptional = isScriptOptional(form.type);
+  const showScript = showScriptName(form);
 
   async function handleCreate() {
     if (!canSubmit) return;
@@ -89,8 +94,10 @@ export function NewObjectModal({
       name: form.name.trim(),
       id: form.id.trim(),
       // Pass the (possibly hand-edited) script through; createObject ignores it
-      // for a "none" policy and resolves blanks to its own default.
+      // when no script is attached and resolves blanks to its own default.
       script: showScript ? form.script.trim() : undefined,
+      // Gate the optional-script types; intrinsic types ignore this.
+      attachScript: form.attachScript,
     });
     if (result.ok) {
       onOpenChange(false);
@@ -176,6 +183,29 @@ export function NewObjectModal({
             />
             {errors.id && <p className="text-destructive text-xs">{errors.id}</p>}
           </div>
+
+          {scriptOptional && (
+            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <div className="grid gap-0.5">
+                <Label htmlFor="new-object-attach-script" className="cursor-pointer">
+                  Attach a script
+                </Label>
+                <p className="text-muted-foreground text-xs">
+                  {form.type === "Creature"
+                    ? "Point this creature at an AI script."
+                    : `Create a Lua script for this ${form.type.toLowerCase()}.`}
+                </p>
+              </div>
+              <Switch
+                id="new-object-attach-script"
+                checked={form.attachScript}
+                disabled={busy}
+                onCheckedChange={(checked) =>
+                  setForm((f) => reduceForm(f, { kind: "attachScript", value: checked }))
+                }
+              />
+            </div>
+          )}
 
           {showScript && (
             <div className="grid gap-1.5">

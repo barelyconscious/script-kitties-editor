@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GameObject } from "@/components/workbench/gameObjects";
+import { scriptReach } from "@/components/workbench/gameObjects";
 import { ObjectList } from "@/components/workbench/ObjectList";
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
@@ -24,6 +25,19 @@ export default function Workbench() {
 
   const [tabs, setTabs] = useState<WorkbenchTab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+
+  // Reach per script file, derived once from the already-loaded object list so
+  // each tab's script pane can show "shared by N" without re-fetching. Computed
+  // via the shared `scriptReach` helper to keep the empty-name / exact-match
+  // semantics identical to the rest of the app.
+  const reachByScript = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const obj of objects) {
+      if (obj.script.trim().length === 0 || map.has(obj.script)) continue;
+      map.set(obj.script, scriptReach(objects, obj.script));
+    }
+    return map;
+  }, [objects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +104,11 @@ export default function Workbench() {
               const key = tabKey(tab);
               return (
                 <div key={key} className="absolute inset-0">
-                  <TabWorkspace tab={tab} hidden={key !== activeKey} />
+                  <TabWorkspace
+                    tab={tab}
+                    hidden={key !== activeKey}
+                    scriptReach={reachByScript.get(tab.scriptName) ?? 0}
+                  />
                 </div>
               );
             })

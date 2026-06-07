@@ -56,6 +56,24 @@ export function hasScript(obj: GameObject): boolean {
 }
 
 /**
+ * How many game objects point at a given script file. Scripts are SHARED, not
+ * 1:1 with objects, so a controller script may back several creatures/items at
+ * once. The Workbench surfaces this count ("shared by N") so editing a shared
+ * script is a sighted choice rather than a surprise.
+ *
+ * Matches on the exact `script` field. An empty/whitespace `scriptName` has no
+ * reach (returns 0) — a script-less object shares nothing.
+ */
+export function scriptReach(objects: readonly GameObject[], scriptName: string): number {
+  if (scriptName.trim().length === 0) return 0;
+  let count = 0;
+  for (const obj of objects) {
+    if (obj.script === scriptName) count += 1;
+  }
+  return count;
+}
+
+/**
  * Case-insensitive match of an object against a search query, across name and
  * id. An empty/whitespace query matches everything.
  */

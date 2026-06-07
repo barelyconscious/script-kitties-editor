@@ -5,6 +5,7 @@ import {
   groupObjects,
   hasScript,
   matchesQuery,
+  scriptReach,
 } from "./gameObjects";
 
 function obj(over: Partial<GameObject> & Pick<GameObject, "objectType" | "id">): GameObject {
@@ -28,6 +29,37 @@ describe("hasScript", () => {
 
   it("is false for a whitespace-only script", () => {
     expect(hasScript(obj({ objectType: "Item", id: "i", script: "   " }))).toBe(false);
+  });
+});
+
+describe("scriptReach", () => {
+  const objects: GameObject[] = [
+    obj({ objectType: "Creature", id: "bitlynx", script: "ai_default.lua" }),
+    obj({ objectType: "Creature", id: "bytecat", script: "ai_default.lua" }),
+    obj({ objectType: "Creature", id: "solokit", script: "ai_solo.lua" }),
+    obj({ objectType: "Charm", id: "ward", script: "" }),
+  ];
+
+  it("counts every object pointing at the same script", () => {
+    expect(scriptReach(objects, "ai_default.lua")).toBe(2);
+  });
+
+  it("counts a script used by a single object", () => {
+    expect(scriptReach(objects, "ai_solo.lua")).toBe(1);
+  });
+
+  it("is 0 for a script no object points at", () => {
+    expect(scriptReach(objects, "ai_missing.lua")).toBe(0);
+  });
+
+  it("is 0 for an empty or whitespace script name (a script-less object shares nothing)", () => {
+    expect(scriptReach(objects, "")).toBe(0);
+    expect(scriptReach(objects, "   ")).toBe(0);
+  });
+
+  it("matches exactly — does not conflate distinct names", () => {
+    const o = [obj({ objectType: "Item", id: "x", script: "ai_default.lua.bak" })];
+    expect(scriptReach(o, "ai_default.lua")).toBe(0);
   });
 });
 

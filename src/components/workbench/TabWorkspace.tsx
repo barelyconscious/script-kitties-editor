@@ -2,6 +2,7 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Save } 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ScriptPane } from "./ScriptPane";
 import { SaveBusProvider, useSaveBus, useSaveTarget } from "./saveBus";
 import type { WorkbenchTab } from "./tabs";
 
@@ -9,6 +10,12 @@ export interface TabWorkspaceProps {
   tab: WorkbenchTab;
   /** Hidden tabs stay MOUNTED (display:none) to preserve their draft state. */
   hidden: boolean;
+  /**
+   * How many game objects point at this tab's script file. Threaded from the
+   * shell (which already loaded the object list) so the script pane can surface
+   * "shared by N" without re-fetching. 0/1 ⇒ not shared.
+   */
+  scriptReach: number;
 }
 
 /**
@@ -20,7 +27,7 @@ export interface TabWorkspaceProps {
  * into the bus via later tasks. One placeholder registers a dummy save target so
  * the bus is demonstrably wired end-to-end.
  */
-export function TabWorkspace({ tab, hidden }: TabWorkspaceProps) {
+export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
   // Default SCRIPT-ONLY: both flanks collapsed.
   const [dataOpen, setDataOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
@@ -82,9 +89,11 @@ export function TabWorkspace({ tab, hidden }: TabWorkspaceProps) {
             </Pane>
           )}
 
-          <Pane label="Script" side="center" className="min-w-0 flex-1">
-            <ScriptPanePlaceholder tab={tab} />
-          </Pane>
+          {/* Script pane owns its own header (names the file + reach) and a
+              full-bleed editor, so it bypasses the generic Pane chrome. */}
+          <section className="flex min-w-0 flex-1 flex-col bg-background" aria-label="Script">
+            <ScriptPane scriptName={tab.scriptName} reach={scriptReach} />
+          </section>
 
           {apiOpen && (
             <Pane label="API Reference" side="right" className="w-80 shrink-0 border-l">
@@ -158,16 +167,6 @@ function DataPanePlaceholder({ tab }: { tab: WorkbenchTab }) {
         {dirty ? "Mark clean (placeholder)" : "Mark dirty (placeholder)"}
       </Button>
     </div>
-  );
-}
-
-function ScriptPanePlaceholder({ tab }: { tab: WorkbenchTab }) {
-  return (
-    <Placeholder>
-      {tab.scriptName
-        ? `Script editor — ${tab.scriptName}`
-        : "Script editor (no script for this object)"}
-    </Placeholder>
   );
 }
 

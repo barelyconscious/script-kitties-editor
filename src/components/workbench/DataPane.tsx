@@ -139,7 +139,7 @@ function DataEditor({
     );
   }
 
-  return <EntityFieldsForm fields={descriptor.fields} value={draft} onChange={setDraft} />;
+  return <EntityFieldsForm fields={descriptor.fields} value={draft} onChange={setDraft} fill />;
 }
 
 function PaneStatus({ children }: { children: React.ReactNode }) {

@@ -53,11 +53,19 @@ export function EntityFieldsForm<T extends { id: string }>({
   value,
   onChange,
   disabled = false,
+  fill = false,
 }: {
   fields: EntityField<T>[];
   value: T;
   onChange: (next: T) => void;
   disabled?: boolean;
+  /**
+   * Fill the parent's height and let IT scroll, instead of the form capping
+   * itself at 60vh with its own scroll. Default false suits the edit dialog
+   * (bounds the modal); the Workbench DATA pane sets `fill` so the form uses the
+   * full pane height (the pane already provides the scroll container).
+   */
+  fill?: boolean;
 }) {
   // Portal target for nested pickers (sprite picker). Pointing their popovers
   // here — inside this subtree — keeps them within the surrounding scroll-lock
@@ -66,7 +74,14 @@ export function EntityFieldsForm<T extends { id: string }>({
 
   return (
     <>
-      <div className="grid max-h-[60vh] grid-cols-2 gap-x-4 gap-y-3 overflow-y-auto px-1 py-1">
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-x-4 gap-y-3 px-1 py-1",
+          // In `fill` mode the parent owns the scroll/height; otherwise the form
+          // bounds itself for the dialog.
+          !fill && "max-h-[60vh] overflow-y-auto",
+        )}
+      >
         {fields.map((field) => {
           const fieldValue = value[field.key];
           const setValue = (v: T[typeof field.key]) => onChange({ ...value, [field.key]: v });

@@ -77,10 +77,7 @@ export function ObjectList({
   if (railed) {
     return (
       <div
-        className={cn(
-          "flex h-full min-h-0 w-12 shrink-0 flex-col border-r bg-background",
-          className,
-        )}
+        className={cn("flex h-full min-h-0 w-12 shrink-0 flex-col border-r bg-sidebar", className)}
       >
         <div className="flex justify-center py-2">
           <button
@@ -112,7 +109,7 @@ export function ObjectList({
 
   return (
     <div
-      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-background", className)}
+      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
     >
       <div className="flex items-center gap-1 px-3 py-2">
         <div className="relative min-w-0 flex-1">

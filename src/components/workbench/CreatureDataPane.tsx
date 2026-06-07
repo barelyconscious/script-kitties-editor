@@ -5,6 +5,7 @@ import { type Creature, loadCreatures, populationWithDraft } from "@/lib/creatur
 import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
 import { CreatureForm } from "@/pages/creature-editor/CreatureForm";
+import { CreatureIdentityFields } from "@/pages/creature-editor/CreatureIdentityFields";
 import { useSaveTarget } from "./saveBus";
 
 type Ability = { id: string; name: string };
@@ -136,14 +137,28 @@ function CreatureDataEditor({ id }: { id: string }) {
           {saveError}
         </div>
       )}
-      <CreatureForm
-        creature={draft}
-        population={populationWithDraft(population, draft)}
-        abilityOptions={abilities}
-        onChange={setDraft}
-        disabled={saving}
-        showProgressionChart={false}
-      />
+      <div className="flex flex-col gap-8">
+        {/* Identity section, matching CreatureForm's Section heading style so it
+            reads as the first section, then stats/growth/abilities follow. */}
+        <section className="flex flex-col gap-3">
+          <div>
+            <h3 className="font-medium text-sm">Details</h3>
+            <p className="text-muted-foreground text-xs">
+              Name, sprite, and description. The script pointer lives in the SCRIPT pane.
+            </p>
+          </div>
+          <CreatureIdentityFields creature={draft} onChange={setDraft} disabled={saving} />
+        </section>
+
+        <CreatureForm
+          creature={draft}
+          population={populationWithDraft(population, draft)}
+          abilityOptions={abilities}
+          onChange={setDraft}
+          disabled={saving}
+          showProgressionChart={false}
+        />
+      </div>
     </div>
   );
 }

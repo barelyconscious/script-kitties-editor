@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiReferencePane } from "@/components/workbench/ApiReferencePane";
 import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirtyMap";
-import type { GameObject } from "@/components/workbench/gameObjects";
+import type { GameObject, GameObjectType } from "@/components/workbench/gameObjects";
 import { scriptReach } from "@/components/workbench/gameObjects";
+import { NewObjectModal } from "@/components/workbench/NewObjectModal";
 import { ObjectList } from "@/components/workbench/ObjectList";
 import {
   openScriptCounts,
@@ -46,6 +47,11 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
 
   const [tabs, setTabs] = useState<WorkbenchTab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+
+  // "New object" modal: open state + the preselected type (from a group "+",
+  // or undefined for the top-level/rail "+" which lets the modal default it).
+  const [newOpen, setNewOpen] = useState(false);
+  const [newType, setNewType] = useState<GameObjectType | undefined>(undefined);
 
   // Per-tab dirtiness, reported up by each TabWorkspace and keyed by tabKey.
   const [dirtyByTab, setDirtyByTab] = useState<Record<string, boolean>>({});
@@ -94,26 +100,28 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
   // another tab" for each of those tabs.
   const openCounts = useMemo(() => openScriptCounts(tabs), [tabs]);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Load (or reload) the object list from the backend. Returns the fresh list on
+  // success (and updates state), or null on failure — so a caller that needs to
+  // act on the new object (e.g. open its tab after creation) can await the result
+  // without re-reading state that React hasn't committed yet.
+  const reload = useCallback(async (): Promise<GameObject[] | null> => {
     setLoading(true);
     setError(null);
-    invoke<GameObject[]>("get_game_objects")
-      .then((result) => {
-        if (!cancelled) setObjects(result);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load game objects.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const result = await invoke<GameObject[]>("get_game_objects");
+      setObjects(result);
+      return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load game objects.");
+      return null;
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const handleOpen = useCallback((obj: GameObject) => {
     setTabs((prev) => {
@@ -122,6 +130,23 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
       return result.tabs;
     });
   }, []);
+
+  const handleNew = useCallback((type?: GameObjectType) => {
+    setNewType(type);
+    setNewOpen(true);
+  }, []);
+
+  // After the modal reports a successful create: reload the list so the new
+  // object exists, then locate it by identity and open+focus its tab. If it's
+  // somehow not in the refreshed list, close gracefully (the modal already did).
+  const handleCreated = useCallback(
+    async (created: { objectType: GameObjectType; id: string }) => {
+      const fresh = await reload();
+      const obj = fresh?.find((o) => o.objectType === created.objectType && o.id === created.id);
+      if (obj) handleOpen(obj);
+    },
+    [reload, handleOpen],
+  );
 
   const handleClose = useCallback(
     (key: string) => {
@@ -148,6 +173,15 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
         error={error}
         activeKey={activeKey}
         onOpen={handleOpen}
+        onNew={handleNew}
+      />
+
+      <NewObjectModal
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        type={newType}
+        objects={objects}
+        onCreated={handleCreated}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -4,6 +4,7 @@ import {
   FileCode,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   SearchIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -27,6 +28,11 @@ export interface ObjectListProps {
   /** Identity key (`objectType:id`) of the object whose tab is active, if any. */
   activeKey?: string | null;
   onOpen: (obj: GameObject) => void;
+  /**
+   * Open the "New object" modal. A `type` (from a group's "+") preselects it;
+   * the top-level / rail "+" passes none so the modal defaults the type.
+   */
+  onNew: (type?: GameObjectType) => void;
   className?: string;
 }
 
@@ -49,6 +55,7 @@ export function ObjectList({
   error,
   activeKey,
   onOpen,
+  onNew,
   className,
 }: ObjectListProps) {
   const [query, setQuery] = useState("");
@@ -79,7 +86,7 @@ export function ObjectList({
       <div
         className={cn("flex h-full min-h-0 w-12 shrink-0 flex-col border-r bg-sidebar", className)}
       >
-        <div className="flex justify-center py-2">
+        <div className="flex flex-col items-center gap-1 py-2">
           <button
             type="button"
             onClick={() => setRailed(false)}
@@ -88,6 +95,15 @@ export function ObjectList({
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <PanelLeftOpen className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onNew()}
+            title="New object"
+            aria-label="New object"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Plus className="size-4" />
           </button>
         </div>
 
@@ -123,6 +139,15 @@ export function ObjectList({
         </div>
         <button
           type="button"
+          onClick={() => onNew()}
+          title="New object"
+          aria-label="New object"
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          type="button"
           onClick={() => setRailed(true)}
           title="Collapse object list"
           aria-label="Collapse object list"
@@ -145,22 +170,33 @@ export function ObjectList({
           groups.map((group) => {
             const isCollapsed = collapsed.has(group.type);
             return (
-              <div key={group.type} className="mb-1">
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.type)}
-                  className="flex w-full items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
-                >
-                  {isCollapsed ? (
-                    <ChevronRight className="size-3.5" />
-                  ) : (
-                    <ChevronDown className="size-3.5" />
-                  )}
-                  <span>{group.label}</span>
-                  <span className="ml-auto text-muted-foreground/60 tabular-nums">
-                    {group.objects.length}
-                  </span>
-                </button>
+              <div key={group.type} className="group/grp mb-1">
+                <div className="flex items-center pr-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.type)}
+                    className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
+                  >
+                    {isCollapsed ? (
+                      <ChevronRight className="size-3.5" />
+                    ) : (
+                      <ChevronDown className="size-3.5" />
+                    )}
+                    <span>{group.label}</span>
+                    <span className="ml-auto text-muted-foreground/60 tabular-nums">
+                      {group.objects.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNew(group.type)}
+                    title={`New ${group.label.replace(/s$/, "").toLowerCase()}`}
+                    aria-label={`New ${group.label.replace(/s$/, "").toLowerCase()}`}
+                    className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/grp:opacity-100"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
                 {!isCollapsed && (
                   <ul>
                     {group.objects.map((obj) => (

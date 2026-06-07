@@ -8,7 +8,7 @@ use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
-use crate::commands::scripts::{get_script, save_script};
+use crate::commands::scripts::{create_script, get_script, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
 use crate::config::get_or_create_config;
 use crate::dal::Dal;
@@ -110,6 +110,7 @@ pub fn run() {
             list_sprites,
             get_script,
             save_script,
+            create_script,
             get_game_objects
         ])
         .run(tauri::generate_context!())

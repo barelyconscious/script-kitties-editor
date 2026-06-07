@@ -1,0 +1,12 @@
+# SystemOS marker file — per-install identity, not per-repo identity.
+# Each contributor registers their local clone with `systemos add` to mint
+# their own marker.
+.project
+
+# Session captures — per-machine PTY scrollback for in-flight or recent
+# runs. Source of truth lives in the central DB; these files are
+# reconstructable local artifacts.
+sessions/
+
+# Per-task scratch space — per-machine, ephemeral.
+artifacts/

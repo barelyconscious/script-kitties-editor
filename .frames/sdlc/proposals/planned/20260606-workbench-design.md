@@ -1,7 +1,7 @@
 ---
 name: "Workbench: a code-and-data workspace for game objects"
 description: "The Workbench is a tabbed workspace of game objects — an object-list explorer plus per-object tabs, each with a DATA pane, a Monaco Lua script editor, and an API reference — where editing an object's data and its script feel like one tool with one per-tab save."
-status: accepted
+status: planned
 author: ux-designer
 date_created: 2026-06-06
 reviewers:
@@ -10,7 +10,6 @@ reviewer_decisions:
   architect: Aligned
   engineer: Aligned
 ---
-
 ## Context
 
 The Workbench is the third tool in Script Kitties Editor (`src/pages/Workbench.tsx`, currently a one-line stub). The other two tools are form-first: **Data Tables** edits entity fields in schema-driven grids/dialogs, and the **Creature Editor** edits one creature through a bespoke form. The Workbench is different in kind — it is the surface where the editor becomes a **code tool**, not a form-filler. That shift changes the trust model: a code editor lives or dies on "did my change take, and where did it go."

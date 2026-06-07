@@ -9,9 +9,6 @@ import Workbench from "./pages/Workbench";
 
 function App() {
   const [activeTool, setActiveTool] = useState<NavRailTool>("workbench");
-  // Workbench reports aggregate dirtiness up because it UNMOUNTS on a tool
-  // switch — so the leave-the-tool guard has to live here, above it.
-  const [workbenchDirty, setWorkbenchDirty] = useState(false);
 
   // Safety net for Ctrl+W on Windows/Linux webviews (WebView2 / WebKitGTK),
   // where the close shortcut can be delivered to the page rather than a native
@@ -30,20 +27,12 @@ function App() {
     return () => window.removeEventListener("keydown", swallowCloseWindow, { capture: true });
   }, []);
 
-  const handleSelectTool = useCallback(
-    (tool: NavRailTool) => {
-      if (
-        activeTool === "workbench" &&
-        tool !== "workbench" &&
-        workbenchDirty &&
-        !window.confirm("You have unsaved changes in the Workbench. Leave anyway?")
-      ) {
-        return;
-      }
-      setActiveTool(tool);
-    },
-    [activeTool, workbenchDirty],
-  );
+  // The Workbench stays MOUNTED across tool switches (see below), so leaving it
+  // with unsaved drafts no longer discards anything — no leave-the-tool guard is
+  // needed. The app-close/reload warning still lives inside the Workbench.
+  const handleSelectTool = useCallback((tool: NavRailTool) => {
+    setActiveTool(tool);
+  }, []);
 
   return (
     <TooltipProvider>
@@ -56,7 +45,16 @@ function App() {
             activeTool !== "workbench" && "p-4",
           )}
         >
-          {activeTool === "workbench" && <Workbench onDirtyChange={setWorkbenchDirty} />}
+          {/* The Workbench stays mounted (hidden when inactive) so its open tabs
+              and any unsaved drafts survive leaving and returning — every tab is
+              already kept mounted-but-hidden inside it, so this just extends the
+              same trick one level up. The form-first tools are cheap to rebuild
+              from disk, so they mount on demand. */}
+          <div
+            className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "workbench" && "hidden")}
+          >
+            <Workbench />
+          </div>
           {activeTool === "creature-editor" && <CreatureEditor />}
           {activeTool === "data-tables" && <DataTables />}
         </main>

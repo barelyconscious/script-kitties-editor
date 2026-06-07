@@ -50,11 +50,6 @@ export type GameObjectGroup = {
   objects: GameObject[];
 };
 
-/** Whether a row should show the script affordance — purely data-driven. */
-export function hasScript(obj: GameObject): boolean {
-  return obj.script.trim().length > 0;
-}
-
 /**
  * How many game objects point at a given script file. Scripts are SHARED, not
  * 1:1 with objects, so a controller script may back several creatures/items at
@@ -107,13 +102,4 @@ export function groupObjects(objects: readonly GameObject[], query: string): Gam
     groups.push({ type, label: GROUP_LABELS[type], objects: bucket });
   }
   return groups;
-}
-
-/**
- * Flatten grouped objects into a single ordered list, preserving group order
- * (and the within-group name sort). Used by the collapsed Workbench rail, which
- * renders sprites in the same order as the expanded list but without headers.
- */
-export function flattenGroups(groups: readonly GameObjectGroup[]): GameObject[] {
-  return groups.flatMap((group) => group.objects);
 }

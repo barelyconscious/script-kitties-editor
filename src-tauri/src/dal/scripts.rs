@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::dal::{atomic_write, Dal};
@@ -59,6 +60,79 @@ impl Dal {
             ));
         };
         atomic_write(&path, contents.as_bytes())?;
+        self.scripts
+            .insert(name.to_string(), Arc::new(Some(contents)));
+        Ok(())
+    }
+
+    /// Create a brand-new `.lua` script file and register it in `assets.json`.
+    /// This is the separate "first-time creation" door that `save_script`
+    /// deliberately refuses — the prerequisite for creating a fresh entity whose
+    /// script isn't in the manifest yet.
+    ///
+    /// `name` includes the `.lua` extension. The file is written to
+    /// `<gameInstallPath>/Scripts/<name>` (Scripts is a sibling of Data, not under
+    /// it) and a single manifest entry `name -> { filepath: "Scripts\\<name>" }`
+    /// is inserted, matching the manifest's existing Windows-separator convention.
+    ///
+    /// We never clobber: refuses if `name` already resolves through the manifest
+    /// OR if the target file already exists on disk, leaving no file or temp
+    /// sidecar behind. On success, both the manifest cache (key `()`) and the
+    /// scripts cache (key `name`) are refreshed so resolution/reads see the new
+    /// script without waiting on the filesystem watcher.
+    ///
+    /// The two mutating steps are all-or-nothing: a failure at either step leaves
+    /// zero residue (no manifest entry, no `.lua` file), so the operation is
+    /// retryable. We write the file FIRST (atomic_write self-cleans on its own
+    /// failure, leaving nothing), then insert the manifest entry — and if the
+    /// manifest insert fails, we delete the just-written file before returning the
+    /// error. Doing it manifest-first would risk wedging the name: a failed file
+    /// write would leave a manifest entry pointing at a missing file, and the
+    /// no-clobber guard (`resolve_asset(name).is_some()`) would then refuse every
+    /// retry.
+    pub fn create_script(&self, name: &str, contents: String) -> Result<(), String> {
+        // Refuse if already registered — never create a second manifest entry or
+        // overwrite a script the editor already knows about.
+        if self.resolve_asset(name)?.is_some() {
+            return Err(format!(
+                "refusing to create script '{}': it is already registered in the asset manifest.",
+                name
+            ));
+        }
+
+        let path: PathBuf = Path::new(&self.config().game_install_path)
+            .join("Scripts")
+            .join(name);
+
+        // Refuse if the file exists on disk even though it's absent from the
+        // manifest — we never clobber an existing file.
+        if path.exists() {
+            return Err(format!(
+                "refusing to create script '{}': a file already exists at {}.",
+                name,
+                path.display()
+            ));
+        }
+
+        // Step 1: write the script file atomically. atomic_write leaves nothing
+        // behind on its own failure (temp + rename), so a failure here needs no
+        // cleanup — just propagate the error.
+        atomic_write(&path, contents.as_bytes())?;
+
+        // Step 2: register in the manifest. If this fails, roll back step 1 by
+        // deleting the just-written file (best-effort) so no orphan remains and a
+        // retry — which re-checks the now-clean manifest and disk — succeeds.
+        let updated = match self.insert_manifest_entry(name, &format!("Scripts\\{name}")) {
+            Ok(updated) => updated,
+            Err(e) => {
+                let _ = std::fs::remove_file(&path);
+                return Err(e);
+            }
+        };
+
+        // Both steps succeeded: refresh caches so resolve/get see the new script
+        // without a watcher round-trip.
+        self.manifest.insert((), Arc::new(updated));
         self.scripts
             .insert(name.to_string(), Arc::new(Some(contents)));
         Ok(())
@@ -196,5 +270,204 @@ mod tests {
             dal.get_script("bite.lua").unwrap(),
             Some("-- new contents\n".to_string())
         );
+    }
+
+    #[test]
+    fn create_writes_file_registers_manifest_and_seeds_both_caches() {
+        let root = temp_install();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+
+        dal.create_script("ability_bite.lua", "-- bite\nreturn {}\n".to_string())
+            .unwrap();
+
+        // File written to Scripts/ (sibling of Data/), no temp sidecar.
+        let script_path = root.join("Scripts").join("ability_bite.lua");
+        assert_eq!(
+            std::fs::read_to_string(&script_path).unwrap(),
+            "-- bite\nreturn {}\n"
+        );
+        assert!(!root.join("Scripts").join("ability_bite.lua.tmp").exists());
+
+        // Manifest on disk gained the entry with a backslash filepath.
+        let manifest_raw = std::fs::read_to_string(root.join("assets.json")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_raw).unwrap();
+        assert_eq!(
+            manifest["ability_bite.lua"]["filepath"],
+            serde_json::json!("Scripts\\ability_bite.lua")
+        );
+        assert!(!root.join("assets.json.tmp").exists());
+
+        // Resolution sees the new script (manifest cache refreshed in-process).
+        let resolved = dal.resolve_asset("ability_bite.lua").unwrap();
+        assert_eq!(resolved, Some(script_path));
+
+        // Scripts cache reflects the contents without re-reading disk.
+        assert_eq!(
+            dal.get_script("ability_bite.lua").unwrap(),
+            Some("-- bite\nreturn {}\n".to_string())
+        );
+    }
+
+    #[test]
+    fn create_refuses_name_already_in_manifest_and_writes_nothing() {
+        let root = temp_install();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bite.lua": { "filepath": "Scripts\\bite.lua" } }"#,
+        );
+
+        let err = dal
+            .create_script("bite.lua", "-- nope\n".to_string())
+            .expect_err("creating an already-registered name must be refused");
+        assert!(
+            err.contains("bite.lua"),
+            "refusal should name the script, got: {err}"
+        );
+
+        // No file or temp may be written for a refused create.
+        assert!(!root.join("Scripts").join("bite.lua").exists());
+        assert!(!root.join("Scripts").join("bite.lua.tmp").exists());
+    }
+
+    #[test]
+    fn create_refuses_when_file_already_exists_on_disk() {
+        let root = temp_install();
+        // File exists on disk but is NOT in the manifest.
+        std::fs::write(root.join("Scripts").join("orphan.lua"), "-- existing\n").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        let err = dal
+            .create_script("orphan.lua", "-- new\n".to_string())
+            .expect_err("creating over an existing on-disk file must be refused");
+        assert!(
+            err.contains("orphan.lua"),
+            "refusal should name the script, got: {err}"
+        );
+
+        // The existing file must be untouched and no manifest entry added.
+        assert_eq!(
+            std::fs::read_to_string(root.join("Scripts").join("orphan.lua")).unwrap(),
+            "-- existing\n"
+        );
+        let manifest_raw = std::fs::read_to_string(root.join("assets.json")).unwrap();
+        assert!(!manifest_raw.contains("orphan.lua"));
+        assert!(!root.join("Scripts").join("orphan.lua.tmp").exists());
+    }
+
+    #[test]
+    fn create_rolls_back_file_when_manifest_insert_fails_and_retry_succeeds() {
+        let root = temp_install();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+
+        // Prime the in-process manifest cache with the VALID manifest so the
+        // no-clobber guard (resolve_asset) passes from cache, then corrupt the
+        // on-disk file. create_script's step-2 insert_manifest_entry re-reads the
+        // raw file from disk and will fail to parse it — a deterministic failure
+        // of the SECOND step while the FIRST step (the file write) succeeds.
+        let _ = dal.resolve_asset("item_bandage.png").unwrap();
+        std::fs::write(root.join("assets.json"), "{ this is not valid json").unwrap();
+
+        let name = "new_script.lua";
+        let err = dal
+            .create_script(name, "-- first attempt\n".to_string())
+            .expect_err("manifest insert over a corrupt file must fail");
+        // (a) an Err is returned — and it points at the manifest parse failure.
+        assert!(
+            err.contains("assets.json") || err.to_lowercase().contains("parse"),
+            "error should describe the manifest failure, got: {err}"
+        );
+
+        // (b) no orphan .lua file (or temp sidecar) remains — step 1 was rolled back.
+        let script_path = root.join("Scripts").join(name);
+        assert!(
+            !script_path.exists(),
+            "failed create must not leave an orphan .lua behind"
+        );
+        assert!(
+            !root.join("Scripts").join("new_script.lua.tmp").exists(),
+            "failed create must not leave a temp sidecar"
+        );
+
+        // (c) no manifest entry was added — and the on-disk manifest never gained
+        // the key (the corrupt write is what we left; the point is the entry the
+        // operation would have added is absent).
+        let manifest_raw = std::fs::read_to_string(root.join("assets.json")).unwrap();
+        assert!(
+            !manifest_raw.contains(name),
+            "failed create must not register a manifest entry"
+        );
+
+        // (d) a subsequent create_script with the SAME name SUCCEEDS — proving the
+        // name was not wedged. Restore a valid manifest on disk (the corruption
+        // was the injected fault, not the residue under test) and invalidate the
+        // primed cache so resolution reflects the restored file.
+        std::fs::write(
+            root.join("assets.json"),
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        )
+        .unwrap();
+        dal.manifest.invalidate_all();
+
+        dal.create_script(name, "-- retry\n".to_string())
+            .expect("retry after rollback must succeed — the name must not be wedged");
+
+        // The retry actually wrote the file and registered exactly that name.
+        assert_eq!(
+            std::fs::read_to_string(&script_path).unwrap(),
+            "-- retry\n"
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            manifest[name]["filepath"],
+            serde_json::json!("Scripts\\new_script.lua")
+        );
+    }
+
+    #[test]
+    fn create_preserves_existing_manifest_order_and_adds_exactly_one_key() {
+        let root = temp_install();
+        // A manifest whose key order would NOT survive a HashMap round-trip.
+        let original = r#"{
+  "zeta.json": {
+    "filepath": "Data\\zeta.json"
+  },
+  "alpha.json": {
+    "filepath": "Data\\alpha.json"
+  },
+  "mid.png": {
+    "filepath": "Sprites\\mid.png"
+  }
+}"#;
+        let dal = dal_with_manifest(&root, original);
+
+        let before: Vec<String> = {
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                    .unwrap();
+            v.as_object().unwrap().keys().cloned().collect()
+        };
+
+        dal.create_script("new_script.lua", "-- x\n".to_string())
+            .unwrap();
+
+        let after: Vec<String> = {
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                    .unwrap();
+            v.as_object().unwrap().keys().cloned().collect()
+        };
+
+        // Exactly one key added, appended at the end, with all prior keys in order.
+        assert_eq!(after.len(), before.len() + 1);
+        assert_eq!(&after[..before.len()], &before[..]);
+        assert_eq!(after.last().unwrap(), "new_script.lua");
     }
 }

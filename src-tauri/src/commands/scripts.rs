@@ -18,3 +18,12 @@ pub fn get_script(name: String, dal: State<Dal>) -> Result<Option<String>, Strin
 pub fn save_script(name: String, contents: String, dal: State<Dal>) -> Result<(), String> {
     dal.save_script(&name, contents)
 }
+
+/// Create a brand-new `.lua` script file and register it in `assets.json`. This
+/// is the first-time-creation door that `save_script` refuses. Errors (creating
+/// nothing) if `name` already resolves in the manifest or the target file already
+/// exists on disk — we never clobber.
+#[tauri::command]
+pub fn create_script(name: String, contents: String, dal: State<Dal>) -> Result<(), String> {
+    dal.create_script(&name, contents)
+}

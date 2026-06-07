@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  flattenGroups,
   type GameObject,
   type GameObjectType,
   groupObjects,
-  hasScript,
   matchesQuery,
   scriptReach,
 } from "./gameObjects";
@@ -18,20 +16,6 @@ function obj(over: Partial<GameObject> & Pick<GameObject, "objectType" | "id">):
     ...over,
   };
 }
-
-describe("hasScript", () => {
-  it("is true for a non-empty script", () => {
-    expect(hasScript(obj({ objectType: "Ability", id: "a", script: "x.lua" }))).toBe(true);
-  });
-
-  it("is false for an empty script", () => {
-    expect(hasScript(obj({ objectType: "Charm", id: "c", script: "" }))).toBe(false);
-  });
-
-  it("is false for a whitespace-only script", () => {
-    expect(hasScript(obj({ objectType: "Item", id: "i", script: "   " }))).toBe(false);
-  });
-});
 
 describe("scriptReach", () => {
   const objects: GameObject[] = [
@@ -129,29 +113,5 @@ describe("groupObjects", () => {
       name: "X",
     });
     expect(groupObjects([...objects, weird], "")).toHaveLength(3);
-  });
-});
-
-describe("flattenGroups", () => {
-  const objects: GameObject[] = [
-    obj({ objectType: "Ability", id: "z", name: "Zeta" }),
-    obj({ objectType: "Ability", id: "a", name: "Alpha" }),
-    obj({ objectType: "Creature", id: "bitlynx", name: "Bit Lynx" }),
-    obj({ objectType: "Charm", id: "luck", name: "Lucky Charm" }),
-  ];
-
-  it("flattens groups into one list, preserving group then within-group order", () => {
-    const flat = flattenGroups(groupObjects(objects, ""));
-    // Creature group first, then Abilities sorted by name, then Charm.
-    expect(flat.map((o) => o.id)).toEqual(["bitlynx", "a", "z", "luck"]);
-  });
-
-  it("is empty for no groups", () => {
-    expect(flattenGroups([])).toEqual([]);
-  });
-
-  it("only includes objects surviving the search filter", () => {
-    const flat = flattenGroups(groupObjects(objects, "bit"));
-    expect(flat.map((o) => o.id)).toEqual(["bitlynx"]);
   });
 });

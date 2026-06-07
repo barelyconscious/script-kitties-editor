@@ -24,8 +24,9 @@ export type ItemDrop = {
 export type ItemRow = Item & Omit<ItemDrop, "id">;
 
 // Defaults for an item that has no itemDropTable entry yet (e.g. kittycards).
-// Editing + saving such a row creates its drop entry.
-const DEFAULT_DROP: Omit<ItemDrop, "id"> = {
+// Editing + saving such a row creates its drop entry. Exported so the Workbench
+// creation core can seed a brand-new item's drop fields from the same defaults.
+export const DEFAULT_DROP: Omit<ItemDrop, "id"> = {
   rarity: "COMMON",
   value: 0,
   minLevel: 0,

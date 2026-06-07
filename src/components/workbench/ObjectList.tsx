@@ -1,24 +1,17 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  FileCode,
-  PanelLeftClose,
-  PanelLeftOpen,
-  SearchIcon,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
-import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import {
-  flattenGroups,
-  type GameObject,
-  type GameObjectType,
-  GROUP_ORDER,
-  groupObjects,
-  hasScript,
-} from "./gameObjects";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { type GameObject, type GameObjectType, GROUP_ORDER, groupObjects } from "./gameObjects";
 
 export interface ObjectListProps {
   objects: GameObject[];
@@ -27,6 +20,11 @@ export interface ObjectListProps {
   /** Identity key (`objectType:id`) of the object whose tab is active, if any. */
   activeKey?: string | null;
   onOpen: (obj: GameObject) => void;
+  /**
+   * Open the "New object" modal preselected to `type`. The header "+" is a
+   * dropdown of every type; each group's "+" passes its own type.
+   */
+  onNew: (type?: GameObjectType) => void;
   className?: string;
 }
 
@@ -38,10 +36,8 @@ function keyOf(obj: GameObject): string {
 /**
  * The far-left object browser: every game object grouped by type under
  * collapsible headers, with a single search that filters across ALL groups.
- * Clicking a row opens (or focuses) that object's tab.
- *
- * Can collapse to a thin sprite-only rail (same grouped order, names surfaced on
- * hover) to reclaim horizontal space while keeping objects openable.
+ * Clicking a row opens (or focuses) that object's tab. The header "+" is a
+ * dropdown that creates a new object of a chosen type.
  */
 export function ObjectList({
   objects,
@@ -49,21 +45,14 @@ export function ObjectList({
   error,
   activeKey,
   onOpen,
+  onNew,
   className,
 }: ObjectListProps) {
   const [query, setQuery] = useState("");
-  // Collapsed group headers (expanded view only). Empty = everything expanded.
+  // Collapsed group headers. Empty = everything expanded.
   const [collapsed, setCollapsed] = useState<Set<GameObjectType>>(() => new Set());
-  // Whether the whole list is collapsed to the sprite-only rail. Default: expanded.
-  const [railed, setRailed] = useState(false);
 
-  // The rail ignores the search box, so build its grouping unfiltered. The
-  // expanded view filters by the live query. Both share `groupObjects`.
-  const groups = useMemo(
-    () => groupObjects(objects, railed ? "" : query),
-    [objects, query, railed],
-  );
-  const railObjects = useMemo(() => (railed ? flattenGroups(groups) : []), [railed, groups]);
+  const groups = useMemo(() => groupObjects(objects, query), [objects, query]);
 
   function toggleGroup(type: GameObjectType) {
     setCollapsed((prev) => {
@@ -72,39 +61,6 @@ export function ObjectList({
       else next.add(type);
       return next;
     });
-  }
-
-  if (railed) {
-    return (
-      <div
-        className={cn("flex h-full min-h-0 w-12 shrink-0 flex-col border-r bg-sidebar", className)}
-      >
-        <div className="flex justify-center py-2">
-          <button
-            type="button"
-            onClick={() => setRailed(false)}
-            title="Expand object list"
-            aria-label="Expand object list"
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <PanelLeftOpen className="size-4" />
-          </button>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto pb-4">
-          {loading || error || railObjects.length === 0
-            ? null
-            : railObjects.map((obj) => (
-                <RailItem
-                  key={keyOf(obj)}
-                  obj={obj}
-                  active={activeKey === keyOf(obj)}
-                  onOpen={onOpen}
-                />
-              ))}
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -121,15 +77,27 @@ export function ObjectList({
             className="pl-8"
           />
         </div>
-        <button
-          type="button"
-          onClick={() => setRailed(true)}
-          title="Collapse object list"
-          aria-label="Collapse object list"
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelLeftClose className="size-4" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              title="New object"
+              aria-label="New object"
+              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Plus className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>New object</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {GROUP_ORDER.map((type) => (
+              <DropdownMenuItem key={type} onSelect={() => onNew(type)}>
+                {type}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
@@ -149,7 +117,7 @@ export function ObjectList({
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.type)}
-                  className="flex w-full items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
+                  className="flex w-full min-w-0 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
                 >
                   {isCollapsed ? (
                     <ChevronRight className="size-3.5" />
@@ -191,7 +159,6 @@ function ObjectRow({
   active: boolean;
   onOpen: (obj: GameObject) => void;
 }) {
-  const scripted = hasScript(obj);
   return (
     <li>
       <button
@@ -209,45 +176,8 @@ function ObjectRow({
           <span className="size-5 shrink-0" aria-hidden="true" />
         )}
         <span className="min-w-0 flex-1 truncate">{obj.name}</span>
-        {scripted && (
-          <FileCode className="size-3.5 shrink-0 text-muted-foreground" aria-label="Has script" />
-        )}
       </button>
     </li>
-  );
-}
-
-/** A single sprite button in the collapsed rail; hovering reveals the object name. */
-function RailItem({
-  obj,
-  active,
-  onOpen,
-}: {
-  obj: GameObject;
-  active: boolean;
-  onOpen: (obj: GameObject) => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={() => onOpen(obj)}
-          aria-label={obj.name}
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted",
-            active && "bg-muted ring-1 ring-ring",
-          )}
-        >
-          {obj.sprite ? (
-            <Sprite name={obj.sprite} className="size-6" lazy />
-          ) : (
-            <span className="size-6 shrink-0" aria-hidden="true" />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right">{obj.name}</TooltipContent>
-    </Tooltip>
   );
 }
 

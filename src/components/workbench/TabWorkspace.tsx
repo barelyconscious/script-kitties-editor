@@ -2,6 +2,7 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Save } 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ApiReferencePane } from "./ApiReferencePane";
 import { DataPane } from "./DataPane";
 import { ScriptPane } from "./ScriptPane";
 import { SaveBusProvider, useSaveBus } from "./saveBus";
@@ -24,8 +25,8 @@ export interface TabWorkspaceProps {
  * center, API right) defaulting to SCRIPT-ONLY. Owns its own save bus so panes
  * register against this tab instance and nothing leaks across tabs.
  *
- * The DATA pane (left) and SCRIPT pane (center) are real and register with the
- * bus; the API pane (right) is still a placeholder slot for a later task.
+ * The DATA pane (left) and SCRIPT pane (center) register with the bus; the API
+ * pane (right) is a self-contained reference browser that holds no bus state.
  */
 export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
   // For CREATURES the data pane (the full creature form) is the primary editing
@@ -105,10 +106,14 @@ export function TabWorkspace({ tab, hidden, scriptReach }: TabWorkspaceProps) {
             <ScriptPane scriptName={tab.scriptName} reach={scriptReach} />
           </section>
 
+          {/* The API pane owns its own header, search, and scroll region (built
+              h-full with a left border), so it bypasses the generic Pane chrome.
+              collapsible={false}: TabWorkspace owns expand/collapse via apiOpen,
+              so the component must not render its own rail toggle (double toggle). */}
           {apiOpen && (
-            <Pane label="API Reference" side="right" className="w-80 shrink-0 border-l">
-              <ApiPanePlaceholder />
-            </Pane>
+            <section className="w-80 shrink-0" aria-label="API Reference">
+              <ApiReferencePane collapsible={false} />
+            </section>
           )}
         </div>
       </div>
@@ -133,19 +138,6 @@ function Pane({
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Placeholder panes. The real DATA/SCRIPT panes are wired above; the API pane
-// lands in a later task.
-// ---------------------------------------------------------------------------
-
-function ApiPanePlaceholder() {
-  return (
-    <div className="flex h-full items-center justify-center text-center text-muted-foreground text-sm">
-      <span>API reference</span>
-    </div>
   );
 }
 

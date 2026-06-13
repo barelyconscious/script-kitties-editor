@@ -45,7 +45,8 @@ export function TabBar({ tabs, activeKey, dirtyByTab, onSelect, onClose, classNa
               role="tab"
               aria-selected={active}
               onClick={() => onSelect(key)}
-              className="max-w-48 truncate py-2"
+              className="max-w-48 truncate"
+              style={{ padding: '11px 0', }}
               title={tab.name}
             >
               {tab.name}

@@ -1,7 +1,7 @@
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { ABILITY_FIELDS, type Ability, loadAbilities, saveAbility } from "@/lib/entities/abilities";
 import { BIOGRAM_FIELDS, type Biogram, loadBiograms, saveBiogram } from "@/lib/entities/biograms";
-import { CHARM_FIELDS, type Charm, loadCharms, saveCharm } from "@/lib/entities/charms";
+import { CHARM_WORKBENCH_FIELDS, type Charm, loadCharms, saveCharm } from "@/lib/entities/charms";
 import { EFFECT_FIELDS, type Effect, loadEffects, saveEffect } from "@/lib/entities/effects";
 import { ITEM_FIELDS, type ItemRow, loadItemRows, saveItemRow } from "@/lib/items";
 import type { GameObjectType } from "./gameObjects";
@@ -30,7 +30,7 @@ const REGISTRY: Partial<Record<GameObjectType, DataDescriptor<{ id: string }>>> 
   Biogram: descriptor<Biogram>({ fields: BIOGRAM_FIELDS, load: loadBiograms, save: saveBiogram }),
   Effect: descriptor<Effect>({ fields: EFFECT_FIELDS, load: loadEffects, save: saveEffect }),
   Item: descriptor<ItemRow>({ fields: ITEM_FIELDS, load: loadItemRows, save: saveItemRow }),
-  Charm: descriptor<Charm>({ fields: CHARM_FIELDS, load: loadCharms, save: saveCharm }),
+  Charm: descriptor<Charm>({ fields: CHARM_WORKBENCH_FIELDS, load: loadCharms, save: saveCharm }),
 };
 
 // Erase the concrete T to the common bound. The cast is sound because the DATA

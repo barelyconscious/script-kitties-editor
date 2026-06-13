@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PlusIcon, Sparkles, XIcon } from "lucide-react";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
+import { IntegerInput } from "@/components/IntegerInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -146,6 +147,54 @@ function StatsEditor({
   );
 }
 
+/** "Fire Damage" → "Fire Dmg", "Special Defense" → "Sp. Def" — abbreviations so
+ * stat names fit the narrow Workbench data pane. */
+function shortStatLabel(key: string): string {
+  const label = STAT_META[key]?.label ?? key;
+  return label
+    .replace(/\bSpecial\b/, "Sp.")
+    .replace(/\bAttack\b/, "Atk")
+    .replace(/\bDefense\b/, "Def")
+    .replace(/\bDamage\b/, "Dmg");
+}
+
+/**
+ * Compact, fixed stats editor for the narrow Workbench DATA pane: EVERY known
+ * stat is always shown as icon + short label + integer spinner — no dropdowns,
+ * no add/remove. Stats left at 0 are stripped on save (see {@link saveCharm}),
+ * so the full list never bloats charms.json.
+ */
+function CompactStatsEditor({
+  value,
+  setValue,
+  disabled,
+}: {
+  value: Record<string, number>;
+  setValue: (v: Record<string, number>) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {STAT_KEYS.map((key) => {
+        const meta = STAT_META[key];
+        const Icon = meta?.Icon ?? Sparkles;
+        return (
+          <div key={key} className="flex items-center gap-2">
+            <Icon className={cn("size-4 shrink-0", meta?.color)} />
+            <span className="min-w-0 flex-1 truncate text-sm">{shortStatLabel(key)}</span>
+            <IntegerInput
+              className="h-8 w-16 shrink-0"
+              value={value[key] ?? 0}
+              disabled={disabled}
+              onValue={(n) => setValue({ ...value, [key]: n })}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // SINGLE SOURCE OF TRUTH for the charm edit schema (incl. the custom stats-map
 // renderer). Consumed by both the Data Tables page and the Workbench DATA pane.
 export const CHARM_FIELDS: EntityField<Charm>[] = [
@@ -167,3 +216,21 @@ export const CHARM_FIELDS: EntityField<Charm>[] = [
     ),
   },
 ];
+
+// Workbench DATA pane variant: identical to CHARM_FIELDS but swaps the roomy
+// dropdown stats editor for the compact, all-stats grid that fits the narrow
+// pane. The Data Tables dialog keeps CHARM_FIELDS (room for the dropdown form).
+export const CHARM_WORKBENCH_FIELDS: EntityField<Charm>[] = CHARM_FIELDS.map((field) =>
+  field.key === "stats"
+    ? {
+        ...field,
+        render: ({ value, setValue, disabled }) => (
+          <CompactStatsEditor
+            value={value as Record<string, number>}
+            setValue={(v) => setValue(v as Charm["stats"])}
+            disabled={disabled}
+          />
+        ),
+      }
+    : field,
+);

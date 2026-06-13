@@ -3,9 +3,11 @@ import "./App.css";
 import { NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { usePreference } from "./lib/preferences";
+import { RegistryProvider } from "./lib/registry";
 import { cn } from "./lib/utils";
 import CreatureEditor from "./pages/CreatureEditor";
 import DataTables from "./pages/DataTables";
+import Registry from "./pages/Registry";
 import Workbench from "./pages/Workbench";
 
 function App() {
@@ -55,29 +57,32 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen overflow-hidden">
-        <NavRail active={activeTool} onSelect={handleSelectTool} />
-        <main
-          className={cn(
-            "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
-            // The Workbench is full-bleed; the form-first tools keep their padding.
-            activeTool !== "workbench" && "p-4",
-          )}
-        >
-          {/* The Workbench stays mounted (hidden when inactive) so its open tabs
+      <RegistryProvider>
+        <div className="flex h-screen overflow-hidden">
+          <NavRail active={activeTool} onSelect={handleSelectTool} />
+          <main
+            className={cn(
+              "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
+              // The Workbench is full-bleed; the form-first tools keep their padding.
+              activeTool !== "workbench" && "p-4",
+            )}
+          >
+            {/* The Workbench stays mounted (hidden when inactive) so its open tabs
               and any unsaved drafts survive leaving and returning — every tab is
               already kept mounted-but-hidden inside it, so this just extends the
               same trick one level up. The form-first tools are cheap to rebuild
               from disk, so they mount on demand. */}
-          <div
-            className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "workbench" && "hidden")}
-          >
-            <Workbench objectListCollapsed={objectListCollapsed} />
-          </div>
-          {activeTool === "creature-editor" && <CreatureEditor />}
-          {activeTool === "data-tables" && <DataTables />}
-        </main>
-      </div>
+            <div
+              className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "workbench" && "hidden")}
+            >
+              <Workbench objectListCollapsed={objectListCollapsed} />
+            </div>
+            {activeTool === "creature-editor" && <CreatureEditor />}
+            {activeTool === "data-tables" && <DataTables />}
+            {activeTool === "registry" && <Registry />}
+          </main>
+        </div>
+      </RegistryProvider>
     </TooltipProvider>
   );
 }

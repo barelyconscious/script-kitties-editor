@@ -1,10 +1,10 @@
-import { Database, Hammer, PawPrint, Settings } from "lucide-react";
+import { Database, Hammer, Library, PawPrint, Settings } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type NavRailTool = "workbench" | "creature-editor" | "data-tables";
+export type NavRailTool = "workbench" | "creature-editor" | "data-tables" | "registry";
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -12,6 +12,7 @@ const TOOLS: { id: NavRailTool; label: string; icon: IconComponent }[] = [
   { id: "workbench", label: "Workbench", icon: Hammer },
   { id: "creature-editor", label: "Creature Editor", icon: PawPrint },
   { id: "data-tables", label: "Data Tables", icon: Database },
+  { id: "registry", label: "Registry", icon: Library },
 ];
 
 export function NavRail({

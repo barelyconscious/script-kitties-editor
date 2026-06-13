@@ -10,26 +10,16 @@ export type Effect = {
   tags: string[];
 };
 
-export const EFFECT_TAGS = [
-  "BENEFICIAL",
-  "BLEED",
-  "BUFF",
-  "BURN",
-  "DEBUFF",
-  "ELECTRIFIED",
-  "HARMFUL",
-  "HELPFUL",
-];
-
 // SINGLE SOURCE OF TRUTH for the effect edit schema. Consumed by both the Data
-// Tables page (EffectsDataTable) and the Workbench DATA pane.
+// Tables page (EffectsDataTable) and the Workbench DATA pane. Tags come from the
+// shared combat-tags Registry enum (see src/lib/registry).
 export const EFFECT_FIELDS: EntityField<Effect>[] = [
   { key: "id", label: "ID", kind: "text", readOnly: true },
   { key: "name", label: "Name", kind: "text" },
   { key: "sprite", label: "Sprite", kind: "sprite" },
   { key: "script", label: "Script", kind: "text" },
   { key: "description", label: "Description", kind: "textarea", full: true },
-  { key: "tags", label: "Tags", kind: "tags", options: EFFECT_TAGS, full: true },
+  { key: "tags", label: "Tags", kind: "tags", optionsFrom: "combatTags", full: true },
 ];
 
 export function loadEffects(): Promise<Effect[]> {

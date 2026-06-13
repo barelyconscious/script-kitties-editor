@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { type RegistryEnumKey, useRegistry } from "@/lib/registry";
 import { cn } from "@/lib/utils";
 import { SpritePicker } from "./SpritePicker";
 import { TagsInput } from "./TagsInput";
@@ -30,6 +31,12 @@ export type EntityField<T> = {
   full?: boolean;
   /** Choices for `select`, and the allowed set for `tags` (free-form if omitted). */
   options?: string[];
+  /**
+   * Source the choices from a Registry enum instead of a hardcoded `options`
+   * list. Resolved at render against the live registry, so editing the Registry
+   * tab updates this field's dropdown everywhere. Takes precedence over `options`.
+   */
+  optionsFrom?: RegistryEnumKey;
   /** Step for `number` fields. Use "any" to allow decimals (e.g. cost). */
   step?: number | "any";
   /** Required when `kind` is "custom". */
@@ -133,6 +140,13 @@ function FieldControl<T extends { id: string }>({
   const readOnly = disabled || field.readOnly;
   type V = T[Extract<keyof T, string>];
 
+  // `optionsFrom` (a Registry enum) wins over a hardcoded `options` list, so a
+  // field's choices track the live registry.
+  const { registry } = useRegistry();
+  const resolvedOptions = field.optionsFrom
+    ? registry[field.optionsFrom].map((o) => o.value)
+    : field.options;
+
   switch (field.kind) {
     case "textarea":
       return (
@@ -183,7 +197,7 @@ function FieldControl<T extends { id: string }>({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {(field.options ?? []).map((opt) => (
+            {(resolvedOptions ?? []).map((opt) => (
               <SelectItem key={opt} value={opt}>
                 {opt}
               </SelectItem>
@@ -192,10 +206,10 @@ function FieldControl<T extends { id: string }>({
         </Select>
       );
     case "tags":
-      return field.options ? (
+      return resolvedOptions ? (
         <TagsSelect
           value={value as string[]}
-          options={field.options}
+          options={resolvedOptions}
           disabled={readOnly}
           onChange={(next) => setValue(next as V)}
         />

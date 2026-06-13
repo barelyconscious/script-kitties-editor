@@ -1,0 +1,182 @@
+{
+  "combatTags": [
+    {
+      "value": "AREA",
+      "description": "Affects an area rather than a single target."
+    },
+    {
+      "value": "AUTO_TARGET",
+      "description": "Picks its target automatically."
+    },
+    {
+      "value": "BENEFICIAL",
+      "description": "A positive effect."
+    },
+    {
+      "value": "BLEED",
+      "description": "Inflicts bleeding damage over time."
+    },
+    {
+      "value": "BUFF",
+      "description": "Improves the target's stats."
+    },
+    {
+      "value": "BURN",
+      "description": "Inflicts burning damage over time."
+    },
+    {
+      "value": "CONJURE",
+      "description": "Summons or creates something."
+    },
+    {
+      "value": "CONTACT",
+      "description": "Requires physical contact."
+    },
+    {
+      "value": "DEBUFF",
+      "description": "Weakens the target's stats."
+    },
+    {
+      "value": "ELECTRIFIED",
+      "description": "Applies an electric effect."
+    },
+    {
+      "value": "HARMFUL",
+      "description": "Can hurt the target."
+    },
+    {
+      "value": "HELPFUL",
+      "description": "Can help the target."
+    },
+    {
+      "value": "PROJECTILE",
+      "description": "Fires a projectile."
+    },
+    {
+      "value": "REQUIRES_TARGET",
+      "description": "Must be aimed at a target."
+    },
+    {
+      "value": "SET_LOCATION",
+      "description": "Targets a chosen location."
+    }
+  ],
+  "itemTags": [
+    {
+      "value": "CONSUMABLE",
+      "description": "Used up when activated."
+    },
+    {
+      "value": "HARMFUL",
+      "description": "Can hurt its target."
+    },
+    {
+      "value": "HELPFUL",
+      "description": "Can help its target."
+    },
+    {
+      "value": "REQUIRES_TARGET",
+      "description": "Must be used on a target."
+    },
+    {
+      "value": "STACKABLE",
+      "description": "Multiple copies share one slot."
+    },
+    {
+      "value": "USABLE_IN_COMBAT",
+      "description": "Can be used during combat."
+    },
+    {
+      "value": "USABLE_OUTSIDE_COMBAT",
+      "description": "Can be used outside of combat."
+    }
+  ],
+  "abilityShapes": [
+    {
+      "value": "POINT",
+      "description": "A single point target."
+    },
+    {
+      "value": "SPHERE",
+      "description": "A spherical area."
+    },
+    {
+      "value": "CONE",
+      "description": "A cone-shaped area."
+    },
+    {
+      "value": "SELF",
+      "description": "Targets the caster."
+    }
+  ],
+  "rarities": [
+    {
+      "value": "POOR",
+      "description": "The lowest rarity tier."
+    },
+    {
+      "value": "COMMON",
+      "description": "A common item."
+    },
+    {
+      "value": "UNCOMMON",
+      "description": "Less common than usual."
+    },
+    {
+      "value": "RARE",
+      "description": "A rare find."
+    },
+    {
+      "value": "EPIC",
+      "description": "A very rare, powerful item."
+    },
+    {
+      "value": "UNIQUE",
+      "description": "One of a kind."
+    }
+  ],
+  "biomes": [
+    {
+      "value": "DESERT",
+      "description": "Arid, sandy biome."
+    },
+    {
+      "value": "FOREST",
+      "description": "Wooded biome."
+    },
+    {
+      "value": "MOUNTAINS",
+      "description": "High, rocky biome."
+    },
+    {
+      "value": "PLAINS",
+      "description": "Open grassland biome."
+    },
+    {
+      "value": "SWAMP",
+      "description": "Wet, marshy biome."
+    }
+  ],
+  "damageTypes": [
+    {
+      "value": "PHYSICAL",
+      "description": "Physical damage."
+    },
+    {
+      "value": "FIRE",
+      "description": "Fire damage."
+    },
+    {
+      "value": "WATER",
+      "description": "Water damage."
+    },
+    {
+      "value": "ELECTRIC",
+      "description": "Electric damage."
+    },
+    {
+      "value": "POISON",
+      "description": "Poison damage."
+    }
+  ]
+}

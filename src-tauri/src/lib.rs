@@ -8,6 +8,7 @@ use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
+use crate::commands::registry::{get_registry, save_registry};
 use crate::commands::scripts::{create_script, get_script, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
 use crate::config::{get_or_create_config, write_to_disk, EditorConfig};
@@ -18,6 +19,7 @@ mod commands;
 mod config;
 mod dal;
 mod model;
+mod registry;
 
 // macOS owns Cmd+W via the default menu's "Close Window" item, and that native
 // accelerator fires before the webview ever sees the keystroke — so the only way
@@ -206,6 +208,8 @@ pub fn run() {
             save_item,
             get_item_drops,
             save_item_drop,
+            get_registry,
+            save_registry,
             get_sprite,
             list_sprites,
             get_script,

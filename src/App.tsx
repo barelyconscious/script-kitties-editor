@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { usePreference } from "./lib/preferences";
 import { cn } from "./lib/utils";
 import CreatureEditor from "./pages/CreatureEditor";
 import DataTables from "./pages/DataTables";
@@ -9,6 +10,13 @@ import Workbench from "./pages/Workbench";
 
 function App() {
   const [activeTool, setActiveTool] = useState<NavRailTool>("workbench");
+
+  // Whether the Workbench's object-list pane is collapsed. Held in the central
+  // preferences layer so it survives tool switches now and can move to
+  // localStorage later without touching this component.
+  const [objectListCollapsed, setObjectListCollapsed] = usePreference(
+    "workbench.objectListCollapsed",
+  );
 
   // Safety net for Ctrl+W on Windows/Linux webviews (WebView2 / WebKitGTK),
   // where the close shortcut can be delivered to the page rather than a native
@@ -30,9 +38,20 @@ function App() {
   // The Workbench stays MOUNTED across tool switches (see below), so leaving it
   // with unsaved drafts no longer discards anything — no leave-the-tool guard is
   // needed. The app-close/reload warning still lives inside the Workbench.
-  const handleSelectTool = useCallback((tool: NavRailTool) => {
-    setActiveTool(tool);
-  }, []);
+  //
+  // Clicking the Workbench rail icon while ALREADY in the Workbench toggles its
+  // object-list pane instead of re-navigating; from any other tool it just
+  // switches in (leaving the pane in whatever state it was last left).
+  const handleSelectTool = useCallback(
+    (tool: NavRailTool) => {
+      if (tool === "workbench" && activeTool === "workbench") {
+        setObjectListCollapsed((v) => !v);
+        return;
+      }
+      setActiveTool(tool);
+    },
+    [activeTool, setObjectListCollapsed],
+  );
 
   return (
     <TooltipProvider>
@@ -53,7 +72,7 @@ function App() {
           <div
             className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "workbench" && "hidden")}
           >
-            <Workbench />
+            <Workbench objectListCollapsed={objectListCollapsed} />
           </div>
           {activeTool === "creature-editor" && <CreatureEditor />}
           {activeTool === "data-tables" && <DataTables />}

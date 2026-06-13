@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiReferencePane } from "@/components/workbench/ApiReferencePane";
 import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirtyMap";
 import type { GameObject, GameObjectType } from "@/components/workbench/gameObjects";
@@ -14,6 +16,7 @@ import {
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
 import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workbench/tabs";
+import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 
 export interface WorkbenchProps {
@@ -23,6 +26,13 @@ export interface WorkbenchProps {
    * switch, so the guard must live above it.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Whether the object-list pane is collapsed. Owned by {@link App} (via the
+   * preferences layer) and toggled by the Workbench rail icon, so it persists
+   * across tool switches. Hidden (not unmounted) so the list keeps its search
+   * text and per-group collapse state.
+   */
+  objectListCollapsed?: boolean;
 }
 
 /**
@@ -40,7 +50,7 @@ export interface WorkbenchProps {
  * three unsaved-changes guards: closing a dirty tab, leaving the Workbench tool
  * (handled in {@link App} via `onDirtyChange`), and closing/reloading the app.
  */
-export default function Workbench({ onDirtyChange }: WorkbenchProps) {
+export default function Workbench({ onDirtyChange, objectListCollapsed }: WorkbenchProps) {
   const [objects, setObjects] = useState<GameObject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -174,7 +184,14 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
         activeKey={activeKey}
         onOpen={handleOpen}
         onNew={handleNew}
+        className={cn(objectListCollapsed && "hidden")}
       />
+
+      {/* When the list is collapsed, leave a slim labelled rail in its place so
+          it's obvious the panel exists and how to bring it back. */}
+      {objectListCollapsed && (
+        <CollapsedListRail onShow={() => setPreference("workbench.objectListCollapsed", false)} />
+      )}
 
       <NewObjectModal
         open={newOpen}
@@ -234,5 +251,32 @@ export default function Workbench({ onDirtyChange }: WorkbenchProps) {
         <ApiReferencePane defaultCollapsed />
       </div>
     </div>
+  );
+}
+
+/**
+ * The slim placeholder shown where the object list was, while it's collapsed.
+ * The whole strip is the click target (with a chevron + vertical label) so it's
+ * obvious the list is hidden and one click brings it back — also reachable via
+ * the Workbench rail icon.
+ */
+function CollapsedListRail({ onShow }: { onShow: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Show object list"
+          onClick={onShow}
+          className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-r bg-sidebar py-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <PanelLeftOpen className="size-4 shrink-0" />
+          <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
+            Objects
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">Show object list</TooltipContent>
+    </Tooltip>
   );
 }

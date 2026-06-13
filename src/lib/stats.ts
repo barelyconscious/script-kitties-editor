@@ -1,7 +1,5 @@
 import {
-  Brain,
   Clover,
-  Droplet,
   Flame,
   Heart,
   type LucideIcon,
@@ -32,7 +30,6 @@ export const STAT_META: Record<string, { label: string; Icon: LucideIcon; color:
   specialDefense: { label: "Special Defense", Icon: ShieldHalf, color: "text-violet-300" },
   speed: { label: "Speed", Icon: Wind, color: "text-cyan-400" },
   luck: { label: "Luck", Icon: Clover, color: "text-green-400" },
-  memory: { label: "Memory", Icon: Brain, color: "text-fuchsia-400" },
   fireDamage: { label: "Fire Damage", Icon: Flame, color: "text-orange-400" },
   fireDefense: { label: "Fire Defense", Icon: Shield, color: "text-orange-300" },
   frostDamage: { label: "Frost Damage", Icon: Snowflake, color: "text-sky-400" },
@@ -41,7 +38,6 @@ export const STAT_META: Record<string, { label: string; Icon: LucideIcon; color:
   lightningDefense: { label: "Lightning Defense", Icon: Shield, color: "text-amber-300" },
   poisonDamage: { label: "Poison Damage", Icon: Skull, color: "text-green-500" },
   poisonDefense: { label: "Poison Defense", Icon: Shield, color: "text-emerald-400" },
-  waterDamage: { label: "Water Damage", Icon: Droplet, color: "text-blue-400" },
 };
 
 /** All known stat keys, in canonical display order. */
@@ -49,8 +45,7 @@ export const STAT_KEYS = Object.keys(STAT_META);
 
 /**
  * The stat block every creature carries. A fixed, ordered set so the editor's
- * grid is consistent across creatures (missing keys default to 0). Excludes
- * charm-only stats (memory, water) the creature data never uses.
+ * grid is consistent across creatures (missing keys default to 0).
  */
 export const CREATURE_STATS = [
   "health",

@@ -9,18 +9,42 @@ import {
   useRegistry,
 } from "@/lib/registry";
 
-/** The enum sections, in display order, with editor-facing copy. */
-const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string }[] = [
+/**
+ * The enum sections, in display order, with editor-facing copy. `readOnly`
+ * sections are fixed by the game (hardcoded in C++, not tweakable in Lua) — they
+ * are shown for reference but can't be edited. Only the tag lists are editable.
+ */
+const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string; readOnly?: boolean }[] = [
   {
     key: "combatTags",
     title: "Combat Tags",
     blurb: "Shared by abilities, biograms, and effects.",
   },
   { key: "itemTags", title: "Item Tags", blurb: "Available on items." },
-  { key: "abilityShapes", title: "Ability Shapes", blurb: "Targeting shapes for abilities." },
-  { key: "rarities", title: "Rarities", blurb: "Item rarity tiers — order matters (low → high)." },
-  { key: "biomes", title: "Biomes", blurb: "World biomes for item drops." },
-  { key: "damageTypes", title: "Damage Types", blurb: "Referenced by Lua scripts." },
+  {
+    key: "abilityShapes",
+    title: "Ability Shapes",
+    blurb: "Targeting shapes for abilities. Fixed by the game.",
+    readOnly: true,
+  },
+  {
+    key: "rarities",
+    title: "Rarities",
+    blurb: "Item rarity tiers (low → high). Fixed by the game.",
+    readOnly: true,
+  },
+  {
+    key: "biomes",
+    title: "Biomes",
+    blurb: "World biomes for item drops. Fixed by the game.",
+    readOnly: true,
+  },
+  {
+    key: "damageTypes",
+    title: "Damage Types",
+    blurb: "Referenced by Lua scripts. Fixed by the game.",
+    readOnly: true,
+  },
 ];
 
 /**
@@ -123,11 +147,12 @@ export default function Registry() {
           <p className="text-muted-foreground text-sm">Loading…</p>
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {SECTIONS.map(({ key, title, blurb }) => (
+            {SECTIONS.map(({ key, title, blurb, readOnly }) => (
               <EnumSection
                 key={key}
                 title={title}
                 blurb={blurb}
+                readOnly={readOnly}
                 entries={draft[key]}
                 onChange={(entries) => setSection(key, entries)}
               />
@@ -144,11 +169,13 @@ function EnumSection({
   blurb,
   entries,
   onChange,
+  readOnly = false,
 }: {
   title: string;
   blurb: string;
   entries: RegistryEntry[];
   onChange: (entries: RegistryEntry[]) => void;
+  readOnly?: boolean;
 }) {
   function update(index: number, patch: Partial<RegistryEntry>) {
     onChange(entries.map((e, i) => (i === index ? { ...e, ...patch } : e)));
@@ -162,9 +189,16 @@ function EnumSection({
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
-      <div>
-        <h2 className="font-medium text-sm">{title}</h2>
-        <p className="text-muted-foreground text-xs">{blurb}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="font-medium text-sm">{title}</h2>
+          <p className="text-muted-foreground text-xs">{blurb}</p>
+        </div>
+        {readOnly && (
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-medium text-[0.65rem] text-muted-foreground uppercase tracking-wide">
+            Read-only
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -177,6 +211,7 @@ function EnumSection({
               className="w-40 shrink-0 font-mono text-xs uppercase"
               placeholder="VALUE"
               value={entry.value}
+              disabled={readOnly}
               onChange={(e) => update(i, { value: e.currentTarget.value })}
             />
             <Input
@@ -184,24 +219,29 @@ function EnumSection({
               className="min-w-0 flex-1 text-sm"
               placeholder="Description"
               value={entry.description}
+              disabled={readOnly}
               onChange={(e) => update(i, { description: e.currentTarget.value })}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Remove ${entry.value || "value"}`}
-              onClick={() => remove(i)}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+            {!readOnly && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${entry.value || "value"}`}
+                onClick={() => remove(i)}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
           </div>
         ))}
       </div>
 
-      <Button type="button" variant="outline" size="sm" className="self-start" onClick={add}>
-        <Plus className="size-4" /> Add value
-      </Button>
+      {!readOnly && (
+        <Button type="button" variant="outline" size="sm" className="self-start" onClick={add}>
+          <Plus className="size-4" /> Add value
+        </Button>
+      )}
     </section>
   );
 }

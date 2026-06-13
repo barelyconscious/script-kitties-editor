@@ -295,7 +295,7 @@ function Breadcrumb({
   onCrumb: (depth: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 border-b px-2 py-1.5 text-xs">
+    <div className="flex items-center gap-1 border-b px-2 py-1.5 text-sm" style={{ padding: '8px', }}>
       <button
         type="button"
         title="Back to all"
@@ -317,7 +317,7 @@ function Breadcrumb({
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: a drill path is an ordered stack that can repeat a type name; the depth index is the stable identity.
             <span key={`${item.name}-${i}`} className="flex items-center gap-0.5">
-              <ChevronRight className="size-3 text-muted-foreground/60" />
+              <ChevronRight className="size-3.5 text-muted-foreground/60" />
               {isLast ? (
                 <span className="font-medium font-mono text-foreground">{item.name}</span>
               ) : (

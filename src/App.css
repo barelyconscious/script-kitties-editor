@@ -21,10 +21,10 @@
   }
 
   /* Overlay-style scrollbars: thin, rounded, and transparent until the user is
-     actively scrolling (the `is-scrolling` class is toggled on <html> by
-     initAutohideScrollbars) or hovering the scrollable area. Mirrors macOS
-     autohide behavior on Windows/WebView2, and applies to every scroll
-     container in the app. */
+     actively scrolling the container (the `is-scrolling` class is toggled on
+     the scrolled element by initAutohideScrollbars) or hovering it. Mirrors
+     macOS autohide behavior on Windows/WebView2, and applies to every scroll
+     container in the app — but only the one in use reveals its bar. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -44,7 +44,7 @@
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
-  html.is-scrolling ::-webkit-scrollbar-thumb,
+  .is-scrolling::-webkit-scrollbar-thumb,
   *:hover::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
   }

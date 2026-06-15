@@ -34,7 +34,7 @@ Tauri 2 desktop app — an editor/inspector for the `worlds-cpp` game's data fil
 ## Patterns & conventions
 
 - **Schema-driven tables**: a data-table page supplies `columns` + a `fields` schema (`EntityField`) + Tauri command names (or custom `load`/`onSave` hooks) to `EntityDataTable`; the dialog renders the form from the schema. To add an entity table, copy an existing `*DataTable.tsx`.
-- **Joins**: `ItemsDataTable` joins `items.json` ⋈ `itemDropTable.json` by `id` (loot/economy/biome). Saving writes both records. Creatures have a parallel `creatureSpawnTable.json` (not yet surfaced in the editor).
+- **Joins**: `ItemsDataTable` joins `items.json` ⋈ `itemDropTable.json` by `id` (loot/economy/biome). Saving writes both records.
 - **Stat projection** (`src/lib/creature.ts`): linear — `value(L) = base + gainPerLevel·(L−1)`. The chart compares a creature against the population's per-level average and max (population includes the live draft). `MAX_LEVEL = 25`.
 - **Save normalization**: zero-valued entries are stripped from sparse maps before writing (charm `stats`, creature `statGainsPerLevel`) so untouched stats don't churn files; creature `baseStats` keeps its full ordered block.
 

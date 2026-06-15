@@ -12,6 +12,8 @@ pub enum GameObjectType {
     Charm,
     Item,
     Creature,
+    Bundle,
+    Pack,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,12 +126,84 @@ pub struct Creature {
     pub sprite: String,
     pub description: String,
     pub ai_controller: String, // shoulda been script
+    // Gacha rarity (a Registry `rarities` value). Optional so pre-existing
+    // creatures.json entries deserialize and script-less round-trips stay clean.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rarity: String,
     pub base_stats: BTreeMap<String, i32>,
     pub base_abilities: Vec<String>,
     #[serde(default)]
     pub stat_gains_per_level: BTreeMap<String, i32>,
     #[serde(default)]
     pub abilities_by_level: Vec<CreatureLevelUp>,
+}
+
+/// A gacha **bundle**: a named, customizable collection of creatures (seasons &
+/// promotions). Each member may override a handful of the creature's draw-time
+/// attributes; everything else (growth curve, per-level unlocks, id, AI script)
+/// comes from the base creature.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bundle {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sprite: String,
+    #[serde(default)]
+    pub creatures: Vec<BundleCreature>,
+}
+
+/// One member of a `Bundle`: a reference to a creature by `id` plus the optional
+/// per-creature overrides applied when the creature is drawn from this bundle.
+/// Empty overrides are skipped on save so untouched members stay minimal.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleCreature {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sprite_override: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub base_stats_overrides: BTreeMap<String, i32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abilities_override: Vec<String>,
+}
+
+/// A gacha **pack**: a card pack whose `slots` each define a draw pool. The C++
+/// draw system consumes these; the editor just authors them.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pack {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sprite: String,
+    #[serde(default)]
+    pub slots: Vec<PackSlot>,
+}
+
+/// One card slot in a `Pack`. For now a slot carries only its `drawRules`; the
+/// design's "guaranteed creature" slot variant is deferred.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackSlot {
+    pub draw_rules: DrawRules,
+}
+
+/// The weighted draw configuration for a `PackSlot`: which bundles can be drawn
+/// from (by weight) and the rarity distribution (weights that should sum to 1).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrawRules {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bundles: BTreeMap<String, f64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rarity: BTreeMap<String, f64>,
 }
 
 /// One entry in the game's `assets.json` manifest. Maps a logical asset name

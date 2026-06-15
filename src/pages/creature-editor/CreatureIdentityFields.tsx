@@ -2,8 +2,16 @@ import { useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { Creature } from "@/lib/creature";
+import { useEnumValues } from "@/lib/registry";
 
 /**
  * Controlled grid of a creature's identity fields — name, sprite, description,
@@ -32,6 +40,7 @@ export function CreatureIdentityFields({
   // Portal target for the sprite picker's popover, so it scrolls within the
   // surrounding host (dialog or pane) — same pattern as EntityFieldsForm.
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+  const rarities = useEnumValues("rarities");
   const set = <K extends keyof Creature>(key: K, value: Creature[K]) =>
     onChange({ ...creature, [key]: value });
 
@@ -59,6 +68,27 @@ export function CreatureIdentityFields({
             container={portalContainer}
             onChange={(name) => set("sprite", name)}
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="creature-rarity" className="text-xs">
+            Rarity
+          </Label>
+          <Select
+            value={creature.rarity || undefined}
+            disabled={disabled}
+            onValueChange={(value) => set("rarity", value)}
+          >
+            <SelectTrigger id="creature-rarity">
+              <SelectValue placeholder="Choose rarity…" />
+            </SelectTrigger>
+            <SelectContent>
+              {rarities.map((r) => (
+                <SelectItem key={r} value={r}>
+                  {r}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {includeScript && (
           <div className="col-span-2 flex flex-col gap-1.5">

@@ -11,6 +11,8 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
     let creatures = dal.get_creatures()?;
     let effects = dal.get_effects()?;
     let items = dal.get_items()?;
+    let bundles = dal.get_bundles()?;
+    let packs = dal.get_packs()?;
 
     let mut all = Vec::with_capacity(
         abilities.len()
@@ -18,7 +20,9 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             + charms.len()
             + creatures.len()
             + effects.len()
-            + items.len(),
+            + items.len()
+            + bundles.len()
+            + packs.len(),
     );
 
     for a in abilities.iter() {
@@ -86,6 +90,30 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             sprite: i.sprite.clone(),
             script: i.script.clone(),
             description: i.description.clone(),
+        });
+    }
+
+    for b in bundles.iter() {
+        all.push(GameObject {
+            object_type: GameObjectType::Bundle,
+            id: b.id.clone(),
+            name: b.name.clone(),
+            sprite: b.sprite.clone(),
+            // Bundles are script-less.
+            script: String::new(),
+            description: b.description.clone(),
+        });
+    }
+
+    for p in packs.iter() {
+        all.push(GameObject {
+            object_type: GameObjectType::Pack,
+            id: p.id.clone(),
+            name: p.name.clone(),
+            sprite: p.sprite.clone(),
+            // Packs are script-less.
+            script: String::new(),
+            description: p.description.clone(),
         });
     }
 

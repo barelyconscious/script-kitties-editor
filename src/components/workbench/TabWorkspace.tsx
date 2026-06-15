@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BundleEditorPane } from "./BundleEditorPane";
 import { CreatureChartPane } from "./CreatureChartPane";
+import { CreatureDataPane } from "./CreatureDataPane";
+import { CreatureTabProvider } from "./creatureTab";
 import { DataPane } from "./DataPane";
 import { PackEditorPane } from "./PackEditorPane";
 import { ScriptPane } from "./ScriptPane";
@@ -238,30 +240,23 @@ export function TabWorkspace({
                   <PackEditorPane id={tab.id} />
                 )}
               </section>
-            ) : (
-              <>
+            ) : isCreature ? (
+              // Creatures share ONE draft across both panes via the provider, so
+              // the stats graph reflects live (unsaved) edits and a focused stat
+              // box drives the chart. The provider is always mounted (outside the
+              // dataOpen / view toggles) so the draft + save target never unmount.
+              <CreatureTabProvider id={tab.id}>
                 {dataOpen && (
-                  <Pane
-                    label="Data"
-                    side="left"
-                    // The creature form (stat grids, chart, unlocks) is much taller
-                    // and wider than the flat-type field grid, so give it more room.
-                    className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
-                  >
-                    <DataPane objectType={tab.objectType} id={tab.id} />
+                  // The creature form (stat grids, unlocks) is much taller and
+                  // wider than the flat-type field grid, so give it more room.
+                  <Pane label="Data" side="left" className="w-[28rem] shrink-0 border-r">
+                    <CreatureDataPane />
                   </Pane>
                 )}
 
-                {/* The center region. For creatures it flips between the script
-                    editor and the stats graph; every other type only ever shows
-                    the script. The Script pane owns its own header (names the file
-                    + reach) and a full-bleed editor, so it bypasses the generic
-                    Pane chrome. min-h-0 + overflow-hidden BOUND this flex item so a
-                    tall Monaco document scrolls INSIDE the editor instead of growing
-                    the section (flex items default to min-height:auto). */}
                 <section
                   className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                  aria-label={isCreature && creatureView === "chart" ? "Stats graph" : "Script"}
+                  aria-label={creatureView === "chart" ? "Stats graph" : "Script"}
                 >
                   {/* Keep the script editor MOUNTED (hidden) when the chart is
                       shown so its unsaved edits and save-bus registration survive
@@ -269,7 +264,7 @@ export function TabWorkspace({
                   <div
                     className={cn(
                       "flex min-h-0 flex-1 flex-col",
-                      isCreature && creatureView === "chart" && "hidden",
+                      creatureView === "chart" && "hidden",
                     )}
                   >
                     <ScriptPane
@@ -278,7 +273,31 @@ export function TabWorkspace({
                       alsoOpenElsewhere={alsoOpenElsewhere}
                     />
                   </div>
-                  {isCreature && creatureView === "chart" && <CreatureChartPane id={tab.id} />}
+                  {creatureView === "chart" && <CreatureChartPane />}
+                </section>
+              </CreatureTabProvider>
+            ) : (
+              <>
+                {dataOpen && (
+                  <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
+                    <DataPane objectType={tab.objectType} id={tab.id} />
+                  </Pane>
+                )}
+
+                {/* The Script pane owns its own header (names the file + reach) and
+                    a full-bleed editor, so it bypasses the generic Pane chrome.
+                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
+                    document scrolls INSIDE the editor instead of growing the section
+                    (flex items default to min-height:auto). */}
+                <section
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                  aria-label="Script"
+                >
+                  <ScriptPane
+                    scriptName={tab.scriptName}
+                    reach={scriptReach}
+                    alsoOpenElsewhere={alsoOpenElsewhere}
+                  />
                 </section>
               </>
             )}

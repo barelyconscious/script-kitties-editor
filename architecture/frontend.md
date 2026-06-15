@@ -21,9 +21,11 @@ A **`TabWorkspace`** body depends on the object type:
 - **Flat entities** (Ability, Biogram, Effect, Item, Charm) → a narrow **data pane**
   (schema-driven form from the entity's `EntityField[]`) plus a **script pane** (Monaco
   editor for the object's `.lua` script).
-- **Creature** → the bespoke `CreatureDataPane` (embeds the real `CreatureForm`) on the
-  left, and a toolbar **Script/Stats** toggle that flips the center between the script editor
-  and the read-only `CreatureChartPane`.
+- **Creature** → a `CreatureTabProvider` shares one draft across both panes: the bespoke
+  `CreatureDataPane` (the real `CreatureForm`) on the left, and a toolbar **Script/Stats**
+  toggle flipping the center between the script editor and the read-only `CreatureChartPane`.
+  Because the chart reads the live draft, it tracks unsaved edits, and focusing a stat box
+  switches the charted stat.
 - **Bundle / Pack** → a **bespoke full-width pane** (`BundleEditorPane` / `PackEditorPane`),
   no script pane — these are script-less, visually richer editors.
 
@@ -52,10 +54,14 @@ Lives entirely inside the Workbench (the standalone Creature Editor tool was rem
 The reusable parts are in `src/pages/creature-editor/`: `CreatureForm` is the editing
 surface — the **stat/growth grid** (`StatGrowthTable`), base abilities, and per-level
 unlocks (`AbilitiesByLevelEditor`); identity fields (name/sprite/rarity/description) live
-in `CreatureIdentityFields`. A creature tab shows the form in its `CreatureDataPane` (left,
-chart suppressed) and lets the center region toggle between the aiController **script** and
-the **progression chart** (`ProgressionChart`, projected stats vs. the population
-average/max) via `CreatureChartPane`.
+in `CreatureIdentityFields`. A creature tab wraps both panes in `CreatureTabProvider`
+(`src/components/workbench/creatureTab.tsx`), which owns the shared draft, population, and
+the `"data"` save target. `CreatureDataPane` (left, chart suppressed) edits that draft; the
+center region toggles between the aiController **script** and the **progression chart**
+(`ProgressionChart`, projected stats vs. population average/max) via `CreatureChartPane`,
+which reads the same live draft — so the chart reflects unsaved edits and follows the
+focused stat box. The provider is always mounted, so the draft survives hiding the Data pane
+or switching to the chart.
 
 ## Data Tables
 

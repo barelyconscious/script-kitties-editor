@@ -1,7 +1,6 @@
 import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EntityFieldsForm } from "@/components/data-tables/EntityFieldsForm";
-import { CreatureDataPane } from "./CreatureDataPane";
 import { type DataDescriptor, dataDescriptorFor, selectById } from "./dataRegistry";
 import type { GameObjectType } from "./gameObjects";
 import { useSaveTarget } from "./saveBus";
@@ -16,9 +15,8 @@ import { useSaveTarget } from "./saveBus";
  * through the type's `save` (the SAME function the Data Tables page uses, so
  * validation/normalization is identical) then advances the baseline.
  *
- * Creatures have no descriptor — they embed the bespoke {@link CreatureDataPane}
- * (the real CreatureForm) instead of a raw field editor, so there is one source
- * of truth and no normalization drift.
+ * Creatures don't come through here — the Workbench routes them to the bespoke
+ * creature panes (which share a draft via `CreatureTabProvider`) directly.
  */
 export interface DataPaneProps {
   objectType: GameObjectType;
@@ -27,11 +25,6 @@ export interface DataPaneProps {
 }
 
 export function DataPane({ objectType, id }: DataPaneProps) {
-  // Creatures have no schema descriptor: embed the bespoke creature form, which
-  // wires itself to the save bus and owns its own load/draft/save.
-  if (objectType === "Creature") {
-    return <CreatureDataPane id={id} />;
-  }
   const descriptor = dataDescriptorFor(objectType);
   if (!descriptor) {
     // Any future descriptor-less, non-creature type lands here.

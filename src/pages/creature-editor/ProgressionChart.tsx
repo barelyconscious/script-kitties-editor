@@ -30,19 +30,35 @@ const CHART_CONFIG = {
  * Projects one stat across levels 1..MAX_LEVEL for the edited creature and plots
  * it against the population average and max, so growth can be balanced visually.
  * Reads live from the in-progress edit, so tweaking base/gain moves the line.
+ *
+ * The selected stat is optionally CONTROLLED: pass `stat` + `onStatChange` to
+ * drive it from outside (e.g. focusing a stat box in the Workbench). Left
+ * uncontrolled (no `stat`), it manages its own selection, defaulting to the
+ * first growing stat.
  */
 export function ProgressionChart({
   creature,
   population,
+  stat: statProp,
+  onStatChange,
 }: {
   creature: Creature;
   population: Creature[];
+  /** Controlled selection. null/undefined ⇒ the chart picks its own default. */
+  stat?: string | null;
+  onStatChange?: (stat: string) => void;
 }) {
-  // Default to the stat that actually grows, falling back to attack.
-  const [stat, setStat] = useState<string>(() => {
+  // Default to the stat that actually grows, falling back to attack. Used only
+  // while uncontrolled (or before a controlled value is set).
+  const [fallback, setFallback] = useState<string>(() => {
     const growing = CREATURE_STATS.find((s) => (creature.statGainsPerLevel[s] ?? 0) > 0);
     return growing ?? "attack";
   });
+  const stat = statProp != null && statProp.length > 0 ? statProp : fallback;
+  const setStat = (next: string) => {
+    if (onStatChange) onStatChange(next);
+    else setFallback(next);
+  };
 
   const data = useMemo(
     () => buildProgression(creature, population, stat),

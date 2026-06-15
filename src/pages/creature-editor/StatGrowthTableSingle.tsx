@@ -18,10 +18,13 @@ export function StatGrowthTableSingle({
   creature,
   onChange,
   disabled,
+  onStatFocus,
 }: {
   creature: Creature;
   onChange: (next: Creature) => void;
   disabled?: boolean;
+  /** Called with a stat key when its Base/Gain box gains focus. */
+  onStatFocus?: (stat: string) => void;
 }) {
   function setBase(stat: string, n: number) {
     onChange({ ...creature, baseStats: { ...creature.baseStats, [stat]: n } });
@@ -65,6 +68,7 @@ export function StatGrowthTableSingle({
                     value={base}
                     min={0}
                     onValue={(n) => setBase(stat, n)}
+                    onFocus={() => onStatFocus?.(stat)}
                     disabled={disabled}
                     className="ml-auto h-8 w-20 text-right"
                   />
@@ -74,6 +78,7 @@ export function StatGrowthTableSingle({
                     value={gain}
                     min={0}
                     onValue={(n) => setGain(stat, n)}
+                    onFocus={() => onStatFocus?.(stat)}
                     disabled={disabled}
                     className="ml-auto h-8 w-20 text-right"
                   />

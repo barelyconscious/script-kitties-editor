@@ -1,66 +1,30 @@
 import { FileWarning, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { type Creature, loadCreatures } from "@/lib/creature";
+import { populationWithDraft } from "@/lib/creature";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { ProgressionChart } from "@/pages/creature-editor/ProgressionChart";
+import { useCreatureTab } from "./creatureTab";
+
+/** Coalesce a burst of stat scrubbing into one chart redraw (ms). */
+const CHART_DEBOUNCE_MS = 150;
 
 /**
  * The STATS-GRAPH view for a CREATURE tab — the alternate face of the center
  * region, toggled against the {@link ScriptPane} from the tab toolbar. It plots
  * this creature's projected growth against the population average/max (the same
- * {@link ProgressionChart} the standalone Creature Editor leads with).
+ * {@link ProgressionChart} the standalone Creature Editor led with).
  *
- * It owns no draft and registers no save target: the editable surface is the
- * Data pane (left). This pane loads the creature population from disk and is
- * mounted only while the chart is shown, so each switch-to-chart reflects the
- * latest SAVED values. (Unsaved edits in the Data pane aren't mirrored here —
- * the two panes hold independent state by design.)
+ * A pure consumer of {@link CreatureTabProvider}: it reads the LIVE draft, so the
+ * lines move as you edit stats in the Data pane (even unsaved), and it reads
+ * `activeStat` so focusing a stat box switches the plotted stat. It owns no draft
+ * and registers no save target — the editable surface is the Data pane.
  */
-export interface CreatureChartPaneProps {
-  /** Primary key of the creature being charted. */
-  id: string;
-}
-
-export function CreatureChartPane({ id }: CreatureChartPaneProps) {
-  // Remount on id change so the loaded population never leaks across tabs.
-  return <CreatureChart key={id} id={id} />;
-}
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "notFound" }
-  | { kind: "loaded" };
-
-function CreatureChart({ id }: { id: string }) {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
-  // The whole population drives the chart's average/max; `creature` is this one,
-  // selected from it (so it's already part of the population — no draft to swap).
-  const [population, setPopulation] = useState<Creature[]>([]);
-  const [creature, setCreature] = useState<Creature | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ kind: "loading" });
-    loadCreatures()
-      .then((creatures) => {
-        if (cancelled) return;
-        const found = creatures.find((c) => c.id === id) ?? null;
-        if (!found) {
-          setState({ kind: "notFound" });
-          return;
-        }
-        setPopulation(creatures);
-        setCreature(found);
-        setState({ kind: "loaded" });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setState({ kind: "error", message: errorMessage(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+export function CreatureChartPane() {
+  const { state, draft, population, activeStat, setActiveStat } = useCreatureTab();
+  // Feed the chart a debounced draft so rapid scrubbing (held arrow key, scroll
+  // wheel) coalesces into one Recharts redraw; the Data pane stays instant since
+  // it reads the live draft directly. (Stat selection stays instant — it's a
+  // single discrete action, not a burst.)
+  const debouncedDraft = useDebouncedValue(draft, CHART_DEBOUNCE_MS);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -79,17 +43,23 @@ function CreatureChart({ id }: { id: string }) {
             <span className="font-medium text-foreground">Could not load creatures.</span>
             <span className="text-xs">{state.message}</span>
           </PaneStatus>
-        ) : state.kind === "notFound" || !creature ? (
+        ) : state.kind === "notFound" || !draft ? (
           <PaneStatus>
             <FileWarning className="size-5 text-amber-500" />
-            <span>No creature found for “{id}”.</span>
+            <span>This creature could not be found.</span>
           </PaneStatus>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-muted-foreground text-xs">
-              Projected growth versus the average and max across all creatures.
+              Projected growth versus the average and max across all creatures — updates live as you
+              edit stats.
             </p>
-            <ProgressionChart creature={creature} population={population} />
+            <ProgressionChart
+              creature={debouncedDraft ?? draft}
+              population={populationWithDraft(population, debouncedDraft ?? draft)}
+              stat={activeStat}
+              onStatChange={setActiveStat}
+            />
           </div>
         )}
       </div>
@@ -103,12 +73,6 @@ function PaneStatus({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  return String(err);
 }
 
 export default CreatureChartPane;

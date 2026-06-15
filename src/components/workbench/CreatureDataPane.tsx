@@ -1,105 +1,23 @@
-import { invoke } from "@tauri-apps/api/core";
 import { FileWarning, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { type Creature, loadCreatures, populationWithDraft } from "@/lib/creature";
-import { useCreatureDraft } from "@/lib/useCreatureDraft";
-import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
+import { populationWithDraft } from "@/lib/creature";
 import { CreatureForm } from "@/pages/creature-editor/CreatureForm";
 import { CreatureIdentityFields } from "@/pages/creature-editor/CreatureIdentityFields";
-import { useSaveTarget } from "./saveBus";
-
-type Ability = { id: string; name: string };
+import { useCreatureTab } from "./creatureTab";
 
 /**
- * The DATA pane for a CREATURE tab: embeds the SAME {@link CreatureForm} the
- * standalone Creature Editor uses (stat grids, per-level unlocks, base
- * abilities) and plugs it into the per-tab save bus via the lifted
- * {@link useCreatureDraft} hook. The Workbench is the code-and-data lens, so
- * this pane passes `showProgressionChart={false}` — the balance chart belongs
- * to the standalone Creature Editor, not here.
+ * The DATA pane for a CREATURE tab: identity fields plus the SAME
+ * {@link CreatureForm} the standalone editor used (stat grid, per-level unlocks,
+ * base abilities). State lives in the surrounding {@link CreatureTabProvider} —
+ * this pane is a pure consumer, so its edits flow straight to the shared draft
+ * the Stats-graph pane reads. Focusing a stat box reports the stat up via
+ * `setActiveStat` so the chart follows.
  *
- * One source of truth: there is NO bespoke field editor and NO second
- * normalization path here — the zero-stripping save lives only in
- * `saveCreature` (called inside the hook). Editing marks the bus's "data"
- * target dirty; saving routes through that same path and advances the local
- * baseline so dirty clears.
+ * The progression chart is suppressed here (`showProgressionChart={false}`): in
+ * the Workbench the chart is the center pane's Stats view, not part of this form.
  */
-export interface CreatureDataPaneProps {
-  /** Primary key of the creature being edited. */
-  id: string;
-}
-
-export function CreatureDataPane({ id }: CreatureDataPaneProps) {
-  // Remount on id change so the draft/baseline state never leaks across tabs.
-  return <CreatureDataEditor key={id} id={id} />;
-}
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "notFound" }
-  | { kind: "loaded" };
-
-function CreatureDataEditor({ id }: { id: string }) {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
-  // The full population is needed for the chart's avg/max; abilities for the
-  // pickers. `saved` is THIS creature's persisted baseline (single-creature
-  // state) — onSaved replaces it so dirty clears post-save.
-  const [population, setPopulation] = useState<Creature[]>([]);
-  const [abilities, setAbilities] = useState<AbilityOption[]>([]);
-  const [saved, setSaved] = useState<Creature | null>(null);
-
-  // Load all creatures (for the chart population) + abilities (for the pickers),
-  // then select this creature by id as the baseline.
-  useEffect(() => {
-    let cancelled = false;
-    setState({ kind: "loading" });
-    Promise.all([loadCreatures(), invoke<Ability[]>("get_abilities")])
-      .then(([creatures, abil]) => {
-        if (cancelled) return;
-        const found = creatures.find((c) => c.id === id) ?? null;
-        if (!found) {
-          setState({ kind: "notFound" });
-          return;
-        }
-        setPopulation(creatures);
-        setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
-        setSaved(found);
-        setState({ kind: "loaded" });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setState({ kind: "error", message: errorMessage(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  // Advance the local baseline to the just-saved draft so `saved` follows and
-  // `dirty` clears, for this single creature. Also keep the population copy in sync so the chart's
-  // avg/max reflect the saved values.
-  const onSaved = useCallback((savedDraft: Creature) => {
-    setSaved(savedDraft);
-    setPopulation((prev) => prev.map((c) => (c.id === savedDraft.id ? savedDraft : c)));
-  }, []);
-
-  const { draft, setDraft, dirty, saving, saveError, save } = useCreatureDraft(saved, onSaved);
-
-  // Ref so the bus `save` closure reads the latest hook `save` without being
-  // recreated each render. The hook's `save` identity changes every render, so
-  // a ref-stable wrapper keeps the bus re-registering only on dirty toggle —
-  // same discipline as ScriptPane/DataPane.
-  const saveRef = useRef(save);
-  saveRef.current = save;
-  const stableSave = useCallback(() => saveRef.current(), []);
-
-  useSaveTarget({
-    id: "data",
-    order: 0, // DATA saves run BEFORE the script (order 10).
-    dirty,
-    save: stableSave,
-  });
+export function CreatureDataPane() {
+  const { state, draft, setDraft, population, abilities, saving, saveError, setActiveStat } =
+    useCreatureTab();
 
   if (state.kind === "loading") {
     return (
@@ -122,7 +40,7 @@ function CreatureDataEditor({ id }: { id: string }) {
     return (
       <PaneStatus>
         <FileWarning className="size-5 text-amber-500" />
-        <span>No creature found for “{id}”.</span>
+        <span>This creature could not be found.</span>
       </PaneStatus>
     );
   }
@@ -157,6 +75,7 @@ function CreatureDataEditor({ id }: { id: string }) {
           disabled={saving}
           showProgressionChart={false}
           singleColumnStats
+          onStatFocus={setActiveStat}
         />
       </div>
     </div>
@@ -169,12 +88,6 @@ function PaneStatus({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  return String(err);
 }
 
 export default CreatureDataPane;

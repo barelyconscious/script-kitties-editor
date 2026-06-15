@@ -38,6 +38,7 @@ export function CreatureForm({
   disabled,
   showProgressionChart = true,
   singleColumnStats = false,
+  onStatFocus,
 }: {
   creature: Creature;
   population: Creature[];
@@ -57,6 +58,12 @@ export function CreatureForm({
    * Workbench's fixed-width DATA pane passes `true` so the rows aren't squished.
    */
   singleColumnStats?: boolean;
+  /**
+   * Notified with a stat key when one of its value boxes gains focus, so a host
+   * (the Workbench) can sync an external progression chart to that stat. Only
+   * wired for the single-column grid.
+   */
+  onStatFocus?: (stat: string) => void;
 }) {
   const set = <K extends keyof Creature>(key: K, value: Creature[K]) =>
     onChange({ ...creature, [key]: value });
@@ -77,7 +84,12 @@ export function CreatureForm({
         description="Level-1 base value and the flat amount each stat gains per level."
       >
         {singleColumnStats ? (
-          <StatGrowthTableSingle creature={creature} onChange={onChange} disabled={disabled} />
+          <StatGrowthTableSingle
+            creature={creature}
+            onChange={onChange}
+            disabled={disabled}
+            onStatFocus={onStatFocus}
+          />
         ) : (
           <StatGrowthTable creature={creature} onChange={onChange} disabled={disabled} />
         )}

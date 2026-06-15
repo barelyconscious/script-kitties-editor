@@ -1,4 +1,5 @@
 use crate::commands::abilities::{get_abilities, save_ability};
+use crate::commands::assets::update_asset_manifest;
 use crate::commands::biograms::{get_biograms, save_biogram};
 use crate::commands::bundles::{get_bundles, save_bundle};
 use crate::commands::charms::{get_charms, save_charm};
@@ -218,6 +219,7 @@ pub fn run() {
             save_registry,
             get_sprite,
             list_sprites,
+            update_asset_manifest,
             get_script,
             save_script,
             create_script,

@@ -227,6 +227,21 @@ pub struct AssetEntry {
     pub filepath: String,
 }
 
+/// Summary of a full `assets.json` rescan, surfaced to the UI so the user can see
+/// exactly what the scan changed rather than a bare success/fail.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestUpdate {
+    /// Number of assets in the manifest after the scan.
+    pub total: usize,
+    /// Asset names newly discovered on disk (absent from the prior manifest).
+    pub added: Vec<String>,
+    /// Asset names whose on-disk path changed.
+    pub updated: Vec<String>,
+    /// Asset names dropped because their file no longer exists on disk.
+    pub removed: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Dlc {

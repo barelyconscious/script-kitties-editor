@@ -1,4 +1,5 @@
 pub mod abilities;
+pub mod assets;
 pub mod biograms;
 pub mod bundles;
 pub mod charms;

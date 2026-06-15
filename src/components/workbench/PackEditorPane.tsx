@@ -132,6 +132,15 @@ function PackEditor({ id }: { id: string }) {
   const rarityOptions = rarities.map((r) => ({ value: r, label: r }));
   // Total cards across all slots, counting each stack's size.
   const totalCards = draft.slots.reduce((acc, s) => acc + (s.count ?? 1), 0);
+  // Each slot occupies a contiguous run of card positions; numbering is
+  // cumulative so a stack of N consumes N numbers and the next slot continues
+  // after it (e.g. a ×7 slot is "Slots 1-7", then the next starts at 8).
+  let runningStart = 0;
+  const slotStarts = draft.slots.map((s) => {
+    const start = runningStart + 1;
+    runningStart += s.count ?? 1;
+    return start;
+  });
 
   const setSlot = (index: number, next: PackSlot) => {
     setDraft({ ...draft, slots: draft.slots.map((s, i) => (i === index ? next : s)) });
@@ -219,7 +228,7 @@ function PackEditor({ id }: { id: string }) {
             <SlotCard
               // biome-ignore lint/suspicious/noArrayIndexKey: slots have no stable id; order is identity.
               key={index}
-              index={index}
+              startNumber={slotStarts[index]}
               slot={slot}
               bundleOptions={bundleOptions}
               rarityOptions={rarityOptions}
@@ -258,7 +267,7 @@ type WeightOption = { value: string; label: string };
  * one stacked card rather than many sibling cards.
  */
 function SlotCard({
-  index,
+  startNumber,
   slot,
   bundleOptions,
   rarityOptions,
@@ -268,7 +277,8 @@ function SlotCard({
   onRemove,
   flashToken,
 }: {
-  index: number;
+  /** This slot's first card position (1-based, cumulative across earlier stacks). */
+  startNumber: number;
   slot: PackSlot;
   bundleOptions: WeightOption[];
   rarityOptions: WeightOption[];
@@ -282,6 +292,8 @@ function SlotCard({
   const setRules = (rules: DrawRules) => onChange({ ...slot, drawRules: rules });
   const count = slot.count ?? 1;
   const stacked = count > 1;
+  // Label spans the slot's card positions: "Slot 3" alone, "Slots 1-7" stacked.
+  const label = stacked ? `Slots ${startNumber}-${startNumber + count - 1}` : `Slot ${startNumber}`;
 
   // Run the jiggle + streak once whenever an insert/bump targets this card.
   const [animating, setAnimating] = useState(false);
@@ -316,7 +328,7 @@ function SlotCard({
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-sm">Slot {index + 1}</span>
+          <span className="font-medium text-sm">{label}</span>
           <div className="flex items-center gap-1">
             {/* Stack stepper: − removes a copy (min 1), + adds one (the old
                 "duplicate"); the ×N reads the current stack size. */}
@@ -327,7 +339,7 @@ function SlotCard({
                 size="icon-sm"
                 disabled={count <= 1}
                 onClick={onDecrement}
-                aria-label={`Remove one from slot ${index + 1} stack`}
+                aria-label={`Remove one from ${label} stack`}
                 title="Remove from stack"
               >
                 <MinusIcon className="size-4" />
@@ -338,7 +350,7 @@ function SlotCard({
                 variant="ghost"
                 size="icon-sm"
                 onClick={onIncrement}
-                aria-label={`Add one to slot ${index + 1} stack`}
+                aria-label={`Add one to ${label} stack`}
                 title="Duplicate (add to stack)"
               >
                 <PlusIcon className="size-4" />
@@ -349,9 +361,9 @@ function SlotCard({
               variant="ghost"
               size="icon-sm"
               onClick={() => {
-                if (window.confirm(`Remove slot ${index + 1}?`)) onRemove();
+                if (window.confirm(`Remove ${label}?`)) onRemove();
               }}
-              aria-label={`Remove slot ${index + 1}`}
+              aria-label={`Remove ${label}`}
               title="Remove slot"
             >
               <XIcon className="size-4" />

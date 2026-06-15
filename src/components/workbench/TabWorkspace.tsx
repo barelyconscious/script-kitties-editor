@@ -1,8 +1,16 @@
-import { PanelLeftClose, PanelLeftOpen, Save } from "lucide-react";
+import {
+  FileCode2,
+  LineChart,
+  type LucideIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Save,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BundleEditorPane } from "./BundleEditorPane";
+import { CreatureChartPane } from "./CreatureChartPane";
 import { DataPane } from "./DataPane";
 import { PackEditorPane } from "./PackEditorPane";
 import { ScriptPane } from "./ScriptPane";
@@ -80,6 +88,10 @@ export function TabWorkspace({
   // with this tab's bus, so the shared Save button / ⌘S work unchanged.
   const isBespoke = tab.objectType === "Bundle" || tab.objectType === "Pack";
   const [dataOpen, setDataOpen] = useState(true);
+  // Creatures can flip the center region between the aiController SCRIPT (the
+  // default, editable) and a read-only STATS graph. Per-tab state, defaults to
+  // the script so the tab opens as a code lens.
+  const [creatureView, setCreatureView] = useState<"script" | "chart">("script");
 
   const bus = useSaveBus();
 
@@ -160,6 +172,24 @@ export function TabWorkspace({
                 {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
               </Button>
             )}
+            {/* Creatures get a segmented control to swap the center region between
+                the aiController script and the stats graph. */}
+            {isCreature && (
+              <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
+                <ViewToggleButton
+                  active={creatureView === "script"}
+                  onClick={() => setCreatureView("script")}
+                  Icon={FileCode2}
+                  label="Script"
+                />
+                <ViewToggleButton
+                  active={creatureView === "chart"}
+                  onClick={() => setCreatureView("chart")}
+                  Icon={LineChart}
+                  label="Stats"
+                />
+              </div>
+            )}
             {/* Bespoke editors (bundle/pack) already show the name in the tab and
                 in their own Details section, so the toolbar omits it to avoid a
                 third copy. */}
@@ -222,20 +252,33 @@ export function TabWorkspace({
                   </Pane>
                 )}
 
-                {/* Script pane owns its own header (names the file + reach) and a
-                    full-bleed editor, so it bypasses the generic Pane chrome.
-                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
-                    document scrolls INSIDE the editor instead of growing the section
-                    (flex items default to min-height:auto). */}
+                {/* The center region. For creatures it flips between the script
+                    editor and the stats graph; every other type only ever shows
+                    the script. The Script pane owns its own header (names the file
+                    + reach) and a full-bleed editor, so it bypasses the generic
+                    Pane chrome. min-h-0 + overflow-hidden BOUND this flex item so a
+                    tall Monaco document scrolls INSIDE the editor instead of growing
+                    the section (flex items default to min-height:auto). */}
                 <section
                   className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                  aria-label="Script"
+                  aria-label={isCreature && creatureView === "chart" ? "Stats graph" : "Script"}
                 >
-                  <ScriptPane
-                    scriptName={tab.scriptName}
-                    reach={scriptReach}
-                    alsoOpenElsewhere={alsoOpenElsewhere}
-                  />
+                  {/* Keep the script editor MOUNTED (hidden) when the chart is
+                      shown so its unsaved edits and save-bus registration survive
+                      the toggle. */}
+                  <div
+                    className={cn(
+                      "flex min-h-0 flex-1 flex-col",
+                      isCreature && creatureView === "chart" && "hidden",
+                    )}
+                  >
+                    <ScriptPane
+                      scriptName={tab.scriptName}
+                      reach={scriptReach}
+                      alsoOpenElsewhere={alsoOpenElsewhere}
+                    />
+                  </div>
+                  {isCreature && creatureView === "chart" && <CreatureChartPane id={tab.id} />}
                 </section>
               </>
             )}
@@ -243,6 +286,34 @@ export function TabWorkspace({
         </div>
       </RequestSaveProvider>
     </SaveBusProvider>
+  );
+}
+
+/** One segment of the creature center-view toggle (Script / Stats). */
+function ViewToggleButton({
+  active,
+  onClick,
+  Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  Icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex items-center gap-1.5 rounded-sm px-2 py-1 font-medium text-xs transition-colors",
+        active ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </button>
   );
 }
 

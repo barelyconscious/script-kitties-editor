@@ -193,6 +193,18 @@ pub struct Pack {
 #[serde(rename_all = "camelCase")]
 pub struct PackSlot {
     pub draw_rules: DrawRules,
+    /// How many identical cards this slot represents (a "stack"). Defaults to 1
+    /// and is omitted from JSON when 1 so single slots stay compact.
+    #[serde(default = "default_slot_count", skip_serializing_if = "slot_count_is_one")]
+    pub count: u32,
+}
+
+fn default_slot_count() -> u32 {
+    1
+}
+
+fn slot_count_is_one(count: &u32) -> bool {
+    *count == 1
 }
 
 /// The weighted draw configuration for a `PackSlot`: which bundles can be drawn

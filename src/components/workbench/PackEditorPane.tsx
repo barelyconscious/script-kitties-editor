@@ -1,4 +1,4 @@
-import { CopyIcon, FileWarning, Loader2, PlusIcon, XIcon } from "lucide-react";
+import { FileWarning, Loader2, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Button } from "@/components/ui/button";
@@ -130,6 +130,8 @@ function PackEditor({ id }: { id: string }) {
 
   const bundleOptions = bundles.map((b) => ({ value: b.id, label: b.name || b.id }));
   const rarityOptions = rarities.map((r) => ({ value: r, label: r }));
+  // Total cards across all slots, counting each stack's size.
+  const totalCards = draft.slots.reduce((acc, s) => acc + (s.count ?? 1), 0);
 
   const setSlot = (index: number, next: PackSlot) => {
     setDraft({ ...draft, slots: draft.slots.map((s, i) => (i === index ? next : s)) });
@@ -137,22 +139,15 @@ function PackEditor({ id }: { id: string }) {
   const removeSlot = (index: number) => {
     setDraft({ ...draft, slots: draft.slots.filter((_, i) => i !== index) });
   };
-  const duplicateSlot = (index: number) => {
-    const source = draft.slots[index];
-    // Deep-copy the weight maps so the clone shares no references with the source.
-    const copy: PackSlot = {
-      drawRules: {
-        bundles: { ...(source.drawRules.bundles ?? {}) },
-        rarity: { ...(source.drawRules.rarity ?? {}) },
-      },
-    };
-    setDraft({
-      ...draft,
-      slots: [...draft.slots.slice(0, index + 1), copy, ...draft.slots.slice(index + 1)],
-    });
-    // The copy lands directly after its source; flag that position to animate.
+  // "Duplicate" no longer spawns a sibling card — it grows this slot's stack
+  // (count), so N identical draws read as one card stacked ×N. Pulse the card on
+  // each bump for feedback.
+  const bumpCount = (index: number, delta: number) => {
+    const slot = draft.slots[index];
+    const next = Math.max(1, (slot.count ?? 1) + delta);
+    setSlot(index, { ...slot, count: next });
     flashToken.current += 1;
-    setFlash({ index: index + 1, token: flashToken.current });
+    setFlash({ index, token: flashToken.current });
   };
   const addSlot = () => {
     const empty: PackSlot = { drawRules: { bundles: {}, rarity: {} } };
@@ -209,7 +204,10 @@ function PackEditor({ id }: { id: string }) {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="font-medium text-sm">Slots</h3>
+            <h3 className="font-medium text-sm">
+              Slots{" "}
+              <span className="font-normal text-muted-foreground tabular-nums">{totalCards}</span>
+            </h3>
             <p className="text-muted-foreground text-xs">
               Each slot is one card draw, weighted by bundle and rarity.
             </p>
@@ -226,7 +224,8 @@ function PackEditor({ id }: { id: string }) {
               bundleOptions={bundleOptions}
               rarityOptions={rarityOptions}
               onChange={(next) => setSlot(index, next)}
-              onDuplicate={() => duplicateSlot(index)}
+              onIncrement={() => bumpCount(index, 1)}
+              onDecrement={() => bumpCount(index, -1)}
               onRemove={() => removeSlot(index)}
               flashToken={flash?.index === index ? flash.token : null}
             />
@@ -252,14 +251,20 @@ function PackEditor({ id }: { id: string }) {
 
 type WeightOption = { value: string; label: string };
 
-/** One TCG-style card editing a single slot's draw rules. */
+/**
+ * One TCG-style card editing a single slot's draw rules. A slot can represent a
+ * STACK of identical cards (`count`): the +/− stepper grows/shrinks the stack and
+ * the card renders layered "behind" sheets when count > 1, so duplicates read as
+ * one stacked card rather than many sibling cards.
+ */
 function SlotCard({
   index,
   slot,
   bundleOptions,
   rarityOptions,
   onChange,
-  onDuplicate,
+  onIncrement,
+  onDecrement,
   onRemove,
   flashToken,
 }: {
@@ -268,14 +273,17 @@ function SlotCard({
   bundleOptions: WeightOption[];
   rarityOptions: WeightOption[];
   onChange: (next: PackSlot) => void;
-  onDuplicate: () => void;
+  onIncrement: () => void;
+  onDecrement: () => void;
   onRemove: () => void;
-  /** Non-null + changing ⇒ play the just-inserted flourish once. */
+  /** Non-null + changing ⇒ play the insert/bump flourish once. */
   flashToken: number | null;
 }) {
   const setRules = (rules: DrawRules) => onChange({ ...slot, drawRules: rules });
+  const count = slot.count ?? 1;
+  const stacked = count > 1;
 
-  // Run the jiggle + streak once whenever a fresh insert targets this position.
+  // Run the jiggle + streak once whenever an insert/bump targets this card.
   const [animating, setAnimating] = useState(false);
   useEffect(() => {
     if (flashToken == null) return;
@@ -285,64 +293,98 @@ function SlotCard({
   }, [flashToken]);
 
   return (
-    <div
-      className={cn(
-        "relative flex flex-col gap-4 rounded-lg border bg-card p-4",
-        animating && "animate-slot-insert",
+    <div className="relative">
+      {/* Layered sheets peeking out behind the card when it's a stack. Capped at
+          two regardless of count so a big stack doesn't sprawl. */}
+      {stacked && (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-lg border bg-card"
+          />
+          {count > 2 && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 translate-x-3 translate-y-3 rounded-lg border bg-card"
+            />
+          )}
+        </>
       )}
-    >
-      {animating && (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
-          <div className="slot-flash-streak" />
+      <div
+        className={cn(
+          "relative flex flex-col gap-4 rounded-lg border bg-card p-4",
+          animating && "animate-slot-insert",
+        )}
+      >
+        {animating && (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+            <div className="slot-flash-streak" />
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-sm">Slot {index + 1}</span>
+          <div className="flex items-center gap-1">
+            {/* Stack stepper: − removes a copy (min 1), + adds one (the old
+                "duplicate"); the ×N reads the current stack size. */}
+            <div className="flex items-center rounded-md border">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={count <= 1}
+                onClick={onDecrement}
+                aria-label={`Remove one from slot ${index + 1} stack`}
+                title="Remove from stack"
+              >
+                <MinusIcon className="size-4" />
+              </Button>
+              <span className="min-w-7 text-center text-xs tabular-nums">×{count}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onIncrement}
+                aria-label={`Add one to slot ${index + 1} stack`}
+                title="Duplicate (add to stack)"
+              >
+                <PlusIcon className="size-4" />
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => {
+                if (window.confirm(`Remove slot ${index + 1}?`)) onRemove();
+              }}
+              aria-label={`Remove slot ${index + 1}`}
+              title="Remove slot"
+            >
+              <XIcon className="size-4" />
+            </Button>
+          </div>
         </div>
-      )}
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">Slot {index + 1}</span>
-        <div className="flex items-center">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onDuplicate}
-            aria-label={`Duplicate slot ${index + 1}`}
-            title="Duplicate slot"
-          >
-            <CopyIcon className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => {
-              if (window.confirm(`Remove slot ${index + 1}?`)) onRemove();
-            }}
-            aria-label={`Remove slot ${index + 1}`}
-            title="Remove slot"
-          >
-            <XIcon className="size-4" />
-          </Button>
-        </div>
+
+        <WeightDistribution
+          label="Bundle weights"
+          emptyHint="No bundles. Add one to draw from."
+          addLabel="Add bundle"
+          options={bundleOptions}
+          // The backend omits empty weight maps on save, so a loaded slot may have
+          // no `bundles`/`rarity` key — default to {} so the editor never crashes.
+          value={slot.drawRules.bundles ?? {}}
+          onChange={(bundles) => setRules({ ...slot.drawRules, bundles })}
+        />
+
+        <WeightDistribution
+          label="Rarity weights"
+          emptyHint="No rarities. Add one to weight the draw."
+          addLabel="Add rarity"
+          options={rarityOptions}
+          value={slot.drawRules.rarity ?? {}}
+          onChange={(rarity) => setRules({ ...slot.drawRules, rarity })}
+        />
       </div>
-
-      <WeightDistribution
-        label="Bundle weights"
-        emptyHint="No bundles. Add one to draw from."
-        addLabel="Add bundle"
-        options={bundleOptions}
-        // The backend omits empty weight maps on save, so a loaded slot may have
-        // no `bundles`/`rarity` key — default to {} so the editor never crashes.
-        value={slot.drawRules.bundles ?? {}}
-        onChange={(bundles) => setRules({ ...slot.drawRules, bundles })}
-      />
-
-      <WeightDistribution
-        label="Rarity weights"
-        emptyHint="No rarities. Add one to weight the draw."
-        addLabel="Add rarity"
-        options={rarityOptions}
-        value={slot.drawRules.rarity ?? {}}
-        onChange={(rarity) => setRules({ ...slot.drawRules, rarity })}
-      />
     </div>
   );
 }

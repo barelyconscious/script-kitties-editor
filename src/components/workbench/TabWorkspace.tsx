@@ -164,14 +164,8 @@ export function TabWorkspace({
                 in their own Details section, so the toolbar omits it to avoid a
                 third copy. */}
             {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
-            {bus.dirty && (
-              <span
-                role="status"
-                className="size-2 shrink-0 rounded-full bg-amber-500"
-                title="Unsaved changes"
-                aria-label="Unsaved changes"
-              />
-            )}
+            {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
+                toolbar doesn't repeat it. */}
             {status && status.message.length > 0 && (
               <span
                 role="status"

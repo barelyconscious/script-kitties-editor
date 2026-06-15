@@ -10,9 +10,13 @@ export type DrawRules = {
   rarity: Record<string, number>;
 };
 
-/** One card slot in a pack. For now a slot carries only its `drawRules`. */
+/**
+ * One card slot in a pack. `count` is the stack size — how many identical cards
+ * this slot represents — defaulting to 1 and omitted from JSON when 1.
+ */
 export type PackSlot = {
   drawRules: DrawRules;
+  count?: number;
 };
 
 /**

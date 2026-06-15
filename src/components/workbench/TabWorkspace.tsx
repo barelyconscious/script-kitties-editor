@@ -37,6 +37,12 @@ export interface TabWorkspaceProps {
    * close-tab guard. Fires whenever the flag flips.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Fired after a successful save of this tab so the shell can refresh the object
+   * list — an edited name/sprite must surface in the panel (and re-sort) without
+   * a manual reload.
+   */
+  onSaved?: () => void;
 }
 
 /** How long a "Saved" confirmation lingers before auto-clearing. */
@@ -63,6 +69,7 @@ export function TabWorkspace({
   scriptReach,
   alsoOpenElsewhere,
   onDirtyChange,
+  onSaved,
 }: TabWorkspaceProps) {
   // Every type opens with the DATA pane visible by default so an object's fields
   // are immediately editable. Creatures additionally get a wider pane (the full
@@ -106,11 +113,16 @@ export function TabWorkspace({
   // flash "Saved".
   const saveAllRef = useRef(bus.saveAll);
   saveAllRef.current = bus.saveAll;
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const handleSave = useCallback(async () => {
     const outcomes = await saveAllRef.current();
     const summary = summarizeOutcomes(outcomes);
     if (summary.message.length === 0) return; // no-op (nothing was dirty)
     setStatus(summary);
+    // A real save landed — let the shell refresh the object list so an edited
+    // name/sprite shows up in the panel. Skip on failure (nothing persisted).
+    if (summary.ok) onSavedRef.current?.();
   }, []);
 
   // Window-level ⌘S / Ctrl+S — but ONLY for the active (non-hidden) tab. Every

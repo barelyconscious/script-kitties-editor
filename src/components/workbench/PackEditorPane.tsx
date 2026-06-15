@@ -1,4 +1,4 @@
-import { FileWarning, Loader2, PlusIcon, XIcon } from "lucide-react";
+import { CopyIcon, FileWarning, Loader2, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,11 @@ function PackEditor({ id }: { id: string }) {
   const rarities = useEnumValues("rarities");
 
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+
+  // Which slot just got inserted (and a monotonic token so re-duplicating the
+  // same position still re-triggers the one-shot insert flourish in SlotCard).
+  const flashToken = useRef(0);
+  const [flash, setFlash] = useState<{ index: number; token: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,9 +137,29 @@ function PackEditor({ id }: { id: string }) {
   const removeSlot = (index: number) => {
     setDraft({ ...draft, slots: draft.slots.filter((_, i) => i !== index) });
   };
+  const duplicateSlot = (index: number) => {
+    const source = draft.slots[index];
+    // Deep-copy the weight maps so the clone shares no references with the source.
+    const copy: PackSlot = {
+      drawRules: {
+        bundles: { ...(source.drawRules.bundles ?? {}) },
+        rarity: { ...(source.drawRules.rarity ?? {}) },
+      },
+    };
+    setDraft({
+      ...draft,
+      slots: [...draft.slots.slice(0, index + 1), copy, ...draft.slots.slice(index + 1)],
+    });
+    // The copy lands directly after its source; flag that position to animate.
+    flashToken.current += 1;
+    setFlash({ index: index + 1, token: flashToken.current });
+  };
   const addSlot = () => {
     const empty: PackSlot = { drawRules: { bundles: {}, rarity: {} } };
     setDraft({ ...draft, slots: [...draft.slots, empty] });
+    // New slot lands at the end; flag that position for the insert flourish.
+    flashToken.current += 1;
+    setFlash({ index: draft.slots.length, token: flashToken.current });
   };
 
   return (
@@ -201,7 +226,9 @@ function PackEditor({ id }: { id: string }) {
               bundleOptions={bundleOptions}
               rarityOptions={rarityOptions}
               onChange={(next) => setSlot(index, next)}
+              onDuplicate={() => duplicateSlot(index)}
               onRemove={() => removeSlot(index)}
+              flashToken={flash?.index === index ? flash.token : null}
             />
           ))}
 
@@ -232,35 +259,72 @@ function SlotCard({
   bundleOptions,
   rarityOptions,
   onChange,
+  onDuplicate,
   onRemove,
+  flashToken,
 }: {
   index: number;
   slot: PackSlot;
   bundleOptions: WeightOption[];
   rarityOptions: WeightOption[];
   onChange: (next: PackSlot) => void;
+  onDuplicate: () => void;
   onRemove: () => void;
+  /** Non-null + changing ⇒ play the just-inserted flourish once. */
+  flashToken: number | null;
 }) {
   const setRules = (rules: DrawRules) => onChange({ ...slot, drawRules: rules });
 
+  // Run the jiggle + streak once whenever a fresh insert targets this position.
+  const [animating, setAnimating] = useState(false);
+  useEffect(() => {
+    if (flashToken == null) return;
+    setAnimating(true);
+    const timer = setTimeout(() => setAnimating(false), 750);
+    return () => clearTimeout(timer);
+  }, [flashToken]);
+
   return (
-    <div className="flex flex-col gap-4 rounded-lg border bg-card p-4">
+    <div
+      className={cn(
+        "relative flex flex-col gap-4 rounded-lg border bg-card p-4",
+        animating && "animate-slot-insert",
+      )}
+    >
+      {animating && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+          <div className="slot-flash-streak" />
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <span className="font-medium text-sm">Slot {index + 1}</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => {
-            if (window.confirm(`Remove slot ${index + 1}?`)) onRemove();
-          }}
-          aria-label={`Remove slot ${index + 1}`}
-        >
-          <XIcon className="size-4" />
-        </Button>
+        <div className="flex items-center">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDuplicate}
+            aria-label={`Duplicate slot ${index + 1}`}
+            title="Duplicate slot"
+          >
+            <CopyIcon className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              if (window.confirm(`Remove slot ${index + 1}?`)) onRemove();
+            }}
+            aria-label={`Remove slot ${index + 1}`}
+            title="Remove slot"
+          >
+            <XIcon className="size-4" />
+          </Button>
+        </div>
       </div>
 
-      <WeightEditor
+      <WeightDistribution
         label="Bundle weights"
         emptyHint="No bundles. Add one to draw from."
         addLabel="Add bundle"
@@ -271,33 +335,32 @@ function SlotCard({
         onChange={(bundles) => setRules({ ...slot.drawRules, bundles })}
       />
 
-      <WeightEditor
+      <WeightDistribution
         label="Rarity weights"
         emptyHint="No rarities. Add one to weight the draw."
         addLabel="Add rarity"
         options={rarityOptions}
         value={slot.drawRules.rarity ?? {}}
         onChange={(rarity) => setRules({ ...slot.drawRules, rarity })}
-        showSum
       />
     </div>
   );
 }
 
 /**
- * A list of `{ option → weight }` rows with add/remove. Each row picks a key from
- * `options` (minus ones already used) and sets a numeric (float) weight. Used for
- * both bundle and rarity weights. With `showSum`, a running total is shown with a
- * soft warning when it isn't 1.00 (the design requires rarity weights to sum to 1).
+ * A weight set that's a probability split meant to add up to 1.00. Renders one
+ * INDEPENDENT number field per chosen option — editing one never touches the
+ * others, so the user has full control; the Σ readout simply flags when the set
+ * doesn't total 1.00. Entered/shown and stored as 0..1 decimals. Used for both
+ * the bundle and rarity weights of a slot's draw rules.
  */
-function WeightEditor({
+function WeightDistribution({
   label,
   emptyHint,
   addLabel,
   options,
   value,
   onChange,
-  showSum,
 }: {
   label: string;
   emptyHint: string;
@@ -305,7 +368,6 @@ function WeightEditor({
   options: WeightOption[];
   value: Record<string, number>;
   onChange: (next: Record<string, number>) => void;
-  showSum?: boolean;
 }) {
   const entries = Object.entries(value);
   const used = new Set(entries.map(([k]) => k));
@@ -314,35 +376,35 @@ function WeightEditor({
   const sum = entries.reduce((acc, [, v]) => acc + v, 0);
   const sumOk = Math.abs(sum - 1) < 1e-6;
 
-  function rename(oldKey: string, newKey: string) {
+  // Values are plain 0..1 decimals. Each field is independent — no other entries
+  // are adjusted.
+  const setWeight = (key: string, n: number) =>
+    onChange({ ...value, [key]: Number.isNaN(n) ? 0 : Math.min(1, Math.max(0, n)) });
+  const rename = (oldKey: string, newKey: string) => {
     const next: Record<string, number> = {};
     for (const [k, v] of entries) next[k === oldKey ? newKey : k] = v;
     onChange(next);
-  }
-  function setWeight(key: string, n: number) {
-    onChange({ ...value, [key]: n });
-  }
-  function remove(key: string) {
+  };
+  const remove = (key: string) => {
     const next = { ...value };
     delete next[key];
     onChange(next);
-  }
-  function add() {
-    if (available.length === 0) return;
-    onChange({ ...value, [available[0].value]: 1 });
-  }
+  };
+  const add = () => {
+    if (available.length > 0) onChange({ ...value, [available[0].value]: 0 });
+  };
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs">{label}</Label>
-        {showSum && entries.length > 0 && (
+        {entries.length > 0 && (
           <span
             className={cn(
               "text-xs tabular-nums",
               sumOk ? "text-muted-foreground" : "font-medium text-amber-500",
             )}
-            title={sumOk ? undefined : "Rarity weights should sum to 1.00"}
+            title={sumOk ? undefined : "Weights should add up to 1.00"}
           >
             Σ {sum.toFixed(2)}
           </span>
@@ -354,7 +416,7 @@ function WeightEditor({
       {entries.map(([key, weight]) => (
         <div key={key} className="flex items-center gap-2">
           <Select value={key} onValueChange={(k) => rename(key, k)}>
-            <SelectTrigger className="flex-1">
+            <SelectTrigger className="h-9 min-w-0 flex-1">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -368,14 +430,12 @@ function WeightEditor({
           <Input
             type="number"
             inputMode="decimal"
-            step="any"
+            step="0.01"
             min={0}
-            className="h-9 w-20 tabular-nums"
+            max={1}
+            className="h-9 min-w-0 flex-1 tabular-nums"
             value={weight}
-            onChange={(e) => {
-              const n = e.currentTarget.valueAsNumber;
-              setWeight(key, Number.isNaN(n) ? 0 : n);
-            }}
+            onChange={(e) => setWeight(key, e.currentTarget.valueAsNumber)}
           />
           <Button
             type="button"

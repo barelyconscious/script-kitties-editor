@@ -186,8 +186,11 @@ export function TabWorkspace({
             {isBespoke ? (
               // Bespoke full-width editor: owns its own scroll/padding region, no
               // Data/Script split. Registers its save target with this tab's bus.
+              // `scrollbar-gutter: stable` always reserves the scrollbar's width so
+              // a card grid inside doesn't lose a column the moment the vertical
+              // scrollbar appears — it only reflows when the window truly shrinks.
               <section
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4"
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
                 aria-label="Data"
               >
                 {tab.objectType === "Bundle" ? (

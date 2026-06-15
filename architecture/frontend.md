@@ -42,7 +42,7 @@ stepper and a layered sheet behind it — and slots are numbered cumulatively (a
 
 `BundleEditorPane` edits a **bundle** (a named collection of creatures). Each member creature
 can carry **overrides** applied when drawn: `nameOverride`, `descriptionOverride`,
-`spriteOverride`, `baseStatsOverrides`, and `abilitiesOverride`.
+`spriteOverride`, `baseStatsOverride`, and `abilitiesOverride`.
 
 ## Creature Editor
 

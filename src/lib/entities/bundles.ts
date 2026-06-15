@@ -12,7 +12,7 @@ export type BundleCreature = {
   nameOverride?: string;
   descriptionOverride?: string;
   spriteOverride?: string;
-  baseStatsOverrides?: Record<string, number>;
+  baseStatsOverride?: Record<string, number>;
   abilitiesOverride?: string[];
 };
 
@@ -44,8 +44,8 @@ export async function saveBundle(bundle: Bundle): Promise<void> {
     if (c.nameOverride?.trim()) out.nameOverride = c.nameOverride;
     if (c.descriptionOverride?.trim()) out.descriptionOverride = c.descriptionOverride;
     if (c.spriteOverride?.trim()) out.spriteOverride = c.spriteOverride;
-    const stats = Object.fromEntries(nonZeroStats(c.baseStatsOverrides ?? {}));
-    if (Object.keys(stats).length > 0) out.baseStatsOverrides = stats;
+    const stats = Object.fromEntries(nonZeroStats(c.baseStatsOverride ?? {}));
+    if (Object.keys(stats).length > 0) out.baseStatsOverride = stats;
     if (c.abilitiesOverride && c.abilitiesOverride.length > 0)
       out.abilitiesOverride = c.abilitiesOverride;
     return out;

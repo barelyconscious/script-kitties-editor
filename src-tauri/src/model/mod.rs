@@ -168,7 +168,7 @@ pub struct BundleCreature {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sprite_override: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub base_stats_overrides: BTreeMap<String, i32>,
+    pub base_stats_override: BTreeMap<String, i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abilities_override: Vec<String>,
 }

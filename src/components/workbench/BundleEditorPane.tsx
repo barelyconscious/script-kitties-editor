@@ -302,8 +302,8 @@ function MemberCard({
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs">Stat overrides</Label>
         <StatOverridesGrid
-          value={member.baseStatsOverrides ?? {}}
-          onChange={(next) => onChange({ ...member, baseStatsOverrides: next })}
+          value={member.baseStatsOverride ?? {}}
+          onChange={(next) => onChange({ ...member, baseStatsOverride: next })}
         />
       </div>
     </div>

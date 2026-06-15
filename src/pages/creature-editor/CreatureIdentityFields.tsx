@@ -40,7 +40,7 @@ export function CreatureIdentityFields({
   // Portal target for the sprite picker's popover, so it scrolls within the
   // surrounding host (dialog or pane) — same pattern as EntityFieldsForm.
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
-  const rarities = useEnumValues("rarities");
+  const rarities = useEnumValues("creatureRarities");
   const set = <K extends keyof Creature>(key: K, value: Creature[K]) =>
     onChange({ ...creature, [key]: value });
 

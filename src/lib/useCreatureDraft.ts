@@ -2,17 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { type Creature, sameCreature, saveCreature } from "@/lib/creature";
 
 /**
- * Controlled draft/save mechanic for a single creature, factored out of
- * `CreatureEditor` so the Workbench can own it for a creature tab. The parent
- * holds the baseline (the persisted creature, controlled via `saved`); the hook
- * holds the working `draft` and the transient save state.
+ * Controlled draft/save mechanic for a single creature, used by the Workbench's
+ * `CreatureDataPane` to own a creature tab's edit state. The parent holds the
+ * baseline (the persisted creature, controlled via `saved`); the hook holds the
+ * working `draft` and the transient save state.
  *
  * On a successful save the hook calls `onSaved(draft)` with the *un-normalized*
  * draft. The parent advances its baseline (its creature list) to that value, so
  * `saved` follows and `dirty` clears. The zero-stripping normalization is NOT
  * duplicated here — it lives only in `saveCreature` (`creature.ts`), which is the
  * single source of truth. As a result `dirty` is always compared against the
- * un-normalized draft, exactly as the standalone editor did.
+ * un-normalized draft.
  */
 export type UseCreatureDraft = {
   /** The working copy. `null` when nothing is selected. */

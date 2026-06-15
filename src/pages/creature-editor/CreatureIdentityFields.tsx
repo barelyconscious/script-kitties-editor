@@ -16,9 +16,8 @@ import { useEnumValues } from "@/lib/registry";
 /**
  * Controlled grid of a creature's identity fields — name, sprite, description,
  * and (only when `includeScript`) the AI-script pointer. The single source for
- * this markup, shared by the standalone editor's {@link CreatureDetailsDialog}
- * (which passes `includeScript`) and the Workbench creature DATA pane (which
- * omits it, since the Workbench SCRIPT pane owns the script pointer).
+ * this markup; the Workbench creature DATA pane renders it without
+ * `includeScript`, since the Workbench SCRIPT pane owns the script pointer.
  *
  * Owns NO draft/dirty/save state: edits report up via `onChange`. The
  * sprite-picker popover is portalled into an internal sibling div so it scrolls

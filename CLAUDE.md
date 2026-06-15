@@ -10,9 +10,9 @@ Tauri 2 desktop app — an editor/inspector for the `worlds-cpp` game's data fil
 
 ## Layout
 
-- `src/` — React frontend. Entry: `src/main.tsx` → `src/App.tsx`. A `NavRail` switches between three tools (`src/pages/`): **Workbench** (stub), **Creature Editor**, **Data Tables**.
+- `src/` — React frontend. Entry: `src/main.tsx` → `src/App.tsx`. A `NavRail` switches between three tools (`src/pages/`): **Workbench**, **Data Tables**, **Registry**.
   - `src/pages/data-tables/` — one config module per entity (abilities, biograms, charms, effects, items) built on the generic `EntityDataTable`. `DataTables.tsx` is the tab shell.
-  - `src/pages/CreatureEditor.tsx` + `src/pages/creature-editor/` — the creature editor: list sidebar + per-creature form. Leads with the **progression chart** (`ProgressionChart`), then the stat/growth grid (`StatGrowthTable`), base abilities, and per-level unlocks (`AbilitiesByLevelEditor`). Identity fields (name/sprite/script/description) are tucked in `CreatureDetailsDialog` behind a header button. `AbilityPicker` is a searchable multi-select that shows ability names but stores ids.
+  - `src/pages/creature-editor/` — the creature editing surface, now hosted entirely inside the Workbench (the standalone tool was removed). `CreatureForm` leads with the **progression chart** (`ProgressionChart`), then the stat/growth grid (`StatGrowthTable`), base abilities, and per-level unlocks (`AbilitiesByLevelEditor`). Identity fields (name/sprite/script/description) live in `CreatureIdentityFields`. `AbilityPicker` is a searchable multi-select that shows ability names but stores ids.
   - `src/components/data-tables/` — `EntityDataTable` (browse/search/sticky-scroll table), `EntityEditDialog` (schema-driven edit form), `SpritePicker`, `TagsSelect`/`TagsInput`.
   - `src/components/Sprite.tsx` — renders a sprite by logical name via the `get_sprite` command (returns a data URL); module-level cache so a name is fetched once.
   - `src/components/IntegerInput.tsx` — number input locked to whole numbers (blocks `.`/`e`, truncates pastes). Reused anywhere a field must be integral.
@@ -59,4 +59,4 @@ To add a command: implement on `Dal` in `dal/`, add a thin wrapper in `commands/
 
 ## State
 
-Early development (v0.1.0). Data Tables (abilities, biograms, charms, effects, items) browse + edit end-to-end; items join their drop-table entry. Creature Editor is built: identity, base/growth stat grid, per-level ability unlocks, and a progression chart vs. population avg/max. Workbench is still a stub; a per-creature script editor is planned.
+Early development (v0.1.0). Data Tables (abilities, biograms, charms, effects, items) browse + edit end-to-end; items join their drop-table entry. The Workbench is the primary surface: a grouped object list opening per-object tabs, with bespoke editors for creatures (identity, base/growth stat grid, per-level ability unlocks, plus a Script/Stats toggle for the aiController script vs. the progression chart), bundles, and packs. The standalone Creature Editor tool was removed — its surface lives in the Workbench now.

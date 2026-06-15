@@ -5,7 +5,6 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { usePreference } from "./lib/preferences";
 import { RegistryProvider } from "./lib/registry";
 import { cn } from "./lib/utils";
-import CreatureEditor from "./pages/CreatureEditor";
 import DataTables from "./pages/DataTables";
 import Registry from "./pages/Registry";
 import Workbench from "./pages/Workbench";
@@ -63,10 +62,8 @@ function App() {
           <main
             className={cn(
               "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
-              // The Workbench and Creature Editor are full-bleed (their left list
-              // panels hug the window edge, IDE-style); the table/registry tools
-              // keep their padding.
-              (activeTool === "data-tables" || activeTool === "registry") && "p-4",
+              // The Workbench is full-bleed; the form-first tools keep their padding.
+              activeTool !== "workbench" && "p-4",
             )}
           >
             {/* The Workbench stays mounted (hidden when inactive) so its open tabs
@@ -79,7 +76,6 @@ function App() {
             >
               <Workbench objectListCollapsed={objectListCollapsed} />
             </div>
-            {activeTool === "creature-editor" && <CreatureEditor />}
             {activeTool === "data-tables" && <DataTables />}
             {activeTool === "registry" && <Registry />}
           </main>

@@ -21,7 +21,9 @@ A **`TabWorkspace`** body depends on the object type:
 - **Flat entities** (Ability, Biogram, Effect, Item, Charm) → a narrow **data pane**
   (schema-driven form from the entity's `EntityField[]`) plus a **script pane** (Monaco
   editor for the object's `.lua` script).
-- **Creature** → the bespoke `CreatureDataPane` (embeds the real `CreatureForm`).
+- **Creature** → the bespoke `CreatureDataPane` (embeds the real `CreatureForm`) on the
+  left, and a toolbar **Script/Stats** toggle that flips the center between the script editor
+  and the read-only `CreatureChartPane`.
 - **Bundle / Pack** → a **bespoke full-width pane** (`BundleEditorPane` / `PackEditorPane`),
   no script pane — these are script-less, visually richer editors.
 
@@ -44,14 +46,16 @@ stepper and a layered sheet behind it — and slots are numbered cumulatively (a
 can carry **overrides** applied when drawn: `nameOverride`, `descriptionOverride`,
 `spriteOverride`, `baseStatsOverride`, and `abilitiesOverride`.
 
-## Creature Editor
+## Creature editing
 
-`src/pages/CreatureEditor.tsx` + `src/pages/creature-editor/`. A list sidebar plus
-`CreatureForm`, which leads with the **progression chart** (`ProgressionChart`, projected
-stats vs. the population average/max), then the **stat/growth grid** (`StatGrowthTable`),
-base abilities, and per-level unlocks (`AbilitiesByLevelEditor`). Identity fields
-(name/sprite/script/rarity/description) live in `CreatureIdentityFields`. The same
-`CreatureForm` is reused inside the Workbench's `CreatureDataPane`.
+Lives entirely inside the Workbench (the standalone Creature Editor tool was removed).
+The reusable parts are in `src/pages/creature-editor/`: `CreatureForm` is the editing
+surface — the **stat/growth grid** (`StatGrowthTable`), base abilities, and per-level
+unlocks (`AbilitiesByLevelEditor`); identity fields (name/sprite/rarity/description) live
+in `CreatureIdentityFields`. A creature tab shows the form in its `CreatureDataPane` (left,
+chart suppressed) and lets the center region toggle between the aiController **script** and
+the **progression chart** (`ProgressionChart`, projected stats vs. the population
+average/max) via `CreatureChartPane`.
 
 ## Data Tables
 

@@ -77,8 +77,7 @@ function CreatureDataEditor({ id }: { id: string }) {
   }, [id]);
 
   // Advance the local baseline to the just-saved draft so `saved` follows and
-  // `dirty` clears — exactly how CreatureEditor advances its list, but for a
-  // single creature. Also keep the population copy in sync so the chart's
+  // `dirty` clears, for this single creature. Also keep the population copy in sync so the chart's
   // avg/max reflect the saved values.
   const onSaved = useCallback((savedDraft: Creature) => {
     setSaved(savedDraft);

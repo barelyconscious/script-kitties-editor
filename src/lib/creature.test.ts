@@ -8,6 +8,7 @@ function creature(id: string, attack: number): Creature {
     sprite: "",
     description: "",
     aiController: "",
+    rarity: "",
     baseStats: { attack },
     baseAbilities: [],
     statGainsPerLevel: {},

@@ -133,6 +133,17 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
     void reload();
   }, [reload]);
 
+  // Silently re-fetch the object list (no loading flicker) after a save, so an
+  // edited name/sprite is reflected — and re-sorted — in the panel immediately.
+  // A failed background refresh leaves the current list untouched.
+  const refreshObjects = useCallback(async () => {
+    try {
+      setObjects(await invoke<GameObject[]>("get_game_objects"));
+    } catch {
+      // Keep the existing list; the next save/reload will try again.
+    }
+  }, []);
+
   const handleOpen = useCallback((obj: GameObject) => {
     setTabs((prev) => {
       const result = openTab(prev, obj);
@@ -234,6 +245,7 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
                       scriptReach={reachByScript.get(tab.scriptName) ?? 0}
                       alsoOpenElsewhere={(openCounts.get(tab.scriptName) ?? 0) > 1}
                       onDirtyChange={(dirty) => handleTabDirtyChange(key, dirty)}
+                      onSaved={refreshObjects}
                     />
                   </div>
                 );

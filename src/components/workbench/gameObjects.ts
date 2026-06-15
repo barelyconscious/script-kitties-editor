@@ -8,7 +8,15 @@
  */
 
 /** Mirrors Rust `GameObjectType` — serialized as bare PascalCase variant names. */
-export type GameObjectType = "Ability" | "Biogram" | "Effect" | "Charm" | "Item" | "Creature";
+export type GameObjectType =
+  | "Ability"
+  | "Biogram"
+  | "Effect"
+  | "Charm"
+  | "Item"
+  | "Creature"
+  | "Bundle"
+  | "Pack";
 
 /** Mirrors Rust `GameObject` (camelCase fields). */
 export type GameObject = {
@@ -26,6 +34,8 @@ export type GameObject = {
  */
 export const GROUP_ORDER: readonly GameObjectType[] = [
   "Creature",
+  "Bundle",
+  "Pack",
   "Ability",
   "Biogram",
   "Effect",
@@ -36,6 +46,8 @@ export const GROUP_ORDER: readonly GameObjectType[] = [
 /** Human-friendly plural label for each group header. */
 export const GROUP_LABELS: Record<GameObjectType, string> = {
   Creature: "Creatures",
+  Bundle: "Bundles",
+  Pack: "Packs",
   Ability: "Abilities",
   Biogram: "Biograms",
   Effect: "Effects",

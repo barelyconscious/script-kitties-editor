@@ -14,6 +14,8 @@ export type Creature = {
   description: string;
   /** Mislabelled in the data — it's the creature's script, not an "ai controller". */
   aiController: string;
+  /** Gacha rarity (a Registry `creatureRarities` value). Empty when unset. */
+  rarity: string;
   baseStats: Record<string, number>;
   baseAbilities: string[];
   statGainsPerLevel: Record<string, number>;

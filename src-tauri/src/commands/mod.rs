@@ -1,5 +1,6 @@
 pub mod abilities;
 pub mod biograms;
+pub mod bundles;
 pub mod charms;
 pub mod config;
 pub mod creatures;
@@ -8,6 +9,7 @@ pub mod effects;
 pub mod game_objects;
 pub mod item_drops;
 pub mod items;
+pub mod packs;
 pub mod registry;
 pub mod scripts;
 pub mod sprites;

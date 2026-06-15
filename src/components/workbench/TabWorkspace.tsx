@@ -2,7 +2,9 @@ import { PanelLeftClose, PanelLeftOpen, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { BundleEditorPane } from "./BundleEditorPane";
 import { DataPane } from "./DataPane";
+import { PackEditorPane } from "./PackEditorPane";
 import { ScriptPane } from "./ScriptPane";
 import {
   RequestSaveProvider,
@@ -35,6 +37,12 @@ export interface TabWorkspaceProps {
    * close-tab guard. Fires whenever the flag flips.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Fired after a successful save of this tab so the shell can refresh the object
+   * list — an edited name/sprite must surface in the panel (and re-sort) without
+   * a manual reload.
+   */
+  onSaved?: () => void;
 }
 
 /** How long a "Saved" confirmation lingers before auto-clearing. */
@@ -61,11 +69,16 @@ export function TabWorkspace({
   scriptReach,
   alsoOpenElsewhere,
   onDirtyChange,
+  onSaved,
 }: TabWorkspaceProps) {
   // Every type opens with the DATA pane visible by default so an object's fields
   // are immediately editable. Creatures additionally get a wider pane (the full
   // creature form is much larger than the flat-type field grid).
   const isCreature = tab.objectType === "Creature";
+  // Bundles & packs are script-less and get a BESPOKE, full-width editor pane:
+  // no Data/Script split, no data-toggle. They still register one save target
+  // with this tab's bus, so the shared Save button / ⌘S work unchanged.
+  const isBespoke = tab.objectType === "Bundle" || tab.objectType === "Pack";
   const [dataOpen, setDataOpen] = useState(true);
 
   const bus = useSaveBus();
@@ -100,11 +113,16 @@ export function TabWorkspace({
   // flash "Saved".
   const saveAllRef = useRef(bus.saveAll);
   saveAllRef.current = bus.saveAll;
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const handleSave = useCallback(async () => {
     const outcomes = await saveAllRef.current();
     const summary = summarizeOutcomes(outcomes);
     if (summary.message.length === 0) return; // no-op (nothing was dirty)
     setStatus(summary);
+    // A real save landed — let the shell refresh the object list so an edited
+    // name/sprite shows up in the panel. Skip on failure (nothing persisted).
+    if (summary.ok) onSavedRef.current?.();
   }, []);
 
   // Window-level ⌘S / Ctrl+S — but ONLY for the active (non-hidden) tab. Every
@@ -129,24 +147,25 @@ export function TabWorkspace({
         <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
           {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
           <div className="flex items-center gap-1 border-b px-2 py-1.5">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title={dataOpen ? "Hide data pane" : "Show data pane"}
-              aria-pressed={dataOpen}
-              onClick={() => setDataOpen((v) => !v)}
-            >
-              {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </Button>
-            <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
-            {bus.dirty && (
-              <span
-                role="status"
-                className="size-2 shrink-0 rounded-full bg-amber-500"
-                title="Unsaved changes"
-                aria-label="Unsaved changes"
-              />
+            {/* No Data/Script split for bespoke (script-less) editors, so the
+                data-pane toggle is hidden for them. */}
+            {!isBespoke && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title={dataOpen ? "Hide data pane" : "Show data pane"}
+                aria-pressed={dataOpen}
+                onClick={() => setDataOpen((v) => !v)}
+              >
+                {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+              </Button>
             )}
+            {/* Bespoke editors (bundle/pack) already show the name in the tab and
+                in their own Details section, so the toolbar omits it to avoid a
+                third copy. */}
+            {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
+            {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
+                toolbar doesn't repeat it. */}
             {status && status.message.length > 0 && (
               <span
                 role="status"
@@ -173,33 +192,53 @@ export function TabWorkspace({
           </div>
 
           <div className="flex min-h-0 flex-1">
-            {dataOpen && (
-              <Pane
-                label="Data"
-                side="left"
-                // The creature form (stat grids, chart, unlocks) is much taller
-                // and wider than the flat-type field grid, so give it more room.
-                className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
+            {isBespoke ? (
+              // Bespoke full-width editor: owns its own scroll/padding region, no
+              // Data/Script split. Registers its save target with this tab's bus.
+              // `scrollbar-gutter: stable` always reserves the scrollbar's width so
+              // a card grid inside doesn't lose a column the moment the vertical
+              // scrollbar appears — it only reflows when the window truly shrinks.
+              <section
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
+                aria-label="Data"
               >
-                <DataPane objectType={tab.objectType} id={tab.id} />
-              </Pane>
-            )}
+                {tab.objectType === "Bundle" ? (
+                  <BundleEditorPane id={tab.id} />
+                ) : (
+                  <PackEditorPane id={tab.id} />
+                )}
+              </section>
+            ) : (
+              <>
+                {dataOpen && (
+                  <Pane
+                    label="Data"
+                    side="left"
+                    // The creature form (stat grids, chart, unlocks) is much taller
+                    // and wider than the flat-type field grid, so give it more room.
+                    className={cn("shrink-0 border-r", isCreature ? "w-[28rem]" : "w-72")}
+                  >
+                    <DataPane objectType={tab.objectType} id={tab.id} />
+                  </Pane>
+                )}
 
-            {/* Script pane owns its own header (names the file + reach) and a
-                full-bleed editor, so it bypasses the generic Pane chrome.
-                min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
-                document scrolls INSIDE the editor instead of growing the section
-                (flex items default to min-height:auto). */}
-            <section
-              className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-              aria-label="Script"
-            >
-              <ScriptPane
-                scriptName={tab.scriptName}
-                reach={scriptReach}
-                alsoOpenElsewhere={alsoOpenElsewhere}
-              />
-            </section>
+                {/* Script pane owns its own header (names the file + reach) and a
+                    full-bleed editor, so it bypasses the generic Pane chrome.
+                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
+                    document scrolls INSIDE the editor instead of growing the section
+                    (flex items default to min-height:auto). */}
+                <section
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                  aria-label="Script"
+                >
+                  <ScriptPane
+                    scriptName={tab.scriptName}
+                    reach={scriptReach}
+                    alsoOpenElsewhere={alsoOpenElsewhere}
+                  />
+                </section>
+              </>
+            )}
           </div>
         </div>
       </RequestSaveProvider>

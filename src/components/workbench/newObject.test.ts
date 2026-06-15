@@ -208,6 +208,7 @@ describe("makeDefault shapes", () => {
       description: "",
       // Optional script: empty when none is attached.
       aiController: "",
+      rarity: "",
       baseStats: {},
       baseAbilities: [],
       statGainsPerLevel: {},

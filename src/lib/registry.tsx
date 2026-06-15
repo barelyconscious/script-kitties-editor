@@ -29,6 +29,8 @@ export type Registry = {
   rarities: RegistryEntry[];
   biomes: RegistryEntry[];
   damageTypes: RegistryEntry[];
+  /** Card rarity tiers for gacha draws (editable, unlike `rarities`). */
+  creatureRarities: RegistryEntry[];
 };
 
 export type RegistryEnumKey = keyof Registry;
@@ -71,6 +73,7 @@ export const DEFAULT_REGISTRY: Registry = {
   rarities: ["POOR", "COMMON", "UNCOMMON", "RARE", "EPIC", "UNIQUE"].map(v),
   biomes: ["DESERT", "FOREST", "MOUNTAINS", "PLAINS", "SWAMP"].map(v),
   damageTypes: ["PHYSICAL", "FIRE", "WATER", "ELECTRIC", "POISON"].map(v),
+  creatureRarities: ["COMMON", "UNCOMMON", "RARE", "MYTHIC"].map(v),
 };
 
 export function loadRegistry(): Promise<Registry> {

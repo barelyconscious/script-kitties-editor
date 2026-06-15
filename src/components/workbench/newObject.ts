@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Creature, saveCreature } from "@/lib/creature";
 import { type Ability, saveAbility } from "@/lib/entities/abilities";
 import { type Biogram, saveBiogram } from "@/lib/entities/biograms";
+import { type Bundle, saveBundle } from "@/lib/entities/bundles";
 import { type Charm, saveCharm } from "@/lib/entities/charms";
 import { type Effect, saveEffect } from "@/lib/entities/effects";
+import { type Pack, savePack } from "@/lib/entities/packs";
 import { DEFAULT_DROP, type ItemRow, saveItemRow } from "@/lib/items";
 import type { GameObjectType } from "./gameObjects";
 
@@ -286,12 +288,39 @@ const CREATURE_DESCRIPTOR: CreationDescriptor<Creature> = {
     description: "",
     // Empty when no script was attached; createObject resolves the shared default when one is.
     aiController: script ?? "",
+    rarity: "",
     baseStats: {},
     baseAbilities: [],
     statGainsPerLevel: {},
     abilitiesByLevel: [],
   }),
   save: saveCreature,
+};
+
+// Bundles & packs are gacha-authoring entities: script-less, so creation never
+// mints or points at a Lua file (scriptPolicy "none").
+const BUNDLE_DESCRIPTOR: CreationDescriptor<Bundle> = {
+  scriptPolicy: { kind: "none" },
+  makeDefault: ({ id, name }) => ({
+    id,
+    name,
+    description: "",
+    sprite: "",
+    creatures: [],
+  }),
+  save: saveBundle,
+};
+
+const PACK_DESCRIPTOR: CreationDescriptor<Pack> = {
+  scriptPolicy: { kind: "none" },
+  makeDefault: ({ id, name }) => ({
+    id,
+    name,
+    description: "",
+    sprite: "",
+    slots: [],
+  }),
+  save: savePack,
 };
 
 // Each entry is internally well-typed against its own T; the registry erases T
@@ -305,6 +334,8 @@ const REGISTRY: Record<GameObjectType, CreationDescriptor<{ id: string }>> = {
   Item: erase(ITEM_DESCRIPTOR),
   Charm: erase(CHARM_DESCRIPTOR),
   Creature: erase(CREATURE_DESCRIPTOR),
+  Bundle: erase(BUNDLE_DESCRIPTOR),
+  Pack: erase(PACK_DESCRIPTOR),
 };
 
 function erase<T extends { id: string }>(

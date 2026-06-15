@@ -11,18 +11,22 @@ use serde::Serialize;
 
 use crate::{
     config::EditorConfig,
-    model::{Ability, AssetEntry, Biogram, Charm, Creature, Dlc, Effect, Item, ItemDrop},
+    model::{
+        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, Item, ItemDrop, Pack,
+    },
 };
 
 pub mod abilities;
 pub mod assets;
 pub mod biograms;
+pub mod bundles;
 pub mod charms;
 pub mod creatures;
 pub mod dlc;
 pub mod effects;
 pub mod item_drops;
 pub mod items;
+pub mod packs;
 pub mod scripts;
 pub mod sprites;
 
@@ -38,6 +42,8 @@ pub struct Dal {
     pub(crate) effects: Cache<(), Arc<Vec<Effect>>>,
     pub(crate) items: Cache<(), Arc<Vec<Item>>>,
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
+    pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
+    pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
     // The game's assets.json manifest (logical name -> on-disk path).
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
     // Resolved sprite data URLs, keyed by logical sprite name.
@@ -60,6 +66,8 @@ impl Dal {
         let effects: Cache<(), Arc<Vec<Effect>>> = Cache::builder().max_capacity(1).build();
         let items: Cache<(), Arc<Vec<Item>>> = Cache::builder().max_capacity(1).build();
         let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
+        let bundles: Cache<(), Arc<Vec<Bundle>>> = Cache::builder().max_capacity(1).build();
+        let packs: Cache<(), Arc<Vec<Pack>>> = Cache::builder().max_capacity(1).build();
         let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
             Cache::builder().max_capacity(1).build();
         let sprites: Cache<String, Arc<Option<String>>> =
@@ -70,7 +78,7 @@ impl Dal {
         let game_root = PathBuf::from(&config.game_install_path);
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &manifest, &sprites, &scripts,
+            &item_drops, &bundles, &packs, &manifest, &sprites, &scripts,
         )?;
 
         Ok(Self {
@@ -83,6 +91,8 @@ impl Dal {
             effects,
             items,
             item_drops,
+            bundles,
+            packs,
             manifest,
             sprites,
             scripts,
@@ -107,6 +117,8 @@ impl Dal {
             &self.effects,
             &self.items,
             &self.item_drops,
+            &self.bundles,
+            &self.packs,
             &self.manifest,
             &self.sprites,
             &self.scripts,
@@ -124,6 +136,8 @@ impl Dal {
         self.effects.invalidate_all();
         self.items.invalidate_all();
         self.item_drops.invalidate_all();
+        self.bundles.invalidate_all();
+        self.packs.invalidate_all();
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
         self.scripts.invalidate_all();
@@ -151,6 +165,8 @@ fn build_watcher(
     effects: &Cache<(), Arc<Vec<Effect>>>,
     items: &Cache<(), Arc<Vec<Item>>>,
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
+    bundles: &Cache<(), Arc<Vec<Bundle>>>,
+    packs: &Cache<(), Arc<Vec<Pack>>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
     scripts: &Cache<String, Arc<Option<String>>>,
@@ -192,6 +208,14 @@ fn build_watcher(
         }),
         (data_dir.join("itemDropTable.json"), {
             let c = item_drops.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("bundles.json"), {
+            let c = bundles.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("packs.json"), {
+            let c = packs.clone();
             Box::new(move || c.invalidate(&()))
         }),
         // assets.json lives at the game root. When it changes, both the manifest

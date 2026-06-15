@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { type Bundle, type BundleCreature, loadBundles, saveBundle } from "@/lib/entities/bundles";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
+import { useAutoSave } from "./autoSave";
 import { StatOverridesGrid } from "./StatOverridesGrid";
 import { useSaveTarget } from "./saveBus";
 
@@ -92,7 +93,10 @@ function BundleEditor({ id }: { id: string }) {
     setLoaded(current);
   }, []);
 
-  useSaveTarget({ id: "data", order: 0, dirty, save });
+  // Bundles auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
+  // run the same guarded write), and it persists on its own as you edit.
+  const flush = useAutoSave({ draft, dirty, save });
+  useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
 
   // Index the population for fast name/lookup in member cards.
   const byId = useMemo(() => new Map(population.map((c) => [c.id, c])), [population]);

@@ -22,6 +22,7 @@ import {
 } from "@/lib/entities/packs";
 import { useEnumValues } from "@/lib/registry";
 import { cn } from "@/lib/utils";
+import { useAutoSave } from "./autoSave";
 import { useSaveTarget } from "./saveBus";
 
 /**
@@ -100,7 +101,10 @@ function PackEditor({ id }: { id: string }) {
     setLoaded(current);
   }, []);
 
-  useSaveTarget({ id: "data", order: 0, dirty, save });
+  // Packs auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
+  // run the same guarded write), and it persists on its own as you edit.
+  const flush = useAutoSave({ draft, dirty, save });
+  useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
 
   if (state.kind === "loading") {
     return (

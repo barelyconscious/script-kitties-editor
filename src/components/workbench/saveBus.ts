@@ -28,6 +28,12 @@ export type SaveTarget = {
   dirty: boolean;
   /** Persist this target. Individually atomic; throws on failure. */
   save: () => Promise<void>;
+  /**
+   * Whether this target persists itself (debounced) on change. Auto targets
+   * (data) are written without a button; manual targets (scripts) only save via
+   * the tab's "Save Script" action. Defaults to manual when omitted.
+   */
+  autoSave?: boolean;
 };
 
 /** The result of attempting to save one target. */
@@ -196,12 +202,12 @@ export function useSaveTarget(target: SaveTarget): void {
     throw new Error("useSaveTarget must be used within a SaveBusProvider");
   }
 
-  const { id, order, dirty, save } = target;
+  const { id, order, dirty, save, autoSave } = target;
   // Re-register whenever any field changes; unregister on unmount or id change.
   useEffect(() => {
-    registry.register({ id, order, dirty, save });
+    registry.register({ id, order, dirty, save, autoSave });
     return () => registry.unregister(id);
-  }, [registry, id, order, dirty, save]);
+  }, [registry, id, order, dirty, save, autoSave]);
 }
 
 /**
@@ -212,8 +218,19 @@ export function useSaveTarget(target: SaveTarget): void {
 export function useSaveBus(): {
   registry: SaveBusRegistry;
   targets: SaveTarget[];
+  /** Any target dirty (auto or manual). */
   dirty: boolean;
+  /** A manual (script) target is dirty — what the Save Script button gates on. */
+  manualDirty: boolean;
+  /** An auto (data) target is dirty — a write is pending/in-flight. */
+  autoDirty: boolean;
+  /** Whether the tab has any manual (script) target at all. */
+  hasManualTarget: boolean;
   saveAll: () => Promise<SaveOutcome[]>;
+  /** Save only the manual (script) targets. */
+  saveManual: () => Promise<SaveOutcome[]>;
+  /** Flush the auto (data) targets immediately (used by ⌘S / close). */
+  saveAuto: () => Promise<SaveOutcome[]>;
 } {
   const [targets, setTargets] = useState<SaveTarget[]>([]);
   // Mirror the current targets in a ref so saveAll always sees the latest set
@@ -241,6 +258,11 @@ export function useSaveBus(): {
     registry: registryRef.current,
     targets,
     dirty: aggregateDirty(targets),
+    manualDirty: targets.some((t) => !t.autoSave && t.dirty),
+    autoDirty: targets.some((t) => t.autoSave && t.dirty),
+    hasManualTarget: targets.some((t) => !t.autoSave),
     saveAll: () => saveAllTargets(targetsRef.current),
+    saveManual: () => saveAllTargets(targetsRef.current.filter((t) => !t.autoSave)),
+    saveAuto: () => saveAllTargets(targetsRef.current.filter((t) => t.autoSave)),
   };
 }

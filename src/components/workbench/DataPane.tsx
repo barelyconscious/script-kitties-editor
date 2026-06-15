@@ -1,6 +1,7 @@
 import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EntityFieldsForm } from "@/components/data-tables/EntityFieldsForm";
+import { useAutoSave } from "./autoSave";
 import { type DataDescriptor, dataDescriptorFor, selectById } from "./dataRegistry";
 import type { GameObjectType } from "./gameObjects";
 import { useSaveTarget } from "./saveBus";
@@ -99,11 +100,15 @@ function DataEditor({
     setLoaded(current);
   }, [descriptor]);
 
+  // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
+  // the same guarded write, and it also persists on its own as you edit.
+  const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({
     id: "data",
     order: 0, // DATA / pointer saves run BEFORE the script (order 10).
     dirty,
-    save,
+    save: flush,
+    autoSave: true,
   });
 
   if (state.kind === "loading") {

@@ -29,9 +29,13 @@ A **`TabWorkspace`** body depends on the object type:
 - **Bundle / Pack** → a **bespoke full-width pane** (`BundleEditorPane` / `PackEditorPane`),
   no script pane — these are script-less, visually richer editors.
 
-Every pane registers with the tab's **save bus** (`saveBus.ts`): one Save action (button or
-⌘S) persists every dirty target of the active tab in order, then reports one summary. After
-a successful save the shell refreshes the object list so renamed/re-sprited objects update.
+Every pane registers a target with the tab's **save bus** (`saveBus.ts`), tagged **auto** or
+**manual**. **Data** targets auto-save: an edit schedules a debounced write (`useAutoSave`,
+`autoSave.tsx`) with a quiet "Saving…/Saved" indicator — no button. **Scripts** are manual:
+the **Save Script** button or ⌘S (and Monaco's ⌘S) persist the script, flushing any pending
+data write first. The unsaved-dot and the leave/close guards track only the script (data is
+already written); a tab close flushes pending data on unmount. After any successful save the
+shell refreshes the object list so renamed/re-sprited objects update.
 
 ### Pack editor terminology
 

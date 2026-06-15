@@ -1,14 +1,21 @@
 import {
+  CircleAlert,
   FileCode2,
   LineChart,
+  Loader2,
   type LucideIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Save,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  type AutoSaveController,
+  AutoSaveControllerProvider,
+  type AutoSaveStatus,
+} from "./autoSave";
 import { BundleEditorPane } from "./BundleEditorPane";
 import { CreatureChartPane } from "./CreatureChartPane";
 import { CreatureDataPane } from "./CreatureDataPane";
@@ -58,20 +65,21 @@ export interface TabWorkspaceProps {
 /** How long a "Saved" confirmation lingers before auto-clearing. */
 const SAVED_CLEAR_MS = 2500;
 
+/** Debounce from the last data edit before an auto-save fires. */
+const DATA_AUTOSAVE_MS = 700;
+
 /**
  * The workspace for ONE open tab: a collapsible 2-pane layout (DATA left, SCRIPT
- * center) defaulting to SCRIPT-ONLY. Owns its own save bus so panes register
- * against this tab instance and nothing leaks across tabs.
+ * center). Owns its own save bus so panes register against this tab instance and
+ * nothing leaks across tabs.
  *
- * The DATA pane (left) and SCRIPT pane (center) both register with the bus. The
- * API reference is NOT here — it is a single static pane lifted to the Workbench
- * shell (one shared toggle across all tabs), since GAME_API is identical for
- * every tab and holds no bus state.
- *
- * SAVE TRUST MODEL (task 427): one Save action — the toolbar button, the
- * window-level ⌘S (active tab only), or Monaco's in-editor ⌘S — persists every
- * DIRTY target of THIS tab in order (data before script), then surfaces a single
- * summary. A partial failure NEVER reads as success.
+ * SAVE MODEL: DATA persists itself — data targets auto-save (debounced) and show
+ * a quiet "Saving…/Saved" indicator. SCRIPTS are manual: the "Save Script"
+ * button, the window-level ⌘S (active tab only), or Monaco's in-editor ⌘S
+ * persist the script — and flush any pending data write first so a forced save
+ * never races the debounce. The unsaved dot + leave/close guards track the
+ * SCRIPT (the only thing needing a conscious save). The API reference is a single
+ * static pane lifted to the shell, not here.
  */
 export function TabWorkspace({
   tab,
@@ -97,50 +105,68 @@ export function TabWorkspace({
 
   const bus = useSaveBus();
 
-  // Inline save status: a quiet "Saved" on success (auto-clears) or a legible,
-  // persistent error on failure (cleared on the next edit/save).
+  // The SCRIPT (manual) save summary: a quiet "Saved" on success (auto-clears)
+  // or a persistent error (cleared on the next script edit/save).
   const [status, setStatus] = useState<SaveSummary | null>(null);
+  // The DATA auto-save indicator — quiet "Saving…/Saved", persistent on error.
+  const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>({ kind: "idle" });
 
-  // Report dirtiness up. Fire only on transitions to avoid redundant parent
-  // setState churn.
+  // Report SCRIPT dirtiness up: the unsaved dot + close/leave/unload guards track
+  // the script (data auto-saves, so it isn't unsaved work needing a conscious
+  // Save). Fire only on transitions to avoid redundant parent setState churn.
   const lastDirtyRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (lastDirtyRef.current === bus.dirty) return;
-    lastDirtyRef.current = bus.dirty;
-    onDirtyChange?.(bus.dirty);
-  }, [bus.dirty, onDirtyChange]);
+    if (lastDirtyRef.current === bus.manualDirty) return;
+    lastDirtyRef.current = bus.manualDirty;
+    onDirtyChange?.(bus.manualDirty);
+  }, [bus.manualDirty, onDirtyChange]);
 
-  // A fresh edit invalidates any lingering status (esp. a stale error).
+  // A fresh SCRIPT edit invalidates any lingering script status (esp. an error).
   useEffect(() => {
-    if (bus.dirty) setStatus(null);
-  }, [bus.dirty]);
+    if (bus.manualDirty) setStatus(null);
+  }, [bus.manualDirty]);
 
-  // Auto-clear a success confirmation after a couple seconds. Errors persist.
+  // Auto-clear the script success confirmation after a couple seconds. Errors persist.
   useEffect(() => {
     if (!status?.ok || status.message.length === 0) return;
     const timer = setTimeout(() => setStatus(null), SAVED_CLEAR_MS);
     return () => clearTimeout(timer);
   }, [status]);
 
-  // The single unified save. Runs the bus (dirty targets, in order), then maps
-  // the outcomes to one summary. Empty (nothing dirty) is a true no-op: don't
-  // flash "Saved".
-  const saveAllRef = useRef(bus.saveAll);
-  saveAllRef.current = bus.saveAll;
+  // Auto-clear the data "Saved" tick; "saving"/"error" persist.
+  useEffect(() => {
+    if (autoStatus.kind !== "saved") return;
+    const timer = setTimeout(() => setAutoStatus({ kind: "idle" }), SAVED_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [autoStatus]);
+
+  // Shared with the data panes: debounce delay, the quiet status report, and the
+  // post-save object-list refresh. Stable identity so consumers don't churn.
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
-  const handleSave = useCallback(async () => {
-    const outcomes = await saveAllRef.current();
+  const refresh = useCallback(() => onSavedRef.current?.(), []);
+  const autoSaveController = useMemo<AutoSaveController>(
+    () => ({ delayMs: DATA_AUTOSAVE_MS, report: setAutoStatus, onSaved: refresh }),
+    [refresh],
+  );
+
+  // "Save Script": flush any pending DATA write first (so a forced save never
+  // races the debounce), then persist the manual (script) targets and summarize.
+  const saveAutoRef = useRef(bus.saveAuto);
+  saveAutoRef.current = bus.saveAuto;
+  const saveManualRef = useRef(bus.saveManual);
+  saveManualRef.current = bus.saveManual;
+  const handleSaveScript = useCallback(async () => {
+    await saveAutoRef.current();
+    const outcomes = await saveManualRef.current();
     const summary = summarizeOutcomes(outcomes);
-    if (summary.message.length === 0) return; // no-op (nothing was dirty)
+    if (summary.message.length === 0) return; // no-op (script wasn't dirty)
     setStatus(summary);
-    // A real save landed — let the shell refresh the object list so an edited
-    // name/sprite shows up in the panel. Skip on failure (nothing persisted).
     if (summary.ok) onSavedRef.current?.();
   }, []);
 
-  // Window-level ⌘S / Ctrl+S — but ONLY for the active (non-hidden) tab. Every
-  // open tab is mounted, so without this guard every tab's listener would fire.
+  // Window-level ⌘S / Ctrl+S — active (non-hidden) tab only. Saves the script
+  // (flushing pending data first), matching the toolbar + Monaco's ⌘S.
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
   useEffect(() => {
@@ -149,162 +175,194 @@ export function TabWorkspace({
       if (!(e.metaKey || e.ctrlKey)) return;
       if (hiddenRef.current) return; // inactive tab: let the active one handle it
       e.preventDefault();
-      void handleSave();
+      void handleSaveScript();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave]);
+  }, [handleSaveScript]);
 
   return (
     <SaveBusProvider value={bus.registry}>
-      <RequestSaveProvider value={handleSave}>
-        <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
-          {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
-          <div className="flex items-center gap-1 border-b px-2 py-1.5">
-            {/* No Data/Script split for bespoke (script-less) editors, so the
+      <AutoSaveControllerProvider value={autoSaveController}>
+        <RequestSaveProvider value={handleSaveScript}>
+          <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
+            {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
+            <div className="flex items-center gap-1 border-b px-2 py-1.5">
+              {/* No Data/Script split for bespoke (script-less) editors, so the
                 data-pane toggle is hidden for them. */}
-            {!isBespoke && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title={dataOpen ? "Hide data pane" : "Show data pane"}
-                aria-pressed={dataOpen}
-                onClick={() => setDataOpen((v) => !v)}
-              >
-                {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-              </Button>
-            )}
-            {/* Creatures get a segmented control to swap the center region between
+              {!isBespoke && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title={dataOpen ? "Hide data pane" : "Show data pane"}
+                  aria-pressed={dataOpen}
+                  onClick={() => setDataOpen((v) => !v)}
+                >
+                  {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+                </Button>
+              )}
+              {/* Creatures get a segmented control to swap the center region between
                 the aiController script and the stats graph. */}
-            {isCreature && (
-              <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
-                <ViewToggleButton
-                  active={creatureView === "script"}
-                  onClick={() => setCreatureView("script")}
-                  Icon={FileCode2}
-                  label="Script"
-                />
-                <ViewToggleButton
-                  active={creatureView === "chart"}
-                  onClick={() => setCreatureView("chart")}
-                  Icon={LineChart}
-                  label="Stats"
-                />
-              </div>
-            )}
-            {/* Bespoke editors (bundle/pack) already show the name in the tab and
+              {isCreature && (
+                <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
+                  <ViewToggleButton
+                    active={creatureView === "script"}
+                    onClick={() => setCreatureView("script")}
+                    Icon={FileCode2}
+                    label="Script"
+                  />
+                  <ViewToggleButton
+                    active={creatureView === "chart"}
+                    onClick={() => setCreatureView("chart")}
+                    Icon={LineChart}
+                    label="Stats"
+                  />
+                </div>
+              )}
+              {/* Bespoke editors (bundle/pack) already show the name in the tab and
                 in their own Details section, so the toolbar omits it to avoid a
                 third copy. */}
-            {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
-            {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
+              {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
+              {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
                 toolbar doesn't repeat it. */}
-            {status && status.message.length > 0 && (
-              <span
-                role="status"
-                className={cn(
-                  "ml-2 truncate text-xs",
-                  status.ok ? "text-muted-foreground" : "font-medium text-destructive",
-                )}
-                title={status.message}
-              >
-                {status.message}
-              </span>
-            )}
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!bus.dirty}
-                onClick={() => void handleSave()}
-              >
-                <Save />
-                Save
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex min-h-0 flex-1">
-            {isBespoke ? (
-              // Bespoke full-width editor: owns its own scroll/padding region, no
-              // Data/Script split. Registers its save target with this tab's bus.
-              // `scrollbar-gutter: stable` always reserves the scrollbar's width so
-              // a card grid inside doesn't lose a column the moment the vertical
-              // scrollbar appears — it only reflows when the window truly shrinks.
-              <section
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
-                aria-label="Data"
-              >
-                {tab.objectType === "Bundle" ? (
-                  <BundleEditorPane id={tab.id} />
-                ) : (
-                  <PackEditorPane id={tab.id} />
-                )}
-              </section>
-            ) : isCreature ? (
-              // Creatures share ONE draft across both panes via the provider, so
-              // the stats graph reflects live (unsaved) edits and a focused stat
-              // box drives the chart. The provider is always mounted (outside the
-              // dataOpen / view toggles) so the draft + save target never unmount.
-              <CreatureTabProvider id={tab.id}>
-                {dataOpen && (
-                  // The creature form (stat grids, unlocks) is much taller and
-                  // wider than the flat-type field grid, so give it more room.
-                  <Pane label="Data" side="left" className="w-[28rem] shrink-0 border-r">
-                    <CreatureDataPane />
-                  </Pane>
-                )}
-
-                <section
-                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                  aria-label={creatureView === "chart" ? "Stats graph" : "Script"}
+              {status && status.message.length > 0 && (
+                <span
+                  role="status"
+                  className={cn(
+                    "ml-2 truncate text-xs",
+                    status.ok ? "text-muted-foreground" : "font-medium text-destructive",
+                  )}
+                  title={status.message}
                 >
-                  {/* Keep the script editor MOUNTED (hidden) when the chart is
+                  {status.message}
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <AutoSaveIndicator status={autoStatus} />
+                {/* Scripts save manually; bundles/packs are script-less, so the
+                  button only appears when the tab actually has a script. */}
+                {bus.hasManualTarget && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!bus.manualDirty}
+                    onClick={() => void handleSaveScript()}
+                  >
+                    <Save />
+                    Save Script
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1">
+              {isBespoke ? (
+                // Bespoke full-width editor: owns its own scroll/padding region, no
+                // Data/Script split. Registers its save target with this tab's bus.
+                // `scrollbar-gutter: stable` always reserves the scrollbar's width so
+                // a card grid inside doesn't lose a column the moment the vertical
+                // scrollbar appears — it only reflows when the window truly shrinks.
+                <section
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
+                  aria-label="Data"
+                >
+                  {tab.objectType === "Bundle" ? (
+                    <BundleEditorPane id={tab.id} />
+                  ) : (
+                    <PackEditorPane id={tab.id} />
+                  )}
+                </section>
+              ) : isCreature ? (
+                // Creatures share ONE draft across both panes via the provider, so
+                // the stats graph reflects live (unsaved) edits and a focused stat
+                // box drives the chart. The provider is always mounted (outside the
+                // dataOpen / view toggles) so the draft + save target never unmount.
+                <CreatureTabProvider id={tab.id}>
+                  {dataOpen && (
+                    // The creature form (stat grids, unlocks) is much taller and
+                    // wider than the flat-type field grid, so give it more room.
+                    <Pane label="Data" side="left" className="w-[28rem] shrink-0 border-r">
+                      <CreatureDataPane />
+                    </Pane>
+                  )}
+
+                  <section
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                    aria-label={creatureView === "chart" ? "Stats graph" : "Script"}
+                  >
+                    {/* Keep the script editor MOUNTED (hidden) when the chart is
                       shown so its unsaved edits and save-bus registration survive
                       the toggle. */}
-                  <div
-                    className={cn(
-                      "flex min-h-0 flex-1 flex-col",
-                      creatureView === "chart" && "hidden",
-                    )}
+                    <div
+                      className={cn(
+                        "flex min-h-0 flex-1 flex-col",
+                        creatureView === "chart" && "hidden",
+                      )}
+                    >
+                      <ScriptPane
+                        scriptName={tab.scriptName}
+                        reach={scriptReach}
+                        alsoOpenElsewhere={alsoOpenElsewhere}
+                      />
+                    </div>
+                    {creatureView === "chart" && <CreatureChartPane />}
+                  </section>
+                </CreatureTabProvider>
+              ) : (
+                <>
+                  {dataOpen && (
+                    <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
+                      <DataPane objectType={tab.objectType} id={tab.id} />
+                    </Pane>
+                  )}
+
+                  {/* The Script pane owns its own header (names the file + reach) and
+                    a full-bleed editor, so it bypasses the generic Pane chrome.
+                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
+                    document scrolls INSIDE the editor instead of growing the section
+                    (flex items default to min-height:auto). */}
+                  <section
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                    aria-label="Script"
                   >
                     <ScriptPane
                       scriptName={tab.scriptName}
                       reach={scriptReach}
                       alsoOpenElsewhere={alsoOpenElsewhere}
                     />
-                  </div>
-                  {creatureView === "chart" && <CreatureChartPane />}
-                </section>
-              </CreatureTabProvider>
-            ) : (
-              <>
-                {dataOpen && (
-                  <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
-                    <DataPane objectType={tab.objectType} id={tab.id} />
-                  </Pane>
-                )}
-
-                {/* The Script pane owns its own header (names the file + reach) and
-                    a full-bleed editor, so it bypasses the generic Pane chrome.
-                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
-                    document scrolls INSIDE the editor instead of growing the section
-                    (flex items default to min-height:auto). */}
-                <section
-                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                  aria-label="Script"
-                >
-                  <ScriptPane
-                    scriptName={tab.scriptName}
-                    reach={scriptReach}
-                    alsoOpenElsewhere={alsoOpenElsewhere}
-                  />
-                </section>
-              </>
-            )}
+                  </section>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      </RequestSaveProvider>
+        </RequestSaveProvider>
+      </AutoSaveControllerProvider>
     </SaveBusProvider>
+  );
+}
+
+/** Quiet data auto-save indicator: a spinner while saving, a persistent error. */
+function AutoSaveIndicator({ status }: { status: AutoSaveStatus }) {
+  if (status.kind === "idle") return null;
+  if (status.kind === "saving") {
+    return (
+      <span className="flex items-center gap-1 text-muted-foreground text-xs">
+        <Loader2 className="size-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (status.kind === "saved") {
+    return <span className="text-muted-foreground text-xs">Saved</span>;
+  }
+  return (
+    <span
+      className="flex items-center gap-1 font-medium text-destructive text-xs"
+      title={status.message}
+    >
+      <CircleAlert className="size-3" />
+      Couldn’t save
+    </span>
   );
 }
 

@@ -1,16 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
+import { useAutoSave } from "./autoSave";
 import { useSaveTarget } from "./saveBus";
 
 type Ability = { id: string; name: string };
@@ -103,17 +96,15 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
 
   const { draft, setDraft, dirty, saving, saveError, save } = useCreatureDraft(saved, onSaved);
 
-  // Ref-stable save so the bus re-registers only on dirty toggle, not every
-  // keystroke — same discipline as ScriptPane/DataPane.
-  const saveRef = useRef(save);
-  saveRef.current = save;
-  const stableSave = useCallback(() => saveRef.current(), []);
-
+  // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
+  // the same guarded write, and it also persists on its own as you edit.
+  const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({
     id: "data",
     order: 0, // DATA saves run BEFORE the script (order 10).
     dirty,
-    save: stableSave,
+    save: flush,
+    autoSave: true,
   });
 
   // Recreated each render on purpose: the draft changes every keystroke and we

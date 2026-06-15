@@ -36,6 +36,10 @@ pub struct Registry {
     pub biomes: Vec<RegistryEntry>,
     #[serde(default = "default_damage_types")]
     pub damage_types: Vec<RegistryEntry>,
+    /// Card rarity tiers for gacha draws. Editor-tweakable (unlike `rarities`,
+    /// the fixed item tiers) since the gacha tiers are a design knob.
+    #[serde(default = "default_creature_rarities")]
+    pub creature_rarities: Vec<RegistryEntry>,
 }
 
 /// Load the registry, creating it with defaults on first run. A malformed file
@@ -83,6 +87,7 @@ fn default_registry() -> Registry {
         rarities: default_rarities(),
         biomes: default_biomes(),
         damage_types: default_damage_types(),
+        creature_rarities: default_creature_rarities(),
     }
 }
 
@@ -158,5 +163,15 @@ fn default_damage_types() -> Vec<RegistryEntry> {
         entry("WATER", "Water damage."),
         entry("ELECTRIC", "Electric damage."),
         entry("POISON", "Poison damage."),
+    ]
+}
+
+// Ordered low → high; order drives the creature-rarity dropdown.
+fn default_creature_rarities() -> Vec<RegistryEntry> {
+    vec![
+        entry("COMMON", "Common"),
+        entry("UNCOMMON", "Uncommon"),
+        entry("RARE", "Rare."),
+        entry("MYTHIC", "Mythic"),
     ]
 }

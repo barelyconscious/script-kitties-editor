@@ -178,5 +178,23 @@
       "value": "POISON",
       "description": "Poison damage."
     }
+  ],
+  "creatureRarities": [
+    {
+      "value": "COMMON",
+      "description": "A common creature card."
+    },
+    {
+      "value": "UNCOMMON",
+      "description": "Less common than usual."
+    },
+    {
+      "value": "RARE",
+      "description": "A rare creature card."
+    },
+    {
+      "value": "MYTHIC",
+      "description": "A premium rare creature card."
+    }
   ]
 }

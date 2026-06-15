@@ -55,7 +55,7 @@ function PackEditor({ id }: { id: string }) {
   const [loaded, setLoaded] = useState<Pack | null>(null);
   const [draft, setDraft] = useState<Pack | null>(null);
   const [bundles, setBundles] = useState<Bundle[]>([]);
-  const rarities = useEnumValues("rarities");
+  const rarities = useEnumValues("creatureRarities");
 
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 

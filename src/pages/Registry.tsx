@@ -34,6 +34,11 @@ const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string; readOnly?:
     readOnly: true,
   },
   {
+    key: "creatureRarities",
+    title: "Creature Rarities",
+    blurb: "Card rarity tiers for gacha draws (low → high).",
+  },
+  {
     key: "biomes",
     title: "Biomes",
     blurb: "World biomes for item drops. Fixed by the game.",

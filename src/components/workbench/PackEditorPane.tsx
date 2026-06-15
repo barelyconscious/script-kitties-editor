@@ -293,22 +293,16 @@ function SlotCard({
   }, [flashToken]);
 
   return (
-    <div className="relative">
-      {/* Layered sheets peeking out behind the card when it's a stack. Capped at
-          two regardless of count so a big stack doesn't sprawl. */}
+    // self-start so the grid doesn't stretch this item to the row's tallest card:
+    // the card keeps its natural height and the stacked sheet matches it exactly.
+    <div className="relative self-start">
+      {/* A single sheet peeking out behind the card marks it as a stack —
+          shown for any count > 1, never more than one regardless of size. */}
       {stacked && (
-        <>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-lg border bg-card"
-          />
-          {count > 2 && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 translate-x-3 translate-y-3 rounded-lg border bg-card"
-            />
-          )}
-        </>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-lg border bg-card"
+        />
       )}
       <div
         className={cn(

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,8 @@ export default function CreatureEditor() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Collapse the single "Creatures" group, mirroring the Workbench object list.
+  const [listCollapsed, setListCollapsed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,48 +90,72 @@ export default function CreatureEditor() {
   }
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
-      {/* Creature list */}
-      <aside className="flex w-64 shrink-0 flex-col gap-2">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Filter creatures…"
-            className="pl-8"
-          />
+    <div className="flex h-full min-h-0">
+      {/* Creature list — styled to match the Workbench object panel: hugs the
+          left window edge, square corners, sidebar surface, IDE-style. */}
+      <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar">
+        <div className="px-3 py-2">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.currentTarget.value)}
+              placeholder="Search creatures…"
+              className="pl-8"
+            />
+          </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-1">
-          {filtered.length === 0 ? (
-            <p className="p-2 text-muted-foreground text-sm">No creatures match “{query}”.</p>
-          ) : (
-            filtered.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => select(c)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                  c.id === selectedId ? "bg-muted font-medium" : "hover:bg-muted/50",
-                )}
-              >
-                <Sprite name={c.sprite} className="size-6" />
-                <span className="flex-1 truncate">{c.name}</span>
-                {c.id === selectedId && dirty && (
-                  <span
-                    className="size-1.5 shrink-0 rounded-full bg-primary"
-                    title="Unsaved changes"
-                  />
-                )}
-              </button>
-            ))
-          )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+          <button
+            type="button"
+            onClick={() => setListCollapsed((v) => !v)}
+            className="flex w-full min-w-0 items-center gap-1 px-2 py-1.5 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
+          >
+            {listCollapsed ? (
+              <ChevronRight className="size-3.5" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
+            <span>Creatures</span>
+            <span className="ml-auto text-muted-foreground/60 tabular-nums">{filtered.length}</span>
+          </button>
+          {!listCollapsed &&
+            (filtered.length === 0 ? (
+              <p className="px-3 py-8 text-center text-muted-foreground text-sm">
+                {query.trim() ? `Nothing matches “${query}”.` : "No creatures found."}
+              </p>
+            ) : (
+              <ul>
+                {filtered.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => select(c)}
+                      title={c.name}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-2 py-1 pl-6 text-left text-sm transition-colors hover:bg-muted",
+                        c.id === selectedId && "bg-muted font-medium",
+                      )}
+                    >
+                      <Sprite name={c.sprite} className="size-5" />
+                      <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                      {c.id === selectedId && dirty && (
+                        <span
+                          className="size-1.5 shrink-0 rounded-full bg-primary"
+                          title="Unsaved changes"
+                        />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ))}
         </div>
       </aside>
 
-      {/* Editor */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Editor — full-bleed now, so the column carries its own padding. */}
+      <div className="flex min-w-0 flex-1 flex-col px-4 pt-4">
         {draft ? (
           <>
             <div className="flex items-center gap-3 border-b pb-3">

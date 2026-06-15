@@ -63,8 +63,10 @@ function App() {
           <main
             className={cn(
               "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
-              // The Workbench is full-bleed; the form-first tools keep their padding.
-              activeTool !== "workbench" && "p-4",
+              // The Workbench and Creature Editor are full-bleed (their left list
+              // panels hug the window edge, IDE-style); the table/registry tools
+              // keep their padding.
+              (activeTool === "data-tables" || activeTool === "registry") && "p-4",
             )}
           >
             {/* The Workbench stays mounted (hidden when inactive) so its open tabs

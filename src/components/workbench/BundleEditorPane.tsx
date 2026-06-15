@@ -10,10 +10,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { type Bundle, type BundleCreature, loadBundles, saveBundle } from "@/lib/entities/bundles";
+import { useHistoryState } from "@/lib/useHistoryState";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
 import { StatOverridesGrid } from "./StatOverridesGrid";
 import { useSaveTarget } from "./saveBus";
+import { useUndoTarget } from "./undo";
 
 /**
  * The bespoke, full-width DATA editor for a BUNDLE tab. A bundle groups creatures
@@ -44,7 +46,11 @@ type LoadState =
 function BundleEditor({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [loaded, setLoaded] = useState<Bundle | null>(null);
-  const [draft, setDraft] = useState<Bundle | null>(null);
+  // The draft + its undo history; `setDraft` records edits, `reset` re-seeds.
+  const history = useHistoryState<Bundle | null>(null);
+  const draft = history.value;
+  const setDraft = history.set;
+  const reset = history.reset;
   const [population, setPopulation] = useState<Creature[]>([]);
   const [abilities, setAbilities] = useState<AbilityOption[]>([]);
 
@@ -70,7 +76,7 @@ function BundleEditor({ id }: { id: string }) {
         setPopulation(creatures);
         setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
         setLoaded(found);
-        setDraft(found);
+        reset(found); // seed the draft, dropping any prior history
         setState({ kind: "loaded" });
       })
       .catch((err) => {
@@ -80,7 +86,7 @@ function BundleEditor({ id }: { id: string }) {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 
@@ -97,6 +103,15 @@ function BundleEditor({ id }: { id: string }) {
   // run the same guarded write), and it persists on its own as you edit.
   const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
+
+  // Undo/redo for the bundle draft (Ctrl+Z), driven from the tab.
+  useUndoTarget({
+    undo: history.undo,
+    redo: history.redo,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
+    commit: history.commit,
+  });
 
   // Index the population for fast name/lookup in member cards.
   const byId = useMemo(() => new Map(population.map((c) => [c.id, c])), [population]);

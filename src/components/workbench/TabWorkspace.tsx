@@ -6,7 +6,9 @@ import {
   type LucideIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Redo2,
   Save,
+  Undo2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,7 @@ import {
   useSaveBus,
 } from "./saveBus";
 import type { WorkbenchTab } from "./tabs";
+import { UndoRegistryProvider, type UndoTarget } from "./undo";
 
 export interface TabWorkspaceProps {
   tab: WorkbenchTab;
@@ -105,6 +108,14 @@ export function TabWorkspace({
 
   const bus = useSaveBus();
 
+  // The active data editor's undo handlers (creatures/flat/bundle/pack register
+  // exactly one). Drives the toolbar undo/redo buttons + Ctrl+Z keybinding.
+  const [undoTarget, setUndoTarget] = useState<UndoTarget | null>(null);
+  const undoTargetRef = useRef(undoTarget);
+  undoTargetRef.current = undoTarget;
+  const undoRegistry = useMemo(() => ({ set: setUndoTarget }), []);
+  const commitUndoStep = useCallback(() => undoTargetRef.current?.commit(), []);
+
   // The SCRIPT (manual) save summary: a quiet "Saved" on success (auto-clears)
   // or a persistent error (cleared on the next script edit/save).
   const [status, setStatus] = useState<SaveSummary | null>(null);
@@ -165,17 +176,35 @@ export function TabWorkspace({
     if (summary.ok) onSavedRef.current?.();
   }, []);
 
-  // Window-level ⌘S / Ctrl+S — active (non-hidden) tab only. Saves the script
-  // (flushing pending data first), matching the toolbar + Monaco's ⌘S.
+  // Window-level shortcuts for the active (non-hidden) tab: ⌘S/Ctrl+S saves the
+  // script (flushing pending data first); Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y)
+  // undo/redo the DATA draft. Scripts undo inside Monaco, so we defer when it's
+  // focused; elsewhere we override native input undo (app-level data undo).
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.key === "s" || e.key === "S")) return;
       if (!(e.metaKey || e.ctrlKey)) return;
       if (hiddenRef.current) return; // inactive tab: let the active one handle it
-      e.preventDefault();
-      void handleSaveScript();
+      const key = e.key.toLowerCase();
+      if (key === "s") {
+        e.preventDefault();
+        void handleSaveScript();
+        return;
+      }
+      if (key === "z" || key === "y") {
+        const el = e.target as HTMLElement | null;
+        if (el?.closest?.(".monaco-editor")) return; // Monaco owns its own undo
+        const target = undoTargetRef.current;
+        if (!target) return;
+        e.preventDefault(); // override native per-input undo
+        const redo = key === "y" || (key === "z" && e.shiftKey);
+        if (redo) {
+          if (target.canRedo) target.redo();
+        } else if (target.canUndo) {
+          target.undo();
+        }
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -185,156 +214,190 @@ export function TabWorkspace({
     <SaveBusProvider value={bus.registry}>
       <AutoSaveControllerProvider value={autoSaveController}>
         <RequestSaveProvider value={handleSaveScript}>
-          <div className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}>
-            {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
-            <div className="flex items-center gap-1 border-b px-2 py-1.5">
-              {/* No Data/Script split for bespoke (script-less) editors, so the
+          <UndoRegistryProvider value={undoRegistry}>
+            {/* onBlur bubbles (focusout): leaving any data field closes the
+                current undo step, so one Ctrl+Z reverts one field's change. */}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: passive focusout boundary, not an interactive control */}
+            <div
+              className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}
+              onBlur={commitUndoStep}
+            >
+              {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
+              <div className="flex items-center gap-1 border-b px-2 py-1.5">
+                {/* No Data/Script split for bespoke (script-less) editors, so the
                 data-pane toggle is hidden for them. */}
-              {!isBespoke && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  title={dataOpen ? "Hide data pane" : "Show data pane"}
-                  aria-pressed={dataOpen}
-                  onClick={() => setDataOpen((v) => !v)}
-                >
-                  {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-                </Button>
-              )}
-              {/* Creatures get a segmented control to swap the center region between
-                the aiController script and the stats graph. */}
-              {isCreature && (
-                <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
-                  <ViewToggleButton
-                    active={creatureView === "script"}
-                    onClick={() => setCreatureView("script")}
-                    Icon={FileCode2}
-                    label="Script"
-                  />
-                  <ViewToggleButton
-                    active={creatureView === "chart"}
-                    onClick={() => setCreatureView("chart")}
-                    Icon={LineChart}
-                    label="Stats"
-                  />
-                </div>
-              )}
-              {/* Bespoke editors (bundle/pack) already show the name in the tab and
-                in their own Details section, so the toolbar omits it to avoid a
-                third copy. */}
-              {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
-              {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
-                toolbar doesn't repeat it. */}
-              {status && status.message.length > 0 && (
-                <span
-                  role="status"
-                  className={cn(
-                    "ml-2 truncate text-xs",
-                    status.ok ? "text-muted-foreground" : "font-medium text-destructive",
-                  )}
-                  title={status.message}
-                >
-                  {status.message}
-                </span>
-              )}
-              <div className="ml-auto flex items-center gap-2">
-                <AutoSaveIndicator status={autoStatus} />
-                {/* Scripts save manually; bundles/packs are script-less, so the
-                  button only appears when the tab actually has a script. */}
-                {bus.hasManualTarget && (
+                {!isBespoke && (
                   <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!bus.manualDirty}
-                    onClick={() => void handleSaveScript()}
+                    variant="ghost"
+                    size="icon-sm"
+                    title={dataOpen ? "Hide data pane" : "Show data pane"}
+                    aria-pressed={dataOpen}
+                    onClick={() => setDataOpen((v) => !v)}
                   >
-                    <Save />
-                    Save Script
+                    {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
                   </Button>
                 )}
-              </div>
-            </div>
-
-            <div className="flex min-h-0 flex-1">
-              {isBespoke ? (
-                // Bespoke full-width editor: owns its own scroll/padding region, no
-                // Data/Script split. Registers its save target with this tab's bus.
-                // `scrollbar-gutter: stable` always reserves the scrollbar's width so
-                // a card grid inside doesn't lose a column the moment the vertical
-                // scrollbar appears — it only reflows when the window truly shrinks.
-                <section
-                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
-                  aria-label="Data"
-                >
-                  {tab.objectType === "Bundle" ? (
-                    <BundleEditorPane id={tab.id} />
-                  ) : (
-                    <PackEditorPane id={tab.id} />
-                  )}
-                </section>
-              ) : isCreature ? (
-                // Creatures share ONE draft across both panes via the provider, so
-                // the stats graph reflects live (unsaved) edits and a focused stat
-                // box drives the chart. The provider is always mounted (outside the
-                // dataOpen / view toggles) so the draft + save target never unmount.
-                <CreatureTabProvider id={tab.id}>
-                  {dataOpen && (
-                    // The creature form (stat grids, unlocks) is much taller and
-                    // wider than the flat-type field grid, so give it more room.
-                    <Pane label="Data" side="left" className="w-[28rem] shrink-0 border-r">
-                      <CreatureDataPane />
-                    </Pane>
-                  )}
-
-                  <section
-                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                    aria-label={creatureView === "chart" ? "Stats graph" : "Script"}
+                {/* Creatures get a segmented control to swap the center region between
+                the aiController script and the stats graph. */}
+                {isCreature && (
+                  <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
+                    <ViewToggleButton
+                      active={creatureView === "script"}
+                      onClick={() => setCreatureView("script")}
+                      Icon={FileCode2}
+                      label="Script"
+                    />
+                    <ViewToggleButton
+                      active={creatureView === "chart"}
+                      onClick={() => setCreatureView("chart")}
+                      Icon={LineChart}
+                      label="Stats"
+                    />
+                  </div>
+                )}
+                {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
+                  editor is mounted; scripts undo inside Monaco, not here. */}
+                {undoTarget && (
+                  <div className="ml-1 flex items-center">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Undo (Ctrl+Z)"
+                      disabled={!undoTarget.canUndo}
+                      onClick={() => undoTarget.undo()}
+                    >
+                      <Undo2 />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Redo (Ctrl+Shift+Z)"
+                      disabled={!undoTarget.canRedo}
+                      onClick={() => undoTarget.redo()}
+                    >
+                      <Redo2 />
+                    </Button>
+                  </div>
+                )}
+                {/* Bespoke editors (bundle/pack) already show the name in the tab and
+                in their own Details section, so the toolbar omits it to avoid a
+                third copy. */}
+                {!isBespoke && (
+                  <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
+                )}
+                {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
+                toolbar doesn't repeat it. */}
+                {status && status.message.length > 0 && (
+                  <span
+                    role="status"
+                    className={cn(
+                      "ml-2 truncate text-xs",
+                      status.ok ? "text-muted-foreground" : "font-medium text-destructive",
+                    )}
+                    title={status.message}
                   >
-                    {/* Keep the script editor MOUNTED (hidden) when the chart is
+                    {status.message}
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                  <AutoSaveIndicator status={autoStatus} />
+                  {/* Scripts save manually; bundles/packs are script-less, so the
+                  button only appears when the tab actually has a script. */}
+                  {bus.hasManualTarget && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!bus.manualDirty}
+                      onClick={() => void handleSaveScript()}
+                    >
+                      <Save />
+                      Save Script
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1">
+                {isBespoke ? (
+                  // Bespoke full-width editor: owns its own scroll/padding region, no
+                  // Data/Script split. Registers its save target with this tab's bus.
+                  // `scrollbar-gutter: stable` always reserves the scrollbar's width so
+                  // a card grid inside doesn't lose a column the moment the vertical
+                  // scrollbar appears — it only reflows when the window truly shrinks.
+                  <section
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
+                    aria-label="Data"
+                  >
+                    {tab.objectType === "Bundle" ? (
+                      <BundleEditorPane id={tab.id} />
+                    ) : (
+                      <PackEditorPane id={tab.id} />
+                    )}
+                  </section>
+                ) : isCreature ? (
+                  // Creatures share ONE draft across both panes via the provider, so
+                  // the stats graph reflects live (unsaved) edits and a focused stat
+                  // box drives the chart. The provider is always mounted (outside the
+                  // dataOpen / view toggles) so the draft + save target never unmount.
+                  <CreatureTabProvider id={tab.id}>
+                    {dataOpen && (
+                      // The creature form (stat grids, unlocks) is much taller and
+                      // wider than the flat-type field grid, so give it more room.
+                      <Pane label="Data" side="left" className="w-[28rem] shrink-0 border-r">
+                        <CreatureDataPane />
+                      </Pane>
+                    )}
+
+                    <section
+                      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                      aria-label={creatureView === "chart" ? "Stats graph" : "Script"}
+                    >
+                      {/* Keep the script editor MOUNTED (hidden) when the chart is
                       shown so its unsaved edits and save-bus registration survive
                       the toggle. */}
-                    <div
-                      className={cn(
-                        "flex min-h-0 flex-1 flex-col",
-                        creatureView === "chart" && "hidden",
-                      )}
+                      <div
+                        className={cn(
+                          "flex min-h-0 flex-1 flex-col",
+                          creatureView === "chart" && "hidden",
+                        )}
+                      >
+                        <ScriptPane
+                          scriptName={tab.scriptName}
+                          reach={scriptReach}
+                          alsoOpenElsewhere={alsoOpenElsewhere}
+                        />
+                      </div>
+                      {creatureView === "chart" && <CreatureChartPane />}
+                    </section>
+                  </CreatureTabProvider>
+                ) : (
+                  <>
+                    {dataOpen && (
+                      <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
+                        <DataPane objectType={tab.objectType} id={tab.id} />
+                      </Pane>
+                    )}
+
+                    {/* The Script pane owns its own header (names the file + reach) and
+                    a full-bleed editor, so it bypasses the generic Pane chrome.
+                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
+                    document scrolls INSIDE the editor instead of growing the section
+                    (flex items default to min-height:auto). */}
+                    <section
+                      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+                      aria-label="Script"
                     >
                       <ScriptPane
                         scriptName={tab.scriptName}
                         reach={scriptReach}
                         alsoOpenElsewhere={alsoOpenElsewhere}
                       />
-                    </div>
-                    {creatureView === "chart" && <CreatureChartPane />}
-                  </section>
-                </CreatureTabProvider>
-              ) : (
-                <>
-                  {dataOpen && (
-                    <Pane label="Data" side="left" className="w-72 shrink-0 border-r">
-                      <DataPane objectType={tab.objectType} id={tab.id} />
-                    </Pane>
-                  )}
-
-                  {/* The Script pane owns its own header (names the file + reach) and
-                    a full-bleed editor, so it bypasses the generic Pane chrome.
-                    min-h-0 + overflow-hidden BOUND this flex item so a tall Monaco
-                    document scrolls INSIDE the editor instead of growing the section
-                    (flex items default to min-height:auto). */}
-                  <section
-                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-                    aria-label="Script"
-                  >
-                    <ScriptPane
-                      scriptName={tab.scriptName}
-                      reach={scriptReach}
-                      alsoOpenElsewhere={alsoOpenElsewhere}
-                    />
-                  </section>
-                </>
-              )}
+                    </section>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          </UndoRegistryProvider>
         </RequestSaveProvider>
       </AutoSaveControllerProvider>
     </SaveBusProvider>

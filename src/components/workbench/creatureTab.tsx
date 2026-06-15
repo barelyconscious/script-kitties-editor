@@ -5,6 +5,7 @@ import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
 import { useSaveTarget } from "./saveBus";
+import { useUndoTarget } from "./undo";
 
 type Ability = { id: string; name: string };
 
@@ -94,7 +95,19 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
     setPopulation((prev) => prev.map((c) => (c.id === savedDraft.id ? savedDraft : c)));
   }, []);
 
-  const { draft, setDraft, dirty, saving, saveError, save } = useCreatureDraft(saved, onSaved);
+  const {
+    draft,
+    setDraft,
+    dirty,
+    saving,
+    saveError,
+    save,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    commitHistory,
+  } = useCreatureDraft(saved, onSaved);
 
   // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
   // the same guarded write, and it also persists on its own as you edit.
@@ -106,6 +119,9 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
     save: flush,
     autoSave: true,
   });
+
+  // Undo/redo for the creature draft (Ctrl+Z), driven from the tab.
+  useUndoTarget({ undo, redo, canUndo, canRedo, commit: commitHistory });
 
   // Recreated each render on purpose: the draft changes every keystroke and we
   // WANT the consuming panes (chart especially) to re-render with it.

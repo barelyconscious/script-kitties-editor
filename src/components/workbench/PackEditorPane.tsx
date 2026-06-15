@@ -21,9 +21,11 @@ import {
   savePack,
 } from "@/lib/entities/packs";
 import { useEnumValues } from "@/lib/registry";
+import { useHistoryState } from "@/lib/useHistoryState";
 import { cn } from "@/lib/utils";
 import { useAutoSave } from "./autoSave";
 import { useSaveTarget } from "./saveBus";
+import { useUndoTarget } from "./undo";
 
 /**
  * The bespoke, full-width DATA editor for a PACK tab. A pack is a card pack whose
@@ -54,7 +56,11 @@ type LoadState =
 function PackEditor({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [loaded, setLoaded] = useState<Pack | null>(null);
-  const [draft, setDraft] = useState<Pack | null>(null);
+  // The draft + its undo history; `setDraft` records edits, `reset` re-seeds.
+  const history = useHistoryState<Pack | null>(null);
+  const draft = history.value;
+  const setDraft = history.set;
+  const reset = history.reset;
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const rarities = useEnumValues("creatureRarities");
 
@@ -78,7 +84,7 @@ function PackEditor({ id }: { id: string }) {
         }
         setBundles(bundleList);
         setLoaded(found);
-        setDraft(found);
+        reset(found); // seed the draft, dropping any prior history
         setState({ kind: "loaded" });
       })
       .catch((err) => {
@@ -88,7 +94,7 @@ function PackEditor({ id }: { id: string }) {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 
@@ -105,6 +111,15 @@ function PackEditor({ id }: { id: string }) {
   // run the same guarded write), and it persists on its own as you edit.
   const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
+
+  // Undo/redo for the pack draft (Ctrl+Z), driven from the tab.
+  useUndoTarget({
+    undo: history.undo,
+    redo: history.redo,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
+    commit: history.commit,
+  });
 
   if (state.kind === "loading") {
     return (

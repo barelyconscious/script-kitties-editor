@@ -1,10 +1,12 @@
 import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EntityFieldsForm } from "@/components/data-tables/EntityFieldsForm";
+import { useHistoryState } from "@/lib/useHistoryState";
 import { useAutoSave } from "./autoSave";
 import { type DataDescriptor, dataDescriptorFor, selectById } from "./dataRegistry";
 import type { GameObjectType } from "./gameObjects";
 import { useSaveTarget } from "./saveBus";
+import { useUndoTarget } from "./undo";
 
 /**
  * The DATA pane for one Workbench tab: renders a non-creature object's
@@ -54,9 +56,11 @@ function DataEditor({
   id: string;
 }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  // Baseline from disk + the working draft. Both meaningful only when loaded.
+  // Baseline from disk; the working draft + its undo history live in `history`.
   const [loaded, setLoaded] = useState<{ id: string } | null>(null);
-  const [draft, setDraft] = useState<{ id: string } | null>(null);
+  const history = useHistoryState<{ id: string } | null>(null);
+  const draft = history.value;
+  const reset = history.reset;
 
   // SECOND FETCH: pull the full per-domain records and select this one by id.
   useEffect(() => {
@@ -72,7 +76,7 @@ function DataEditor({
           return;
         }
         setLoaded(record);
-        setDraft(record);
+        reset(record); // seed the draft, dropping any prior history
         setState({ kind: "loaded" });
       })
       .catch((err) => {
@@ -82,7 +86,7 @@ function DataEditor({
     return () => {
       cancelled = true;
     };
-  }, [descriptor, id]);
+  }, [descriptor, id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 
@@ -111,6 +115,15 @@ function DataEditor({
     autoSave: true,
   });
 
+  // Undo/redo for the data form (Ctrl+Z), driven from the tab.
+  useUndoTarget({
+    undo: history.undo,
+    redo: history.redo,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
+    commit: history.commit,
+  });
+
   if (state.kind === "loading") {
     return (
       <PaneStatus>
@@ -137,7 +150,7 @@ function DataEditor({
     );
   }
 
-  return <EntityFieldsForm fields={descriptor.fields} value={draft} onChange={setDraft} fill />;
+  return <EntityFieldsForm fields={descriptor.fields} value={draft} onChange={history.set} fill />;
 }
 
 function PaneStatus({ children }: { children: React.ReactNode }) {

@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { type Creature, sameCreature, saveCreature } from "@/lib/creature";
+import { useHistoryState } from "@/lib/useHistoryState";
 
 /**
  * Controlled draft/save mechanic for a single creature, used by the Workbench's
- * `CreatureDataPane` to own a creature tab's edit state. The parent holds the
+ * `CreatureTabProvider` to own a creature tab's edit state. The parent holds the
  * baseline (the persisted creature, controlled via `saved`); the hook holds the
- * working `draft` and the transient save state.
+ * working `draft`, its undo history, and the transient save state.
  *
- * On a successful save the hook calls `onSaved(draft)` with the *un-normalized*
- * draft. The parent advances its baseline (its creature list) to that value, so
- * `saved` follows and `dirty` clears. The zero-stripping normalization is NOT
- * duplicated here — it lives only in `saveCreature` (`creature.ts`), which is the
- * single source of truth. As a result `dirty` is always compared against the
- * un-normalized draft.
+ * The draft is backed by an undo history (`useHistoryState`) that's independent
+ * of the save baseline, so undo/redo survive auto-saves. On a successful save the
+ * hook calls `onSaved(draft)` with the *un-normalized* draft; the parent advances
+ * its baseline so `saved` follows and `dirty` clears. Normalization lives only in
+ * `saveCreature`, so `dirty` is always compared against the un-normalized draft.
  */
 export type UseCreatureDraft = {
   /** The working copy. `null` when nothing is selected. */
@@ -27,6 +27,12 @@ export type UseCreatureDraft = {
   save: () => Promise<void>;
   /** Discard edits — reset the draft to the current baseline. */
   revert: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Close the current undo step (call on blur). */
+  commitHistory: () => void;
 };
 
 export function useCreatureDraft(
@@ -39,17 +45,21 @@ export function useCreatureDraft(
    */
   onSaved: (savedDraft: Creature) => void,
 ): UseCreatureDraft {
-  const [draft, setDraft] = useState<Creature | null>(saved);
+  const history = useHistoryState<Creature | null>(saved);
+  const draft = history.value;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Re-seed the draft when the *selection* changes (a different creature, or
-  // selecting/clearing). Advancing the baseline to the just-saved draft keeps the
-  // same id, so this does not clobber in-progress edits after a save.
+  // Re-seed the draft (dropping history) when the *selection* changes — a
+  // different creature, or selecting/clearing. Done synchronously during render
+  // (React's "adjust state on prop change" pattern) so the draft is never a frame
+  // behind `saved` — an effect would flash "not found" between load and reseed.
+  // Baseline advances after a save keep the same id, so this won't clobber
+  // in-progress edits or undo history.
   const seededId = useRef<string | null>(saved?.id ?? null);
   if ((saved?.id ?? null) !== seededId.current) {
     seededId.current = saved?.id ?? null;
-    setDraft(saved);
+    history.reset(saved);
     setSaveError(null);
   }
 
@@ -68,15 +78,11 @@ export function useCreatureDraft(
     try {
       await saveCreature(draft);
       // Reflect the persisted normalization (stripped zero gains) locally by
-      // advancing the parent's baseline to the un-normalized draft — identical to
-      // the standalone editor's post-save list update.
+      // advancing the parent's baseline to the un-normalized draft.
       onSavedRef.current(draft);
     } catch (e) {
-      // Set the local error for in-pane display, then RE-THROW so callers see the
-      // failure. This honors the Workbench save-bus contract: a `SaveTarget.save`
-      // MUST throw on failure so the router records `ok: false` and partial
-      // failures never look like success. Standalone call sites swallow the
-      // rejection at their own boundary (they already render `saveError`).
+      // Set the local error for in-pane display, then RE-THROW so the save bus
+      // records `ok: false` and partial failures never look like success.
       setSaveError(String(e));
       throw e;
     } finally {
@@ -85,9 +91,22 @@ export function useCreatureDraft(
   }
 
   function revert() {
-    setDraft(saved);
+    history.reset(saved);
     setSaveError(null);
   }
 
-  return { draft, setDraft, dirty, saving, saveError, save, revert };
+  return {
+    draft,
+    setDraft: history.set,
+    dirty,
+    saving,
+    saveError,
+    save,
+    revert,
+    undo: history.undo,
+    redo: history.redo,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
+    commitHistory: history.commit,
+  };
 }

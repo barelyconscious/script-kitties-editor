@@ -37,6 +37,12 @@ data write first. The unsaved-dot and the leave/close guards track only the scri
 already written); a tab close flushes pending data on unmount. After any successful save the
 shell refreshes the object list so renamed/re-sprited objects update.
 
+The data **draft** is backed by an undo history (`useHistoryState`); each editor registers
+its undo/redo with the tab (`undo.ts`), which binds **Ctrl+Z / Ctrl+Shift+Z** (and toolbar
+buttons) and commits a step on blur. Edits coalesce into one step until a field-blur or a
+short idle pause. Scripts are excluded — Monaco owns its own undo. An undo just sets the
+draft, so it auto-saves like any edit.
+
 ### Pack editor terminology
 
 `PackEditorPane` renders a pack's **slots** as a grid of TCG-style **cards**. Each slot has

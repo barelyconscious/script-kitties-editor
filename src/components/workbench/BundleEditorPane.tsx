@@ -140,9 +140,9 @@ function BundleEditor({ id }: { id: string }) {
   const usedIds = new Set(draft.creatures.map((m) => m.id));
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-8">
+    <div className="flex flex-col gap-8">
       {/* Identity */}
-      <section className="flex flex-col gap-3">
+      <section className="flex w-full max-w-4xl flex-col gap-3">
         <div>
           <h3 className="font-medium text-sm">Details</h3>
           <p className="text-muted-foreground text-xs">Name, sprite, and description.</p>
@@ -204,7 +204,7 @@ function BundleEditor({ id }: { id: string }) {
             No creatures yet. Add one above.
           </p>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
             {draft.creatures.map((member, index) => (
               <MemberCard
                 key={member.id}

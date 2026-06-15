@@ -165,7 +165,7 @@ function PackEditor({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-8">
       {/* Identity */}
-      <section className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+      <section className="flex w-full max-w-4xl flex-col gap-3">
         <div>
           <h3 className="font-medium text-sm">Details</h3>
           <p className="text-muted-foreground text-xs">Name, sprite, and description.</p>

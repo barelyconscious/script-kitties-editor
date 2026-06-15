@@ -148,7 +148,10 @@ export function TabWorkspace({
                 {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
               </Button>
             )}
-            <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
+            {/* Bespoke editors (bundle/pack) already show the name in the tab and
+                in their own Details section, so the toolbar omits it to avoid a
+                third copy. */}
+            {!isBespoke && <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>}
             {bus.dirty && (
               <span
                 role="status"

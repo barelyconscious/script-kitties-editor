@@ -16,7 +16,7 @@ import { useCreatureTab } from "./creatureTab";
  * the Workbench the chart is the center pane's Stats view, not part of this form.
  */
 export function CreatureDataPane() {
-  const { state, draft, setDraft, population, abilities, saving, saveError, setActiveStat } =
+  const { state, draft, setDraft, population, abilities, saveError, setActiveStat } =
     useCreatureTab();
 
   if (state.kind === "loading") {
@@ -64,7 +64,10 @@ export function CreatureDataPane() {
               Name, sprite, and description. The script pointer lives in the SCRIPT pane.
             </p>
           </div>
-          <CreatureIdentityFields creature={draft} onChange={setDraft} disabled={saving} />
+          {/* Not disabled during save: data auto-saves continuously, and
+              disabling a focused input mid-edit would blur it (jarring). The
+              auto-save flush is guarded against concurrent edits. */}
+          <CreatureIdentityFields creature={draft} onChange={setDraft} />
         </section>
 
         <CreatureForm
@@ -72,7 +75,6 @@ export function CreatureDataPane() {
           population={populationWithDraft(population, draft)}
           abilityOptions={abilities}
           onChange={setDraft}
-          disabled={saving}
           showProgressionChart={false}
           singleColumnStats
           onStatFocus={setActiveStat}

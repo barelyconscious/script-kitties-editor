@@ -14,27 +14,23 @@ import type { Creature } from "@/lib/creature";
 import { useEnumValues } from "@/lib/registry";
 
 /**
- * Controlled grid of a creature's identity fields — name, sprite, description,
- * and (only when `includeScript`) the AI-script pointer. The single source for
- * this markup; the Workbench creature DATA pane renders it without
- * `includeScript`, since the Workbench SCRIPT pane owns the script pointer.
+ * Controlled grid of a creature's identity fields — name, sprite, rarity, and
+ * description. The single source for this markup, used by the Workbench creature
+ * DATA pane; the AI-script pointer is NOT here — the Workbench SCRIPT pane owns it.
  *
  * Owns NO draft/dirty/save state: edits report up via `onChange`. The
  * sprite-picker popover is portalled into an internal sibling div so it scrolls
- * within whatever host wraps this — a dialog or a scrollable pane — mirroring
+ * within whatever host wraps this — a scrollable pane — mirroring
  * `EntityFieldsForm`.
  */
 export function CreatureIdentityFields({
   creature,
   onChange,
   disabled,
-  includeScript = false,
 }: {
   creature: Creature;
   onChange: (next: Creature) => void;
   disabled?: boolean;
-  /** Render the AI-script pointer (aiController) field. Off by default. */
-  includeScript?: boolean;
 }) {
   // Portal target for the sprite picker's popover, so it scrolls within the
   // surrounding host (dialog or pane) — same pattern as EntityFieldsForm.
@@ -89,19 +85,6 @@ export function CreatureIdentityFields({
             </SelectContent>
           </Select>
         </div>
-        {includeScript && (
-          <div className="col-span-2 flex flex-col gap-1.5">
-            <Label htmlFor="creature-script" className="text-xs">
-              Script
-            </Label>
-            <Input
-              id="creature-script"
-              value={creature.aiController}
-              disabled={disabled}
-              onChange={(e) => set("aiController", e.currentTarget.value)}
-            />
-          </div>
-        )}
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label htmlFor="creature-description" className="text-xs">
             Description

@@ -105,4 +105,41 @@ describe("decideKeyCommand (task 470)", () => {
   it("ignores unrelated modified keys (e.g. Cmd+A) — null pass-through", () => {
     expect(decideKeyCommand(chord({ key: "a", metaKey: true }), ctx())).toBeNull();
   });
+
+  describe("Monaco focus gating (task 472)", () => {
+    it("passes through (null) undo/redo chords when Monaco is focused — let Monaco handle them", () => {
+      const focused = ctx({ monacoFocused: true });
+      // Cmd+Z, Cmd+Shift+Z, and Ctrl+Y all step aside for Monaco's native undo/redo.
+      expect(decideKeyCommand(chord({ key: "z", metaKey: true }), focused)).toBeNull();
+      expect(
+        decideKeyCommand(chord({ key: "z", metaKey: true, shiftKey: true }), focused),
+      ).toBeNull();
+      expect(decideKeyCommand(chord({ key: "y", ctrlKey: true }), focused)).toBeNull();
+    });
+
+    it("STILL swallows Cmd/Ctrl+S when Monaco is focused — the controller tab must save", () => {
+      const focused = ctx({ monacoFocused: true });
+      // Save is exempt from the Monaco-focus pass-through.
+      expect(decideKeyCommand(chord({ key: "s", metaKey: true }), focused)).toBe("save");
+      expect(
+        decideKeyCommand(
+          chord({ key: "s", metaKey: true }),
+          ctx({ monacoFocused: true, dirty: false }),
+        ),
+      ).toBe("swallow");
+    });
+
+    it("drives document undo/redo when Monaco is NOT focused (visual editor focus, as in 470)", () => {
+      const visual = ctx({ monacoFocused: false });
+      expect(decideKeyCommand(chord({ key: "z", metaKey: true }), visual)).toBe("undo");
+      expect(decideKeyCommand(chord({ key: "z", metaKey: true, shiftKey: true }), visual)).toBe(
+        "redo",
+      );
+    });
+
+    it("defaults to NOT-focused when monacoFocused is omitted (back-compat with 470 callers)", () => {
+      // The field is optional; omitting it must behave exactly like 470.
+      expect(decideKeyCommand(chord({ key: "z", metaKey: true }), ctx())).toBe("undo");
+    });
+  });
 });

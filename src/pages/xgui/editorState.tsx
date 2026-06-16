@@ -106,17 +106,22 @@ export type OpenComponent = {
 
 /**
  * A captured snapshot of the open component's UNDOABLE document — the parts an
- * undo/redo restores. This is just the tree, the controller draft, and the
- * controller filename (the only document fields a mutating action can change);
- * selection, active tab, dirty, and the Data Model JSON scratch are deliberately
- * NOT here, because they are view/scratch state, not the saved artifact. The
- * `controller` attribute that `addController` writes lives inside `root.attrs`,
- * so capturing `root` already covers it; `controllerFileName` is captured
- * separately so undoing an Add-script restores the controller-less state.
+ * undo/redo restores. This is the VISUAL tree and the controller filename (the
+ * only document fields a visual mutating action can change); selection, active
+ * tab, dirty, and the Data Model JSON scratch are deliberately NOT here, because
+ * they are view/scratch state, not the saved artifact. The `controller`
+ * attribute that `addController` writes lives inside `root.attrs`, so capturing
+ * `root` already covers it; `controllerFileName` is captured separately so
+ * undoing an Add-script restores the controller-less state.
+ *
+ * The controller's Lua text is DELIBERATELY NOT snapshotted (task 472): Monaco
+ * owns the controller buffer's own fine-grained undo/redo natively, so document
+ * history governs ONLY the visual GuiNode tree. A visual undo/redo therefore
+ * never rewinds the Lua buffer, and a controller-text edit creates no
+ * document-history step (it still marks dirty so Save persists it).
  */
 export type DocSnapshot = {
   root: GuiNode;
-  controllerText: string | null;
   controllerFileName: string | null;
 };
 
@@ -157,8 +162,10 @@ export type EditorState = {
  * ─────────────────────────────────────────────────────────────────────────────
  * UNDO/REDO + COALESCING (task 470)
  * ─────────────────────────────────────────────────────────────────────────────
- * Document mutations (`replaceRoot`, `addChildNode`, `setNodeAttrs`, `removeNode`,
- * `setControllerText`, `addController`) push an undo step. Some carry an optional
+ * VISUAL-tree mutations (`replaceRoot`, `addChildNode`, `setNodeAttrs`,
+ * `removeNode`, `addController`) push an undo step. (`setControllerText` does
+ * NOT — task 472: Monaco owns the controller buffer's undo, so a controller-text
+ * edit is dirty-but-not-a-document-step.) Some carry an optional
  * `coalesceKey`: consecutive mutations sharing the SAME key collapse into ONE undo
  * step instead of one each — this is what makes a whole drag gesture (a burst of
  * `setNodeAttrs` on every pointermove, all keyed by one gesture id) a single
@@ -226,16 +233,13 @@ export type EditorAction =
    * Update the controller working draft from a user edit (F10) — marks dirty. A
    * no-op if nothing is open. F11's Save reads `open.controllerText` and persists
    * it to `open.controllerFileName`.
+   *
+   * Pushes NO document-history step (task 472): Monaco owns the controller
+   * buffer's fine-grained undo/redo natively, so a controller-text edit must not
+   * appear in the visual document's undo stack. It still marks dirty so Save
+   * persists it.
    */
-  | {
-      type: "setControllerText";
-      text: string;
-      /**
-       * Optional coalescing key (task 470) — pass a stable key (e.g. "controller")
-       * so a continuous typing burst in the controller editor is ONE undo step.
-       */
-      coalesceKey?: string;
-    }
+  | { type: "setControllerText"; text: string }
   /**
    * Add-script flow (F10): attach a brand-new controller to a controller-less
    * component WITHOUT touching disk. Sets the root `<View controller="{name}">`
@@ -303,7 +307,6 @@ const initialState: EditorState = {
 function snapshotOf(open: OpenComponent): DocSnapshot {
   return {
     root: open.root,
-    controllerText: open.controllerText,
     controllerFileName: open.controllerFileName,
   };
 }
@@ -351,8 +354,9 @@ function restoreSnapshot(state: EditorState, snap: DocSnapshot): EditorState {
     open: {
       ...state.open,
       root: snap.root,
-      controllerText: snap.controllerText,
       controllerFileName: snap.controllerFileName,
+      // controllerText is INTENTIONALLY left untouched (task 472): Monaco owns
+      // the controller buffer's undo, so a visual undo/redo must not rewind it.
     },
     // Keep the selection if its node survives the restore (by structural address,
     // since undo/redo never re-mint nodeIds this usually matches by id directly);
@@ -462,9 +466,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         open: { ...state.open, controllerText: action.text },
+        // Marks dirty so Save persists the Lua, but pushes NO history step
+        // (task 472) — Monaco owns the controller buffer's own undo/redo, so a
+        // controller edit must not appear in the visual document's undo stack.
         dirty: true,
-        // Continuous typing coalesces when the caller passes a stable key.
-        ...pushHistory(state, action.coalesceKey),
       };
     case "addController": {
       if (!state.open) return state;

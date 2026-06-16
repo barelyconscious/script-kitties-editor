@@ -509,17 +509,43 @@ describe("editorReducer", () => {
       expect(edited.past).toHaveLength(1);
     });
 
-    it("controller-text edits coalesce under their key and are undoable", () => {
+    it("controller-text edits dirty WITHOUT pushing a document-history step (task 472)", () => {
+      // Monaco owns the controller buffer's undo, so setControllerText must not
+      // appear in the visual document's undo stack.
       let s = editorReducer(CLEAN, {
         type: "open",
         component: openDoc({ controllerFileName: "c.lua", controllerText: "" }),
       });
-      s = editorReducer(s, { type: "setControllerText", text: "a", coalesceKey: "controller" });
-      s = editorReducer(s, { type: "setControllerText", text: "ab", coalesceKey: "controller" });
-      s = editorReducer(s, { type: "setControllerText", text: "abc", coalesceKey: "controller" });
+      s = editorReducer(s, { type: "setControllerText", text: "a" });
+      s = editorReducer(s, { type: "setControllerText", text: "ab" });
+      s = editorReducer(s, { type: "setControllerText", text: "abc" });
+      expect(s.open?.controllerText).toBe("abc");
+      expect(s.dirty).toBe(true);
+      // No undo step was created by the controller edits.
+      expect(s.past).toHaveLength(0);
+      expect(s.lastCoalesceKey).toBeNull();
+    });
+
+    it("a visual undo does NOT change the controller Lua buffer (task 472)", () => {
+      // Open with a controller buffer, make a VISUAL edit, type Lua, then undo
+      // the visual edit — the Lua buffer must survive untouched.
+      let s = editorReducer(CLEAN, {
+        type: "open",
+        component: openDoc({
+          root: tree(),
+          controllerFileName: "c.lua",
+          controllerText: "original",
+        }),
+      });
+      // A visual tree edit pushes a document-history step.
+      s = editorReducer(s, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "changed" } });
+      // The user then edits the Lua (no history step).
+      s = editorReducer(s, { type: "setControllerText", text: "edited lua" });
       expect(s.past).toHaveLength(1);
+      // Undo the visual edit: the tree reverts, the Lua buffer is preserved.
       const undone = editorReducer(s, { type: "undo" });
-      expect(undone.open?.controllerText).toBe("");
+      expect(undone.open?.root.children[0].attrs).toEqual({ id: "a" });
+      expect(undone.open?.controllerText).toBe("edited lua");
     });
 
     it("addChildNode and removeNode are each their own undo step", () => {
@@ -546,10 +572,14 @@ describe("editorReducer", () => {
       expect(added.open?.controllerFileName).toBe("bag.lua");
       expect(added.open?.root.attrs.controller).toBe("bag.lua");
       const undone = editorReducer(added, { type: "undo" });
-      // Back to controller-less: filename, buffer, and the View attr all reverted.
+      // Back to controller-less: the VISUAL document reverts — filename and the
+      // <View controller> attr are restored to none. The controller TEXT buffer
+      // is NOT part of document history (task 472, Monaco owns its undo), so it is
+      // left as the empty buffer Add-script seeded; only the tree-level state
+      // (filename + attr) is what undo restores.
       expect(undone.open?.controllerFileName).toBeNull();
-      expect(undone.open?.controllerText).toBeNull();
       expect(undone.open?.root.attrs.controller).toBeUndefined();
+      expect(undone.open?.controllerText).toBe("");
     });
 
     it("preserves the selection across undo when the node still exists", () => {

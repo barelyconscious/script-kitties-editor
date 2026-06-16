@@ -132,12 +132,11 @@ export function ControllerTab() {
       <div className="min-h-0 flex-1">
         <ScriptEditor
           value={text}
-          // `coalesceKey: "controller"` folds a continuous typing burst into ONE
-          // undo step (task 470) instead of one per keystroke; any other document
-          // action (a tree/property edit) naturally opens a new step.
-          onChange={(value) =>
-            dispatch({ type: "setControllerText", text: value, coalesceKey: "controller" })
-          }
+          // Controller edits mark the component dirty (so Save persists the Lua)
+          // but create NO document-history step (task 472): Monaco owns this
+          // buffer's fine-grained undo/redo natively, reachable because the
+          // window-level Cmd+Z handler steps aside while Monaco is focused.
+          onChange={(value) => dispatch({ type: "setControllerText", text: value })}
         />
       </div>
     </div>

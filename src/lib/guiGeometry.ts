@@ -130,3 +130,56 @@ export function computeBoxGeometry(
     height: calcAxis(size.relY, size.absY),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Drag-to-move (F7): pixel delta → offset writeback
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply an on-screen pixel drag delta to a `position` value, writing the delta
+ * into the OFFSET half (`absX`/`absY`) ONLY and returning the new serialized
+ * `relX,relY,absX,absY` string. This is the pure core of F7 drag-to-move: the
+ * preview computes the cursor delta in stage pixels and hands it here; the result
+ * is written back through the store's `setNodeAttrs` action.
+ *
+ * Invariants (the design's "drag moves offset, never scale"):
+ *  - The SCALE fields (`relX`, `relY`) are passed through VERBATIM — a literal
+ *    `0.5` or a `{healthRatio}` token survives a drag untouched. A drag never
+ *    converts, clamps, or otherwise mutates the scale half.
+ *  - The OFFSET fields accumulate the delta: `absX' = absX + dx`, `absY' = absY +
+ *    dy`. Existing literal offsets are added onto, so repeated/continuous drags
+ *    accumulate correctly.
+ *  - A BOUND offset field (`absX`/`absY` is a whole `{token}`) has no numeric value
+ *    to accumulate against, so its base is treated as `0` and the field is REPLACED
+ *    by the resulting literal pixel value. Rationale: a drag is a direct,
+ *    literal-pixel gesture — the user physically placed the box, so the offset
+ *    becomes that literal. The scale half (where most bindings live for responsive
+ *    layout) is the part a drag promises never to disturb; an offset binding is the
+ *    rarer case and "you dragged it, you set it" is the least-surprising rule. A
+ *    bound SCALE field is never affected (scale is verbatim).
+ *  - Malformed / empty offset fields parse to `0` (the same F2 fallback as
+ *    {@link parseUDim2}), so a half-authored value still drags from origin.
+ *
+ * The pixel delta is already in STAGE pixels — the caller divides the raw screen
+ * delta by the preview zoom factor first (the preview is fixed 100%, so today that
+ * divisor is 1, but keeping it the caller's job means a future zoom needs no change
+ * here). No trig, no layout solver: a stage-pixel delta maps 1:1 to offset pixels.
+ *
+ * @param positionAttr the raw `position` string, or `undefined` when absent (the
+ *   default `0,0,0,0` applies, so a drag from a never-positioned box still works).
+ * @param dx stage-pixel delta to add to the x offset (`absX`).
+ * @param dy stage-pixel delta to add to the y offset (`absY`).
+ */
+export function applyDragDelta(positionAttr: string | undefined, dx: number, dy: number): string {
+  const parts = (positionAttr ?? DEFAULT_POSITION).split(",");
+  // Scale fields verbatim — preserve exactly what was authored (literal or token),
+  // defaulting a missing field to "0" so the result always has four segments.
+  const relX = (parts[0] ?? "").trim() || "0";
+  const relY = (parts[1] ?? "").trim() || "0";
+  // Offset fields: parse the current literal (a token/garbage base parses to 0),
+  // add the delta, and emit the literal pixel result. parseField is reused so the
+  // drag and the renderer agree on what "the current offset" is.
+  const absX = parseField(parts[2]) + dx;
+  const absY = parseField(parts[3]) + dy;
+  return `${relX},${relY},${absX},${absY}`;
+}

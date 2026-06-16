@@ -37,7 +37,7 @@
  * @see design/xgui_ta.md — "Preview back-reference + layer rendering model resolved"
  */
 
-import type { CSSProperties } from "react";
+import { type CSSProperties, useRef } from "react";
 import {
   colorCodeToCss,
   type Palette,
@@ -441,6 +441,23 @@ export type GuiPreviewProps = {
    * Defaults to empty — then palette-named colors render styled-but-literal.
    */
   palette?: Palette;
+  /**
+   * F7 drag-to-move: called at the START of a drag on the SELECTED box, with the
+   * box's `nodeId`. The host captures the node's current `position` here so each
+   * subsequent {@link onDragMove} can be applied to that fixed base (avoiding
+   * per-move accumulation drift). Omit to disable dragging (then the preview is
+   * select-only).
+   */
+  onDragStart?: (nodeId: string) => void;
+  /**
+   * F7 drag-to-move: called on each pointer move during a drag with the box's
+   * `nodeId` and the CUMULATIVE stage-pixel delta from the drag's start
+   * (`totalDx`/`totalDy`). The host applies it to the position captured at
+   * {@link onDragStart} via `applyDragDelta` and writes it back, so the offset
+   * tracks the cursor live. Stage-pixel = screen-pixel ÷ zoom; the preview is
+   * fixed 100%, so the divisor is 1 (the host owns that division).
+   */
+  onDragMove?: (nodeId: string, totalDx: number, totalDy: number) => void;
 };
 
 /**
@@ -462,6 +479,8 @@ export function GuiPreview({
   onSelect,
   model,
   palette = {},
+  onDragStart,
+  onDragMove,
 }: GuiPreviewProps) {
   // A root-only scope stack for the whole tree (F4). Descending into a `forEach`
   // subtree pushes the current item (see `renderChildren`/`stampForEach`); with
@@ -487,6 +506,48 @@ export function GuiPreview({
     onSelect(nearestNodeId([id]));
   };
 
+  // F7 drag-to-move: a drag begins on POINTERDOWN over the box that is already the
+  // current selection — dragging the selected box repositions it; pressing on any
+  // other box just selects it (via the click that follows) and does NOT drag. The
+  // active drag's identity + screen origin live in a ref (not state) so a move
+  // doesn't re-render the preview from the pointer handler — the only render is the
+  // store writeback the host performs from `onDragMove`.
+  const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Dragging is opt-in (host supplies the writeback) and primary-button only.
+    if (!onDragMove || event.button !== 0) return;
+    const target = event.target as Element;
+    const box = target.closest(`[${NODE_ID_ATTR}]`);
+    const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
+    // Only the ALREADY-selected box drags. A forEach instance shares the template
+    // nodeId, so this resolves to the template — dragging an instance moves the
+    // template, the documented behavior (instances are data-driven).
+    if (id === null || id !== selectedNodeId) return;
+    drag.current = { nodeId: id, startX: event.clientX, startY: event.clientY };
+    // Capture so moves/up are delivered here even if the cursor leaves the box.
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onDragStart?.(id);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const active = drag.current;
+    if (!active || !onDragMove) return;
+    // Screen-pixel delta ÷ zoom = stage-pixel delta. The preview is fixed 100%, so
+    // the divisor is 1 and the mapping is 1:1 (no trig, no layout solver).
+    const totalDx = event.clientX - active.startX;
+    const totalDy = event.clientY - active.startY;
+    onDragMove(active.nodeId, totalDx, totalDy);
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
     // The stage is the preview canvas: selection is by click (and later
     // drag/F7). Keyboard-driven selection is the tree panel's job (F9), so the
@@ -496,6 +557,10 @@ export function GuiPreview({
     <div
       data-gui-stage=""
       onClick={handleClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
       className="relative overflow-visible bg-[#1b1b1f] text-[#b9b2a5]"
       style={{
         position: "relative",

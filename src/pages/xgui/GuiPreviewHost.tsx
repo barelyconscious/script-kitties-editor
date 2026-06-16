@@ -20,12 +20,15 @@
  * mount.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { applyDragDelta } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { DataModelPanel } from "./DataModelPanel";
 import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
+import { withAttr } from "./guiProperties";
+import { findNode } from "./guiTreeEdit";
 
 export type GuiPreviewHostProps = {
   /** The parsed component to preview. */
@@ -59,6 +62,30 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
 
   const palette = usePalette();
 
+  // F7 drag-to-move: capture the dragged node's `position` at drag START so each
+  // move applies the CUMULATIVE delta to that fixed base — `applyDragDelta` is
+  // idempotent per-move, so writing the absolute (start-relative) delta every move
+  // never drifts. Held in a ref (not state) so capturing it doesn't re-render.
+  const dragBasePosition = useRef<string | undefined>(undefined);
+
+  const handleDragStart = (nodeId: string) => {
+    const node = findNode(root, nodeId);
+    dragBasePosition.current = node?.attrs.position;
+  };
+
+  const handleDragMove = (nodeId: string, totalDx: number, totalDy: number) => {
+    const node = findNode(root, nodeId);
+    if (!node) return;
+    // Apply the cumulative delta to the position captured at drag start; the offset
+    // half tracks the cursor while the scale half is preserved verbatim.
+    const nextPosition = applyDragDelta(dragBasePosition.current, totalDx, totalDy);
+    dispatch({
+      type: "setNodeAttrs",
+      nodeId,
+      attrs: withAttr(node.attrs, "position", nextPosition),
+    });
+  };
+
   return (
     <div className="flex h-full min-h-0">
       <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -68,6 +95,8 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           model={model}
           palette={palette}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
         />
       </div>
       <div className="w-80 shrink-0 border-border border-l">

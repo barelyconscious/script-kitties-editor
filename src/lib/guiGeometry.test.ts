@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyDragDelta,
   calcAxis,
   computeBoxGeometry,
   DEFAULT_POSITION,
@@ -116,5 +117,72 @@ describe("stage constants", () => {
   it("is the fixed 1280x768 preview resolution", () => {
     expect(STAGE_WIDTH).toBe(1280);
     expect(STAGE_HEIGHT).toBe(768);
+  });
+});
+
+describe("applyDragDelta (F7 drag-to-move)", () => {
+  it("adds the pixel delta to the absX/absY offset half", () => {
+    // From the origin, a +40,+12 drag lands the offset at exactly the delta.
+    expect(applyDragDelta("0,0,0,0", 40, 12)).toBe("0,0,40,12");
+  });
+
+  it("accumulates onto existing literal offsets", () => {
+    // Box already at offset (10,20); a (+5,-3) drag delta accumulates correctly.
+    expect(applyDragDelta("0,0,10,20", 5, -3)).toBe("0,0,15,17");
+  });
+
+  it("never touches the scale half — literal scale survives verbatim", () => {
+    // relX/relY are passed through unchanged; only the offsets move.
+    expect(applyDragDelta("0.5,0.25,10,20", 6, 4)).toBe("0.5,0.25,16,24");
+  });
+
+  it("never touches a BOUND scale field — the {token} survives a drag", () => {
+    // A responsive scale binding (scale-x = {healthRatio}) is preserved verbatim;
+    // only the offset half is written. This is the core "drag moves offset, never
+    // scale" guarantee even when scale is data-bound.
+    expect(applyDragDelta("{healthRatio},1,0,0", 8, 9)).toBe("{healthRatio},1,8,9");
+  });
+
+  it("replaces a BOUND offset field with the resulting literal (base 0 + delta)", () => {
+    // A bound offset has no numeric value to accumulate onto, so its base is 0 and
+    // the field becomes the literal pixel result. The bound field is NOT clobbered
+    // by garbage — it is replaced per the documented "you dragged it, you set it".
+    expect(applyDragDelta("0,0,{xOff},0", 30, 0)).toBe("0,0,30,0");
+    // The OTHER (literal) offset still accumulates normally alongside it.
+    expect(applyDragDelta("0,0,{xOff},5", 30, 7)).toBe("0,0,30,12");
+  });
+
+  it("handles negative (right/bottom-anchored) offsets, accumulating signed", () => {
+    // bag.xml right-anchored panel position="1,0,-300,0"; dragging left -20 and
+    // down +15 keeps the scale half and shifts the signed offset.
+    expect(applyDragDelta("1,0,-300,0", -20, 15)).toBe("1,0,-320,15");
+  });
+
+  it("applies the default 0,0,0,0 when position is absent", () => {
+    // A never-positioned box still drags from origin (the documented default).
+    expect(applyDragDelta(undefined, 7, 9)).toBe("0,0,7,9");
+  });
+
+  it("fills missing scale/offset fields with 0 (half-authored value)", () => {
+    // A short "1,1" value (scale only) drags from a 0 offset base.
+    expect(applyDragDelta("1,1", 3, 4)).toBe("1,1,3,4");
+  });
+
+  it("tolerates whitespace around fields", () => {
+    expect(applyDragDelta(" 0 , 0 , 10 , 20 ", 5, 5)).toBe("0,0,15,25");
+  });
+
+  it("treats a garbage offset field as a 0 base", () => {
+    expect(applyDragDelta("0,0,abc,xyz", 11, 22)).toBe("0,0,11,22");
+  });
+
+  it("is idempotent per-move when applied to a fixed base (no drift)", () => {
+    // The host applies the CUMULATIVE delta to the base captured at drag start.
+    // Re-applying a larger cumulative delta to the SAME base gives the right answer
+    // — this is why per-move writes never accumulate rounding/double-count drift.
+    const base = "0,0,100,50";
+    expect(applyDragDelta(base, 10, 10)).toBe("0,0,110,60");
+    expect(applyDragDelta(base, 25, 25)).toBe("0,0,125,75");
+    expect(applyDragDelta(base, 25, 25)).toBe("0,0,125,75");
   });
 });

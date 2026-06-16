@@ -277,6 +277,144 @@ export function screenDeltaToLogical(
 }
 
 // ---------------------------------------------------------------------------
+// View transform (473): zoom + pan over the fit-to-fit base
+// ---------------------------------------------------------------------------
+
+/**
+ * The preview's view transform: an absolute render `scale` plus a screen-pixel
+ * pan offset (`panX`/`panY`). The stage is drawn with
+ * `translate(panX, panY) scale(scale)` (transform-origin top-left) on the ROOT
+ * stage element only (the one intentional stacking context — F5a). The viewport
+ * clips; children stay in 1280×768 logical space.
+ *
+ * `scale` is an ABSOLUTE factor (not relative to the fit scale): 1 = native
+ * 100%, the fit scale = letterboxed-to-fit. Pan is in viewport (screen) pixels,
+ * measured from the viewport's top-left corner to the stage's top-left corner.
+ */
+export type ViewTransform = {
+  scale: number;
+  panX: number;
+  panY: number;
+};
+
+/**
+ * The zoom clamp bounds. Below {@link MIN_SCALE} the stage is an unusable speck;
+ * above {@link MAX_SCALE} a single logical pixel is a huge block and panning gets
+ * unwieldy. Both ends are generous — the fit scale (often ~0.3–1) sits comfortably
+ * inside, and a user can zoom well past 100% to inspect pixel detail or far out to
+ * see an overflowing layout whole.
+ */
+export const MIN_SCALE = 0.1;
+export const MAX_SCALE = 8;
+
+/**
+ * Clamp a raw scale into [{@link MIN_SCALE}, {@link MAX_SCALE}]. `NaN` (from a bad
+ * wheel event) falls back to {@link MIN_SCALE} rather than corrupting the view —
+ * defense-in-depth, the callers never pass one. `±Infinity` clamps normally through
+ * `Math.min`/`Math.max` (so `+Infinity` → MAX_SCALE, `-Infinity` → MIN_SCALE).
+ */
+export function clampScale(scale: number): number {
+  if (Number.isNaN(scale)) return MIN_SCALE;
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+}
+
+/**
+ * Compute the fit-and-center view transform for the fixed stage inside a
+ * `containerW × containerH` viewport: the fit scale (largest uniform scale that
+ * letterboxes the 1280×768 stage inside the viewport, via {@link computeFitScale})
+ * plus the pan that CENTERS the scaled stage in the viewport.
+ *
+ *   scale = computeFitScale(W, H)
+ *   panX  = (W - STAGE_WIDTH  * scale) / 2
+ *   panY  = (H - STAGE_HEIGHT * scale) / 2
+ *
+ * This replaces the old flex-centering footprint wrapper: with pan baked into the
+ * stage transform, the stage centers itself and the viewport simply clips. It is
+ * the "Fit" state and the open-a-component default. A degenerate viewport yields
+ * `computeFitScale`'s fallback of 1 and a pan computed against that.
+ */
+export function fitView(containerW: number, containerH: number): ViewTransform {
+  const scale = computeFitScale(containerW, containerH);
+  const w = Number.isFinite(containerW) ? containerW : 0;
+  const h = Number.isFinite(containerH) ? containerH : 0;
+  return {
+    scale,
+    panX: (w - STAGE_WIDTH * scale) / 2,
+    panY: (h - STAGE_HEIGHT * scale) / 2,
+  };
+}
+
+/**
+ * Zoom the view toward a fixed point — the logical stage point currently under
+ * the cursor stays pinned under the cursor as the scale changes. This is the
+ * standard "zoom where you point" behavior for Ctrl/Cmd+wheel.
+ *
+ * The math (pure, the reason this lives here): the logical point under the cursor
+ * is `L = (cursor - pan) / scale`. After the scale changes to `scale'`, we want
+ * that same `L` to still map to the same `cursor`, so the new pan is
+ * `pan' = cursor - L * scale'`. Worked per axis with the shared `L`.
+ *
+ * `nextScaleRaw` is the desired (pre-clamp) target scale; it is clamped to
+ * [{@link MIN_SCALE}, {@link MAX_SCALE}] here. When the clamp pins the scale (the
+ * user wheels past a bound), `L * scale'` uses the CLAMPED scale, so the pan stops
+ * drifting too — the point stays put and the zoom simply doesn't go further.
+ *
+ * @param view the current view transform.
+ * @param cursorX cursor x in VIEWPORT coordinates (relative to the viewport's
+ *   top-left, the same frame `panX` is measured in).
+ * @param cursorY cursor y in viewport coordinates.
+ * @param nextScaleRaw the desired new absolute scale (before clamping).
+ */
+export function zoomTowardCursor(
+  view: ViewTransform,
+  cursorX: number,
+  cursorY: number,
+  nextScaleRaw: number,
+): ViewTransform {
+  const nextScale = clampScale(nextScaleRaw);
+  // The logical point under the cursor, invariant across the zoom.
+  const lx = (cursorX - view.panX) / view.scale;
+  const ly = (cursorY - view.panY) / view.scale;
+  return {
+    scale: nextScale,
+    panX: cursorX - lx * nextScale,
+    panY: cursorY - ly * nextScale,
+  };
+}
+
+/**
+ * The multiplicative step one zoom increment applies — a wheel notch or a +/−
+ * button press multiplies (or divides) the scale by this factor. A ~1.1× step is
+ * fine-grained enough to feel smooth on a mouse wheel yet reaches the clamp bounds
+ * in a handful of notches.
+ */
+export const ZOOM_STEP = 1.1;
+
+/**
+ * Translate a wheel `deltaY` into a target scale, zooming IN on a negative delta
+ * (wheel up / scroll toward the screen) and OUT on a positive delta, matching the
+ * platform convention. The magnitude of `deltaY` is ignored beyond its sign — one
+ * notch is one {@link ZOOM_STEP} — so a high-resolution trackpad and a notched
+ * mouse wheel both step predictably. The result is the PRE-CLAMP target scale to
+ * hand to {@link zoomTowardCursor} (which clamps).
+ */
+export function scaleForWheel(currentScale: number, deltaY: number): number {
+  return deltaY < 0 ? currentScale * ZOOM_STEP : currentScale / ZOOM_STEP;
+}
+
+/**
+ * Pan the view by a screen-pixel delta — a pure translate, so it never touches
+ * `scale`. Used by the space-drag / middle-mouse pan gesture: each pointer move
+ * adds the cursor's screen delta to the pan. Because pan is a pure translate, it
+ * does NOT affect the screen→logical delta conversion element drag uses
+ * ({@link screenDeltaToLogical} divides by scale only), so element drag stays
+ * accurate when zoomed AND panned.
+ */
+export function panBy(view: ViewTransform, dxScreen: number, dyScreen: number): ViewTransform {
+  return { scale: view.scale, panX: view.panX + dxScreen, panY: view.panY + dyScreen };
+}
+
+// ---------------------------------------------------------------------------
 // Texture rendering (F: sprite-as-background): which sprite name to load
 // ---------------------------------------------------------------------------
 

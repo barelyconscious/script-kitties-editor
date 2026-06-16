@@ -2,17 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   applyDragDelta,
   calcAxis,
+  clampScale,
   computeBoxGeometry,
   computeFitScale,
   DEFAULT_POSITION,
   DEFAULT_SIZE,
   DRAG_CLICK_THRESHOLD_PX,
+  fitView,
   isDragGesture,
+  MAX_SCALE,
+  MIN_SCALE,
+  panBy,
   parseUDim2,
   STAGE_HEIGHT,
   STAGE_WIDTH,
+  scaleForWheel,
   screenDeltaToLogical,
   textureToLoad,
+  type ViewTransform,
+  ZOOM_STEP,
+  zoomTowardCursor,
 } from "./guiGeometry";
 
 describe("parseUDim2", () => {
@@ -378,5 +387,204 @@ describe("isDragGesture — drag vs. click (469)", () => {
     // Pin the contract: the gesture threshold is 3 screen px (the value the preview's
     // click-suppression reads). A change here is a behavior change, not an accident.
     expect(DRAG_CLICK_THRESHOLD_PX).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// View transform (473): zoom + pan
+// ---------------------------------------------------------------------------
+
+describe("clampScale (zoom bounds)", () => {
+  it("passes through a scale inside the bounds", () => {
+    expect(clampScale(1)).toBe(1);
+    expect(clampScale(0.5)).toBe(0.5);
+    expect(clampScale(4)).toBe(4);
+  });
+
+  it("clamps below the minimum to MIN_SCALE", () => {
+    expect(clampScale(0.01)).toBe(MIN_SCALE);
+    expect(clampScale(-3)).toBe(MIN_SCALE);
+    expect(clampScale(0)).toBe(MIN_SCALE);
+  });
+
+  it("clamps above the maximum to MAX_SCALE", () => {
+    expect(clampScale(50)).toBe(MAX_SCALE);
+    expect(clampScale(Number.POSITIVE_INFINITY)).toBe(MAX_SCALE);
+  });
+
+  it("falls back to MIN_SCALE for a non-finite scale (NaN guard)", () => {
+    expect(clampScale(Number.NaN)).toBe(MIN_SCALE);
+  });
+
+  it("exposes sensible, ordered bounds", () => {
+    expect(MIN_SCALE).toBeGreaterThan(0);
+    expect(MAX_SCALE).toBeGreaterThan(MIN_SCALE);
+  });
+});
+
+describe("fitView (fit + center)", () => {
+  it("scale 1 and zero pan when the viewport exactly matches the stage", () => {
+    expect(fitView(STAGE_WIDTH, STAGE_HEIGHT)).toEqual({ scale: 1, panX: 0, panY: 0 });
+  });
+
+  it("centers the letterboxed stage in a wider viewport (height-bound)", () => {
+    // 2x width, 1x height → fit scale 1; the scaled stage is STAGE_WIDTH wide, so it
+    // is centered horizontally with (2W - W)/2 = W/2 pad, zero vertical pad.
+    const view = fitView(STAGE_WIDTH * 2, STAGE_HEIGHT);
+    expect(view.scale).toBe(1);
+    expect(view.panX).toBe(STAGE_WIDTH / 2);
+    expect(view.panY).toBe(0);
+  });
+
+  it("centers the letterboxed stage in a taller viewport (width-bound)", () => {
+    const view = fitView(STAGE_WIDTH, STAGE_HEIGHT * 3);
+    expect(view.scale).toBe(1);
+    expect(view.panX).toBe(0);
+    expect(view.panY).toBe(STAGE_HEIGHT);
+  });
+
+  it("scales down and centers in a smaller viewport", () => {
+    // Half-size viewport → fit scale 0.5 → scaled stage is exactly the viewport, so
+    // the centering pan is zero on both axes.
+    const view = fitView(STAGE_WIDTH / 2, STAGE_HEIGHT / 2);
+    expect(view.scale).toBe(0.5);
+    expect(view.panX).toBe(0);
+    expect(view.panY).toBe(0);
+  });
+
+  it("the centered stage stays fully inside the viewport", () => {
+    // With fit-and-center, the scaled stage fits within the viewport on both axes:
+    // pan >= 0 and pan + scaledDim <= viewport dim.
+    const W = 900;
+    const H = 1000;
+    const view = fitView(W, H);
+    expect(view.panX).toBeGreaterThanOrEqual(0);
+    expect(view.panY).toBeGreaterThanOrEqual(0);
+    expect(view.panX + STAGE_WIDTH * view.scale).toBeLessThanOrEqual(W + 1e-9);
+    expect(view.panY + STAGE_HEIGHT * view.scale).toBeLessThanOrEqual(H + 1e-9);
+  });
+
+  it("falls back to scale 1 for a degenerate viewport", () => {
+    const view = fitView(0, 0);
+    expect(view.scale).toBe(1);
+  });
+});
+
+describe("zoomTowardCursor (keep the point under the cursor fixed)", () => {
+  // The defining property across MANY scales: the logical point under the cursor
+  // before the zoom maps back to the same cursor position after the zoom.
+  const cases: Array<{ view: ViewTransform; cursor: [number, number]; next: number }> = [
+    { view: { scale: 1, panX: 0, panY: 0 }, cursor: [100, 100], next: 2 },
+    { view: { scale: 1, panX: 0, panY: 0 }, cursor: [100, 100], next: 0.5 },
+    { view: { scale: 0.5, panX: 40, panY: 20 }, cursor: [300, 200], next: 1 },
+    { view: { scale: 2, panX: -100, panY: -50 }, cursor: [640, 360], next: 0.8 },
+    { view: { scale: 0.37, panX: 220, panY: 15 }, cursor: [512, 333], next: 1.4 },
+  ];
+
+  for (const { view, cursor, next } of cases) {
+    it(`keeps the cursor's logical point fixed (scale ${view.scale} → ${next})`, () => {
+      const [cx, cy] = cursor;
+      // Logical point under the cursor BEFORE the zoom.
+      const lxBefore = (cx - view.panX) / view.scale;
+      const lyBefore = (cy - view.panY) / view.scale;
+      const after = zoomTowardCursor(view, cx, cy, next);
+      // Where that same logical point lands AFTER the zoom — must be the cursor.
+      const screenX = lxBefore * after.scale + after.panX;
+      const screenY = lyBefore * after.scale + after.panY;
+      expect(screenX).toBeCloseTo(cx, 9);
+      expect(screenY).toBeCloseTo(cy, 9);
+    });
+  }
+
+  it("applies the requested scale when within bounds", () => {
+    expect(zoomTowardCursor({ scale: 1, panX: 0, panY: 0 }, 0, 0, 3).scale).toBe(3);
+  });
+
+  it("clamps the scale at the max and still pins the cursor point", () => {
+    const view: ViewTransform = { scale: 4, panX: 10, panY: 10 };
+    const cx = 200;
+    const cy = 150;
+    const lx = (cx - view.panX) / view.scale;
+    const ly = (cy - view.panY) / view.scale;
+    // Request a huge scale → clamps to MAX_SCALE; the cursor point still stays put.
+    const after = zoomTowardCursor(view, cx, cy, 100);
+    expect(after.scale).toBe(MAX_SCALE);
+    expect(lx * after.scale + after.panX).toBeCloseTo(cx, 9);
+    expect(ly * after.scale + after.panY).toBeCloseTo(cy, 9);
+  });
+
+  it("clamps the scale at the min", () => {
+    expect(zoomTowardCursor({ scale: 0.2, panX: 0, panY: 0 }, 0, 0, 0.001).scale).toBe(MIN_SCALE);
+  });
+
+  it("zooming at the origin cursor leaves pan at zero (origin is the fixed point)", () => {
+    expect(zoomTowardCursor({ scale: 1, panX: 0, panY: 0 }, 0, 0, 2)).toEqual({
+      scale: 2,
+      panX: 0,
+      panY: 0,
+    });
+  });
+});
+
+describe("scaleForWheel (wheel → target scale)", () => {
+  it("zooms IN on a negative deltaY (wheel up)", () => {
+    expect(scaleForWheel(1, -1)).toBeCloseTo(ZOOM_STEP, 9);
+  });
+
+  it("zooms OUT on a positive deltaY (wheel down)", () => {
+    expect(scaleForWheel(1, 1)).toBeCloseTo(1 / ZOOM_STEP, 9);
+  });
+
+  it("ignores the magnitude of deltaY — only the sign matters (one notch per tick)", () => {
+    expect(scaleForWheel(2, -120)).toBeCloseTo(2 * ZOOM_STEP, 9);
+    expect(scaleForWheel(2, 0.5)).toBeCloseTo(2 / ZOOM_STEP, 9);
+  });
+
+  it("the step is > 1 (a real zoom increment)", () => {
+    expect(ZOOM_STEP).toBeGreaterThan(1);
+  });
+});
+
+describe("panBy (pure translate)", () => {
+  it("adds the screen delta to the pan, leaving scale untouched", () => {
+    expect(panBy({ scale: 0.75, panX: 10, panY: 20 }, 5, -8)).toEqual({
+      scale: 0.75,
+      panX: 15,
+      panY: 12,
+    });
+  });
+
+  it("never changes scale regardless of delta", () => {
+    expect(panBy({ scale: 3, panX: 0, panY: 0 }, 100, 100).scale).toBe(3);
+  });
+});
+
+describe("element drag under combined zoom + pan (integration)", () => {
+  // Pan is a PURE translate, so it must NOT change the screen→logical delta the
+  // element drag writes — only scale divides. These pin that invariant: the same
+  // screen drag writes the same integer logical offset at any pan, and the right
+  // offset under a non-unit scale.
+  it("pan does not affect the logical drag delta (only scale does)", () => {
+    const screenDx = 50;
+    const screenDy = 30;
+    const scale = 0.5;
+    const noPan = screenDeltaToLogical(screenDx, screenDy, scale);
+    // Whatever the pan, the conversion is identical (pan never enters it).
+    expect(noPan).toEqual({ dx: 100, dy: 60 });
+    // And the written offset (integer) is the same with any pan in play.
+    expect(applyDragDelta("0,0,0,0", noPan.dx, noPan.dy)).toBe("0,0,100,60");
+  });
+
+  it("writes the correct INTEGER offset when zoomed and panned", () => {
+    // A fit-and-center view at 0.5 scale with a non-zero centering pan; the drag
+    // offset is driven purely by scale, and the result is a whole-pixel offset.
+    const view = fitView(STAGE_WIDTH / 2, STAGE_HEIGHT); // scale 0.5, panX 0, panY 192
+    expect(view.scale).toBe(0.5);
+    const { dx, dy } = screenDeltaToLogical(25, 25, view.scale);
+    const result = applyDragDelta("0,0,10,20", dx, dy);
+    expect(result).toBe("0,0,60,70");
+    const [, , absX, absY] = result.split(",");
+    expect(Number.isInteger(Number(absX))).toBe(true);
+    expect(Number.isInteger(Number(absY))).toBe(true);
   });
 });

@@ -59,6 +59,7 @@ import {
   STAGE_WIDTH,
   screenDeltaToLogical,
   textureToLoad,
+  type ViewTransform,
 } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
 import { ScopeStack } from "../../lib/guiScope";
@@ -485,15 +486,27 @@ export type GuiPreviewProps = {
    */
   onDragMove?: (nodeId: string, totalDx: number, totalDy: number) => void;
   /**
-   * The render scale applied to the root stage (fit-to-container letterbox,
-   * computed by the host via `computeFitScale`). Defaults to `1` (native size). It
-   * does TWO things:
-   * it's applied as a single `transform: scale()` on the root stage (the one
+   * The view transform applied to the root stage (473): an absolute `scale` plus a
+   * screen-pixel `panX`/`panY`. Defaults to native 100% at the origin. It does TWO
+   * things:
+   * it's applied as `translate(panX, panY) scale(scale)` on the root stage (the one
    * intentional stacking context — never on intermediate wrappers, per F5a), and
-   * it converts the drag's screen-pixel delta into logical-pixel delta (÷ scale)
-   * so dragging stays accurate when the stage is scaled.
+   * its `scale` converts the drag's screen-pixel delta into logical-pixel delta
+   * (÷ scale) so dragging stays accurate when the stage is zoomed. Pan is a pure
+   * translate, so it does NOT affect the drag delta conversion — element drag stays
+   * accurate when zoomed AND panned.
    */
-  scale?: number;
+  view?: ViewTransform;
+  /**
+   * Disambiguates pan from element-drag (473): consulted on the stage's
+   * pointerdown — when it returns `true` the gesture is a VIEW PAN (space+left or
+   * middle-mouse, owned by the host's viewport handler), so the stage does NOT start
+   * an element drag or change selection and lets the pan run. Pointer events bubble
+   * child→parent, so the stage (child) sees the pointerdown before the viewport
+   * (parent); this predicate is how the stage yields the gesture to the pan. Omit to
+   * never treat a stage pointerdown as a pan (ordinary select/element-drag only).
+   */
+  isPanGesture?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
 };
 
 /**
@@ -517,8 +530,10 @@ export function GuiPreview({
   palette = {},
   onDragStart,
   onDragMove,
-  scale = 1,
+  view = IDENTITY_VIEW,
+  isPanGesture,
 }: GuiPreviewProps) {
+  const { scale, panX, panY } = view;
   // A root-only scope stack for the whole tree (F4). Descending into a `forEach`
   // subtree pushes the current item (see `renderChildren`/`stampForEach`); with
   // no `forEach` entered, the current item IS the root, so this is a strict
@@ -562,6 +577,16 @@ export function GuiPreview({
   const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // View-pan gesture (space+left / middle-mouse): the host's viewport handler owns
+    // it. Yield — don't start an element drag, don't change selection. For a
+    // PRIMARY-button pan (space+left) the browser will synthesize a trailing `click`,
+    // so suppress it (one click) to keep the box selected; a MIDDLE-button pan emits
+    // no `click` (only `auxclick`), so we must NOT arm the flag or it would swallow
+    // the next legitimate left-click.
+    if (isPanGesture?.(event)) {
+      if (event.button === 0) suppressNextClick.current = true;
+      return;
+    }
     // Dragging is opt-in (host supplies the writeback) and primary-button only.
     if (!onDragMove || event.button !== 0) return;
     const target = event.target as Element;
@@ -629,13 +654,14 @@ export function GuiPreview({
         position: "relative",
         width: `${STAGE_WIDTH}px`,
         height: `${STAGE_HEIGHT}px`,
-        // Scale-to-fit: a single `transform: scale()` on the ROOT stage renders the
-        // 1280×768 logical canvas at the fit-to-container size. The stage is the one
-        // intentional stacking context, so a transform on IT is fine and intended;
-        // NEVER add transform/opacity/filter/isolation to an intermediate wrapper
-        // box (the F5a trap). `top left` origin keeps the scaled box pinned to the
-        // host's centering wrapper, which is sized to the scaled footprint.
-        transform: `scale(${scale})`,
+        // View transform (473): a single `translate(panX, panY) scale(scale)` on the
+        // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
+        // The stage is the one intentional stacking context, so a transform on IT is
+        // fine and intended; NEVER add transform/opacity/filter/isolation to an
+        // intermediate wrapper box (the F5a trap). `top left` origin makes the pan
+        // (in viewport screen px) place the stage's top-left exactly at (panX, panY)
+        // within the clipping viewport — fit-and-center bakes the centering into pan.
+        transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
         transformOrigin: "top left",
         // F5b: the stage is the ONE intentional stacking context — it is the root
         // for this subtree, so every leaf's numeric z-index is interpreted relative
@@ -651,3 +677,6 @@ export function GuiPreview({
 
 /** The empty `<Component>`-`src` ancestor set at the stage root (no mounts above). */
 const EMPTY_ANCESTRY: ReadonlySet<string> = new Set();
+
+/** The default view transform: native 100% at the origin (no zoom, no pan). */
+const IDENTITY_VIEW: ViewTransform = { scale: 1, panX: 0, panY: 0 };

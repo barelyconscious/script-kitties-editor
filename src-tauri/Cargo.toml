@@ -22,6 +22,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Order-preserving map for the GUI palette (name -> "r,g,b,a"). Insertion order is
+# author-controlled and must round-trip so re-saves produce minimal diffs. Pinned
+# to the version serde_json's `preserve_order` already resolves, so no new crate
+# version is pulled in.
+indexmap = { version = "2", features = ["serde"] }
 moka = { version = "0.12.15", features = ["sync"] }
 notify = "6"
 base64 = "0.22"

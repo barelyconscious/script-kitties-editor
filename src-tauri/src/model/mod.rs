@@ -1,8 +1,19 @@
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 // BTreeMap (not HashMap) for stat maps: it iterates keys in sorted order, so
 // serde emits them alphabetically and deterministically. HashMap's randomized
 // iteration order churned the whole stats block on every save.
 use std::collections::BTreeMap;
+
+/// The GUI color palette: a flat, **order-preserving** map of palette name
+/// (an identifier, e.g. `TextDefault`) -> color-code string (`r,g,b,a`, e.g.
+/// `185,178,165,255`). The runtime resolves `textColor="TextDefault"` against
+/// this same map, so the on-disk shape is exactly this object.
+///
+/// `IndexMap` (not `BTreeMap`) because key order is author-controlled and must
+/// round-trip: re-saving an untouched palette should produce a byte-identical
+/// file, so an edit yields a minimal diff. Lives at `Data/gui_palette.json`.
+pub type Palette = IndexMap<String, String>;
 
 #[derive(Serialize, Deserialize)]
 pub enum GameObjectType {

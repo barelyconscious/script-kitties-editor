@@ -12,6 +12,7 @@ use crate::commands::gui::get_gui_tree;
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
+use crate::commands::palette::{get_palette, save_palette};
 use crate::commands::registry::{get_registry, save_registry};
 use crate::commands::scripts::{create_script, get_script, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
@@ -216,6 +217,8 @@ pub fn run() {
             save_bundle,
             get_packs,
             save_pack,
+            get_palette,
+            save_palette,
             get_registry,
             save_registry,
             get_sprite,

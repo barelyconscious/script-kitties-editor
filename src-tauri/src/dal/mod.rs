@@ -13,7 +13,7 @@ use crate::{
     config::EditorConfig,
     model::{
         Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, GuiFolder, Item,
-        ItemDrop, Pack,
+        ItemDrop, Pack, Palette,
     },
 };
 
@@ -29,6 +29,7 @@ pub mod gui;
 pub mod item_drops;
 pub mod items;
 pub mod packs;
+pub mod palette;
 pub mod scripts;
 pub mod sprites;
 
@@ -46,6 +47,9 @@ pub struct Dal {
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
     pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
+    // The GUI color palette (name -> "r,g,b,a"), from Data/gui_palette.json. A
+    // single coarse cache unit under key `()`, like the per-domain caches above.
+    pub(crate) palette: Cache<(), Arc<Palette>>,
     // The game's assets.json manifest (logical name -> on-disk path).
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
     // Resolved sprite data URLs, keyed by logical sprite name.
@@ -75,6 +79,7 @@ impl Dal {
         let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
         let bundles: Cache<(), Arc<Vec<Bundle>>> = Cache::builder().max_capacity(1).build();
         let packs: Cache<(), Arc<Vec<Pack>>> = Cache::builder().max_capacity(1).build();
+        let palette: Cache<(), Arc<Palette>> = Cache::builder().max_capacity(1).build();
         let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
             Cache::builder().max_capacity(1).build();
         let sprites: Cache<String, Arc<Option<String>>> =
@@ -86,7 +91,7 @@ impl Dal {
         let game_root = PathBuf::from(&config.game_install_path);
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &bundles, &packs, &manifest, &sprites, &scripts, &gui_tree,
+            &item_drops, &bundles, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
         )?;
 
         Ok(Self {
@@ -101,6 +106,7 @@ impl Dal {
             item_drops,
             bundles,
             packs,
+            palette,
             manifest,
             sprites,
             scripts,
@@ -128,6 +134,7 @@ impl Dal {
             &self.item_drops,
             &self.bundles,
             &self.packs,
+            &self.palette,
             &self.manifest,
             &self.sprites,
             &self.scripts,
@@ -148,6 +155,7 @@ impl Dal {
         self.item_drops.invalidate_all();
         self.bundles.invalidate_all();
         self.packs.invalidate_all();
+        self.palette.invalidate_all();
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
         self.scripts.invalidate_all();
@@ -178,6 +186,7 @@ fn build_watcher(
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
     bundles: &Cache<(), Arc<Vec<Bundle>>>,
     packs: &Cache<(), Arc<Vec<Pack>>>,
+    palette: &Cache<(), Arc<Palette>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
     scripts: &Cache<String, Arc<Option<String>>>,
@@ -229,6 +238,12 @@ fn build_watcher(
         }),
         (data_dir.join("packs.json"), {
             let c = packs.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        // The GUI palette lives under the already-watched Data/, so no new watch
+        // is needed — just an exact-path invalidator like the domain files above.
+        (data_dir.join("gui_palette.json"), {
+            let c = palette.clone();
             Box::new(move || c.invalidate(&()))
         }),
         // assets.json lives at the game root. When it changes, both the manifest

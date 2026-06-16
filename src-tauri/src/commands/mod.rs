@@ -12,6 +12,7 @@ pub mod gui;
 pub mod item_drops;
 pub mod items;
 pub mod packs;
+pub mod palette;
 pub mod registry;
 pub mod scripts;
 pub mod sprites;

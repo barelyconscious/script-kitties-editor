@@ -32,6 +32,7 @@ import {
   applyDragDelta,
   fitView,
   panBy,
+  refitTriggerKey,
   scaleForWheel,
   type ViewTransform,
   ZOOM_STEP,
@@ -75,6 +76,12 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
   // highlight off this one value — sync is free because there is one source.
   const { state, dispatch } = useEditorStore();
   const selectedNodeId = state.selectedNodeId;
+  // The STABLE identity of the open component — its gui-relative path. This is what
+  // "a component opened" keys on: it stays fixed across every edit to the SAME file
+  // (drag, property edit, add/remove, undo/redo, live-reload), and only changes when
+  // a DIFFERENT component is opened. Unlike `root`, whose reference is replaced on
+  // every immutable edit, so it must NOT drive the fit-and-center reset (task 474).
+  const openComponentKey = refitTriggerKey(state.open);
 
   const palette = usePalette();
 
@@ -112,15 +119,19 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
     return () => obs.disconnect();
   }, []);
 
-  // Opening a different component re-fits and re-centers, clearing any manual view.
-  // `root` identity changes when the host mounts a new component (the parsed tree is
-  // a fresh object), which is exactly "opened a component" → reset to Fit.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit is keyed on the opened component (root), not the viewport ref/setter.
+  // Opening a DIFFERENT component re-fits and re-centers, clearing any manual view.
+  // Keyed on the open component's STABLE identity (`open.path`), NOT the `root`
+  // object reference (task 474): every immutable edit — a drag's per-pointermove
+  // `setNodeAttrs`, add/remove, undo/redo, an F13 live-reload of the same file —
+  // replaces `root`, so keying on `root` mis-reads any edit as "a component opened"
+  // and snaps the view back to fit, discarding the user's zoom/pan. The path only
+  // changes when a different file is opened, which is exactly "opened a component".
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit is keyed on the opened component's stable identity (openComponentKey), not the viewport ref/setter.
   useEffect(() => {
     const el = viewportRef.current;
     userAdjusted.current = false;
     if (el) setView(fitView(el.clientWidth, el.clientHeight));
-  }, [root]);
+  }, [openComponentKey]);
 
   // Reset to fit-and-center (the "Fit" control + the auto-fit default).
   const handleFit = useCallback(() => {

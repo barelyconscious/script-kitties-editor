@@ -446,3 +446,26 @@ export function textureToLoad(texture: string | undefined, resolved: boolean): s
   const trimmed = texture.trim();
   return trimmed === "" ? null : trimmed;
 }
+
+// ---------------------------------------------------------------------------
+// Auto-fit trigger (task 474): re-fit on opening a DIFFERENT component only
+// ---------------------------------------------------------------------------
+
+/**
+ * The dependency key the preview's fit-and-center reset is keyed on. The reset
+ * (re-fit + clear `userAdjusted`) must fire ONLY when a DIFFERENT component is
+ * opened — never on an edit to the SAME open component.
+ *
+ * The key is the open component's STABLE identity — its gui-relative `path` (or
+ * `null` when nothing is open). Crucially it is NOT the `root` GuiNode reference:
+ * the document is immutable, so a drag's per-pointermove `setNodeAttrs`, an
+ * add/remove, an undo/redo, or an F13 live-reload of the same file all replace
+ * `root` while leaving `path` untouched. Keying on `root` therefore mis-reads any
+ * edit as "a component opened" and snaps the user's zoom/pan back to fit; keying on
+ * `path` re-fits exactly when (and only when) the open file changes.
+ *
+ * @param open the open component's stable identity (`{ path }`), or `null`.
+ */
+export function refitTriggerKey(open: { path: string } | null): string | null {
+  return open?.path ?? null;
+}

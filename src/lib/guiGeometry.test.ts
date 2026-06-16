@@ -14,6 +14,7 @@ import {
   MIN_SCALE,
   panBy,
   parseUDim2,
+  refitTriggerKey,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   scaleForWheel,
@@ -586,5 +587,34 @@ describe("element drag under combined zoom + pan (integration)", () => {
     const [, , absX, absY] = result.split(",");
     expect(Number.isInteger(Number(absX))).toBe(true);
     expect(Number.isInteger(Number(absY))).toBe(true);
+  });
+});
+
+describe("refitTriggerKey (task 474: re-fit only on opening a different component)", () => {
+  it("is null when nothing is open", () => {
+    expect(refitTriggerKey(null)).toBeNull();
+  });
+
+  it("is the open component's stable path", () => {
+    expect(refitTriggerKey({ path: "widgets/bag.xml" })).toBe("widgets/bag.xml");
+  });
+
+  it("is STABLE across an immutable edit to the same component (the bug)", () => {
+    // The regression: a drag's per-pointermove setNodeAttrs (and add/remove,
+    // undo/redo, live-reload) replaces `root` but never touches `path`. The trigger
+    // must NOT change, so the fit-and-center reset does NOT fire and the user's
+    // zoom/pan survives. We model two successive edit states of the SAME file —
+    // distinct objects (immutable), distinct `root` refs — sharing one path.
+    const beforeEdit = { path: "widgets/bag.xml", root: { ref: "old" } };
+    const afterEdit = { path: "widgets/bag.xml", root: { ref: "new" } };
+    expect(afterEdit.root).not.toBe(beforeEdit.root); // root reference DID change
+    // ...yet the trigger key is identical, so the effect does not re-run.
+    expect(refitTriggerKey(afterEdit)).toBe(refitTriggerKey(beforeEdit));
+  });
+
+  it("CHANGES when a different component is opened (still fits-and-centers)", () => {
+    const bag = refitTriggerKey({ path: "widgets/bag.xml" });
+    const inventory = refitTriggerKey({ path: "widgets/inventory.xml" });
+    expect(inventory).not.toBe(bag);
   });
 });

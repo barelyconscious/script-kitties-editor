@@ -49,6 +49,7 @@ import { computeBoxGeometry, STAGE_HEIGHT, STAGE_WIDTH } from "../../lib/guiGeom
 import type { GuiNode } from "../../lib/guiNode";
 import { ScopeStack } from "../../lib/guiScope";
 import { isNodeSelected, NODE_ID_ATTR, nearestNodeId } from "../../lib/guiSelection";
+import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
 
 /** The DOM attribute that disambiguates `forEach` instances sharing a node id. */
@@ -57,6 +58,24 @@ export const INSTANCE_KEY_ATTR = "data-instance-key";
 /** A box-producing element tag. `View` is the stage; `Event` is non-visual. */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
+}
+
+/**
+ * Whether a box has any child that produces a box of its own (a Panel/Text/
+ * Component child, including a `forEach` template). A box with NO such children is
+ * a LEAF — and only leaves receive a numeric `z-index` (F5a): a leaf has no
+ * layering descendants to trap, so its own stacking context is harmless, while a
+ * wrapper carrying a numeric `z-index` WOULD trap its descendants and break global
+ * cross-branch paint order. Wrappers therefore stay `z-index: auto`.
+ *
+ * Note this is a STRUCTURAL leaf check (does the node have visual children at
+ * all), independent of the data model: a `forEach` wrapper whose collection is
+ * currently empty has zero rendered children but is still treated as a wrapper, so
+ * it never picks up a z-index. That is correct — it has nothing to paint, so the
+ * absence of a z-index is moot, and the check stays model-independent.
+ */
+function hasVisualChild(node: GuiNode): boolean {
+  return node.children.some((child) => isVisualTag(child.tag));
 }
 
 /** Default text color when `textColor` is absent (design default). */
@@ -96,6 +115,18 @@ type GuiBoxProps = {
   scope: ScopeStack;
   palette: Palette;
   /**
+   * This box's render-reproducible identity path (F5b), built from its parent's
+   * key + its own `nodeId`(+`instanceKey`). Used to look the box's global `z-index`
+   * up in {@link zOrder} and to derive each child's key.
+   */
+  boxKey: BoxKey;
+  /**
+   * The global `boxKey → z-index` map for the whole component (F5b). A LEAF box
+   * applies its mapped z-index so it competes in the stage's single stacking
+   * context; wrappers ignore it and stay `z-index: auto`.
+   */
+  zOrder: ZOrderMap;
+  /**
    * The `forEach` instance key (`data-instance-key`), present only when this box
    * is one stamped instance of a template. Omitted for ordinary (once-rendered)
    * boxes. All instances of a template share `node.nodeId`, so selection still
@@ -119,6 +150,8 @@ function renderChildren(
   selectedNodeId: string | null,
   scope: ScopeStack,
   palette: Palette,
+  parentKey: BoxKey,
+  zOrder: ZOrderMap,
 ) {
   return children
     .filter((child) => isVisualTag(child.tag))
@@ -132,6 +165,8 @@ function renderChildren(
             selectedNodeId={selectedNodeId}
             scope={scope}
             palette={palette}
+            boxKey={makeBoxKey(parentKey, child.nodeId, undefined)}
+            zOrder={zOrder}
           />,
         ];
       }
@@ -145,6 +180,8 @@ function renderChildren(
           selectedNodeId={selectedNodeId}
           scope={instance.scope}
           palette={palette}
+          boxKey={makeBoxKey(parentKey, child.nodeId, instance.instanceKey)}
+          zOrder={zOrder}
           instanceKey={instance.instanceKey}
         />
       ));
@@ -161,7 +198,15 @@ function renderChildren(
  * geometry/color/text are computed, and any attribute that didn't fully resolve
  * triggers the waiting-for-binding affordance on the box.
  */
-function GuiBox({ node, selectedNodeId, scope, palette, instanceKey }: GuiBoxProps) {
+function GuiBox({
+  node,
+  selectedNodeId,
+  scope,
+  palette,
+  boxKey,
+  zOrder,
+  instanceKey,
+}: GuiBoxProps) {
   // Resolve the whole attribute bag once against this box's scope (the item scope
   // for a forEach instance, the inherited scope otherwise): geometry, colors, and
   // text all read off the resolved values, and `unresolved` drives the
@@ -180,6 +225,15 @@ function GuiBox({ node, selectedNodeId, scope, palette, instanceKey }: GuiBoxPro
   const borderSize = attrs.borderSize?.trim();
   const hasBorder = borderColor !== undefined && borderColor !== "transparent";
   const isText = node.tag === "Text";
+
+  // F5b global z-order: only a LEAF box (no layering descendants) gets a numeric
+  // z-index, drawn from the single global `(layer, doc-order)` ranking so it
+  // competes directly in the stage's one stacking context. A WRAPPER (a box with
+  // visual children) gets NO z-index and stays `z-index: auto` — if it carried a
+  // numeric z-index it would form a stacking context and trap its descendants'
+  // z-index locally, breaking cross-branch global paint order (the F5a trap).
+  const isLeaf = !hasVisualChild(node);
+  const zIndex = isLeaf ? zOrder.get(boxKey) : undefined;
   const textColor = isText ? colorCodeToCss(attrs.textColor ?? DEFAULT_TEXT_COLOR) : undefined;
   const fontSize = isText ? Number(attrs.fontSize) : Number.NaN;
 
@@ -197,6 +251,9 @@ function GuiBox({ node, selectedNodeId, scope, palette, instanceKey }: GuiBoxPro
     fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
+    // F5b: leaf boxes only — a wrapper keeps z-index `auto` (undefined here) so it
+    // never forms a stacking context that would trap its descendants.
+    zIndex,
     outline: selected ? "2px solid var(--ring, #3b82f6)" : undefined,
     outlineOffset: selected ? "-1px" : undefined,
     boxShadow: selected ? "0 0 0 1px rgba(255,255,255,0.6)" : undefined,
@@ -227,7 +284,7 @@ function GuiBox({ node, selectedNodeId, scope, palette, instanceKey }: GuiBoxPro
       style={style}
     >
       {isText ? boxText(resolved) : null}
-      {renderChildren(node.children, selectedNodeId, scope, palette)}
+      {renderChildren(node.children, selectedNodeId, scope, palette, boxKey, zOrder)}
     </div>
   );
 }
@@ -280,6 +337,13 @@ export function GuiPreview({
   // no `forEach` entered, the current item IS the root, so this is a strict
   // superset of F3's flat-root scope.
   const scope = ScopeStack.root(model);
+  // F5b: compute the ONE global `boxKey → z-index` ranking for the whole component
+  // up front, then hand it down so each leaf box can apply its rank. The flatten
+  // mirrors this render's `forEach` expansion + scope, so the map's keys line up
+  // with the boxes rendered below. The stage itself is the single shared stacking
+  // context every leaf's z-index competes within (`position: relative` + an
+  // explicit `zIndex: 0` below); no wrapper in between forms one.
+  const zOrder = computeZOrder(root, model);
   // The DOM half of the back-reference: walk outward from the click target to
   // the nearest box carrying a node id. `closest` matches the target itself
   // first, then ancestors — exactly the "nearest enclosing box" rule. Reading
@@ -306,9 +370,14 @@ export function GuiPreview({
         position: "relative",
         width: `${STAGE_WIDTH}px`,
         height: `${STAGE_HEIGHT}px`,
+        // F5b: the stage is the ONE intentional stacking context — it is the root
+        // for this subtree, so every leaf's numeric z-index is interpreted relative
+        // to it. `position: relative` + a numeric `z-index` forms that context; the
+        // structural wrappers in between deliberately do NOT (they stay `auto`).
+        zIndex: 0,
       }}
     >
-      {renderChildren(root.children, selectedNodeId, scope, palette)}
+      {renderChildren(root.children, selectedNodeId, scope, palette, "", zOrder)}
     </div>
   );
 }

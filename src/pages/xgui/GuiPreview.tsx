@@ -55,7 +55,6 @@ import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import {
   computeBoxGeometry,
   dragStartDecision,
-  isDragGesture,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   screenDeltaToLogical,
@@ -552,13 +551,15 @@ export function GuiPreview({
   // first, then ancestors — exactly the "nearest enclosing box" rule. Reading
   // the chain through `nearestNodeId` keeps the (pure, tested) semantics in one
   // place; here it receives at most one candidate.
-  // Set on pointerup when the gesture was a drag (see `isDragGesture`); consumed (and
-  // reset) by the very next `click`, so exactly one click is suppressed per drag and
-  // ordinary clicks are untouched. A ref, not state — it must not trigger a re-render.
+  // Set on pointerdown whenever a box press arms the gesture (477); consumed (and
+  // reset) by the very next `click`, so exactly one click is suppressed per box
+  // press and ordinary background clicks are untouched. A ref, not state — it must
+  // not trigger a re-render.
   const suppressNextClick = useRef(false);
 
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    // Swallow the click synthesized at the end of a drag: the box stays selected.
+    // Swallow the click synthesized after a box press: the box stays selected
+    // (selection already happened on pointerdown). See `handlePointerDown` (477).
     if (suppressNextClick.current) {
       suppressNextClick.current = false;
       return;
@@ -571,10 +572,10 @@ export function GuiPreview({
 
   // F7 drag-to-move (475): a drag begins on POINTERDOWN over ANY box — pressing on a
   // box selects it AND arms a drag in the SAME gesture, so there is no separate
-  // click-to-select step. The 469 click-vs-drag threshold (`isDragGesture`, checked at
-  // pointerup) still distinguishes a plain click (no move past threshold → just the
-  // select that already happened on pointerdown) from a drag (moved → the box was
-  // repositioned live as the cursor moved). The active drag's identity + screen origin
+  // click-to-select step. A plain click (no move past threshold) is just the select
+  // that already happened on pointerdown; a drag (moved) repositions the box live as
+  // the cursor moves. Either way the trailing `click` is suppressed (477 — see
+  // `handlePointerDown`), so it never re-runs selection. The active drag's identity + screen origin
   // live in a ref (not state) so a move doesn't re-render the preview from the pointer
   // handler — the only render is the store writeback the host performs from `onDragMove`.
   const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
@@ -609,6 +610,15 @@ export function GuiPreview({
     drag.current = { nodeId: id, startX: event.clientX, startY: event.clientY };
     // Capture so moves/up are delivered here even if the cursor leaves the box.
     event.currentTarget.setPointerCapture(event.pointerId);
+    // 477: selection already happened above (on pointerdown), so the trailing
+    // synthesized `click` is redundant for a box press — and worse, pointer
+    // capture retargets it to the (id-less) stage, where `handleClick` would
+    // read no `data-node-id` and call `onSelect(null)`, deselecting on a plain
+    // click. Suppress it unconditionally for any box press (plain click OR drag).
+    // The BACKGROUND-press path returns early above (no arm, no capture), so a
+    // genuine click on empty stage still falls through to `handleClick` and
+    // clears selection.
+    suppressNextClick.current = true;
     onDragStart?.(id);
   };
 
@@ -635,15 +645,12 @@ export function GuiPreview({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    // If the pointer actually moved (past the threshold) this was a drag, not a
-    // click — suppress the trailing synthesized `click` so it doesn't re-run
-    // selection. The box stays selected (the only selection change for a drag
-    // happened on the original pointerdown that grabbed it). A near-zero move falls
-    // through and `handleClick` runs normally (a click on the box is a no-op select;
-    // a click on background clears — both correct).
-    if (isDragGesture(active.startX, active.startY, event.clientX, event.clientY)) {
-      suppressNextClick.current = true;
-    }
+    // 477: the trailing synthesized `click` for any box press is already
+    // suppressed in `handlePointerDown` (selection happened on pointerdown and
+    // capture retargets the click to the stage). No drag-vs-click distinction is
+    // needed here — both plain click and drag keep the box selected via the
+    // single pointerdown-arm suppression. (Background presses don't arm and so
+    // aren't suppressed, leaving the clear-on-empty-stage click intact.)
   };
 
   return (

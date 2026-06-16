@@ -15,6 +15,16 @@ pub fn get_gui_tree(dal: State<Dal>) -> Result<Arc<GuiFolder>, String> {
     dal.get_gui_tree()
 }
 
+/// Read a GUI component's `.xml` body by its bare basename (resolved to
+/// `{name}.xml` via the asset manifest). Returns `null` when no such component is
+/// registered, an error when the manifest references a file that's missing on
+/// disk (broken install), or the XML contents otherwise. This is the XML reader —
+/// controller `.lua` text is read via `get_script`.
+#[tauri::command]
+pub fn get_component(name: String, dal: State<Dal>) -> Result<Option<String>, String> {
+    dal.get_component(&name)
+}
+
 /// Save an already-registered component's `.xml` layout and (if present) its
 /// controller `.lua` together — the GUI editor's manual Save. `name` is the bare
 /// component basename (resolved to `{name}.xml` via the manifest); `controller`,

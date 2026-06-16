@@ -8,7 +8,9 @@ use crate::commands::creatures::{get_creatures, save_creature};
 use crate::commands::dlc::{get_dlcs, save_dlc};
 use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
-use crate::commands::gui::{create_component, create_folder, get_gui_tree, save_component};
+use crate::commands::gui::{
+    create_component, create_folder, get_component, get_gui_tree, save_component,
+};
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
@@ -229,6 +231,7 @@ pub fn run() {
             create_script,
             get_game_objects,
             get_gui_tree,
+            get_component,
             save_component,
             create_component,
             create_folder

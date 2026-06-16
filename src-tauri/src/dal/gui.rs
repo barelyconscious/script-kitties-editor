@@ -47,6 +47,57 @@ impl Dal {
         walk_folder(&root, "")
     }
 
+    /// Read a GUI component's `.xml` body by its bare basename (`"bag"`), the
+    /// value carried in a [`GuiComponentRef`]'s `name` and in a nested
+    /// `<Component src="bag">`. The basename is resolved to `"{name}.xml"` and
+    /// looked up through the asset manifest exactly as the runtime resolves
+    /// `<Component src>` — and because component basenames are unique tree-wide
+    /// (the B3 guarantee), that resolution is unambiguous.
+    ///
+    /// Mirrors [`Dal::get_script`]'s three-outcome discipline (it is the `.lua`
+    /// reader; this is the `.xml` reader — controllers keep using `get_script`):
+    ///
+    /// - `Ok(None)` — `"{name}.xml"` isn't in the manifest, so there is genuinely
+    ///   no such component. Not an error.
+    /// - `Err(..)` — it resolves through the manifest but the file is missing or
+    ///   unreadable on disk: a broken install. Surfaced rather than handing back
+    ///   an editable blank a later save could silently materialize.
+    /// - `Ok(Some(xml))` — resolved and read.
+    ///
+    /// Successful reads (`None` and `Some` alike) are cached by name. Broken-
+    /// install errors are *not* cached, so a fixed install reads cleanly next call.
+    pub fn get_component(&self, name: &str) -> Result<Option<String>, String> {
+        if let Some(hit) = self.components.get(name) {
+            return Ok((*hit).clone());
+        }
+        let result = self.load_component(name)?;
+        self.components
+            .insert(name.to_string(), Arc::new(result.clone()));
+        Ok(result)
+    }
+
+    fn load_component(&self, name: &str) -> Result<Option<String>, String> {
+        let xml_name = format!("{name}.xml");
+        let Some(path) = self.resolve_asset(&xml_name)? else {
+            // Absent from the manifest -> genuinely no such component.
+            return Ok(None);
+        };
+        // In the manifest but missing on disk -> broken install. Surface it so the
+        // user fixes their install instead of editing a phantom blank a save would
+        // then create.
+        let contents = std::fs::read_to_string(&path).map_err(|e| {
+            format!(
+                "component '{}' is registered in the asset manifest as '{}' but could not be read \
+                 at {}: {}",
+                name,
+                xml_name,
+                path.display(),
+                e
+            )
+        })?;
+        Ok(Some(contents))
+    }
+
     /// Overwrite an **already-registered** component's `.xml` layout and, if
     /// present, its controller `.lua` together. This is the per-component "Save"
     /// of the GUI editor (design section 7) — the manual save that persists the
@@ -1341,6 +1392,110 @@ mod tests {
         let cards = folder_at(&tree, "profile/cards").expect("nested folder must list");
         assert_eq!(cards.name, "cards");
         assert_eq!(cards.path, "profile/cards");
+    }
+
+    // ---- get_component: XML body read with the three-outcome discipline ----
+
+    #[test]
+    fn get_component_returns_xml_for_a_registered_component() {
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("bag.xml"), "<View><Panel id=\"x\"/></View>").unwrap();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#,
+        );
+
+        // Queried by BARE basename ("bag"), resolved to "bag.xml" via the manifest.
+        let result = dal.get_component("bag").unwrap();
+        assert_eq!(result, Some("<View><Panel id=\"x\"/></View>".to_string()));
+    }
+
+    #[test]
+    fn get_component_returns_none_when_name_absent_from_manifest() {
+        let root = temp_install();
+        // Manifest has an unrelated entry; the queried component is not present.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+
+        let result = dal.get_component("not_a_component").unwrap();
+        assert_eq!(
+            result, None,
+            "absent-from-manifest must read as no-such-component"
+        );
+    }
+
+    #[test]
+    fn get_component_errors_uncached_when_registered_but_file_missing() {
+        let root = temp_install();
+        // "bag.xml" IS in the manifest, but no file is written under gui/.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#,
+        );
+
+        let err = dal
+            .get_component("bag")
+            .expect_err("a manifest entry with a missing file must be a broken-install error");
+        assert!(
+            err.contains("bag"),
+            "error should name the offending component, got: {err}"
+        );
+        // The broken-install error must NOT be cached: nothing was inserted for it.
+        assert!(
+            dal.components.get("bag").is_none(),
+            "a broken-install error must not be cached"
+        );
+
+        // Proof it isn't cached: once the file appears, the next read succeeds
+        // without a manual invalidation.
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("bag.xml"), "<View/>").unwrap();
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            Some("<View/>".to_string()),
+            "a fixed install must read cleanly on the next call (error was not cached)"
+        );
+    }
+
+    #[test]
+    fn get_component_caches_successful_reads_by_name() {
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        let xml_path = gui.join("bag.xml");
+        std::fs::write(&xml_path, "<View id=\"first\"/>").unwrap();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#,
+        );
+
+        // First read populates the cache.
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            Some("<View id=\"first\"/>".to_string())
+        );
+
+        // Change the file on disk WITHOUT invalidating; the cache must serve the
+        // original contents (proving the read is cached by name).
+        std::fs::write(&xml_path, "<View id=\"second\"/>").unwrap();
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            Some("<View id=\"first\"/>".to_string()),
+            "a cached component read must not re-touch disk"
+        );
+
+        // After an explicit invalidation (what the gui watcher does), the next read
+        // re-walks disk and sees the new contents.
+        dal.components.invalidate_all();
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            Some("<View id=\"second\"/>".to_string())
+        );
     }
 
     #[test]

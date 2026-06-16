@@ -62,6 +62,10 @@ pub struct Dal {
     // wholesale by the recursive `gui/` watch — the read model is a tree, so the
     // cache unit is the tree.
     pub(crate) gui_tree: Cache<(), Arc<GuiFolder>>,
+    // A GUI component's `.xml` body, keyed by its bare basename (e.g. `bag`).
+    // `None` = absent from the manifest (genuinely no such component); `Some` =
+    // the file contents. Mirrors `scripts`, but reads `.xml` rather than `.lua`.
+    pub(crate) components: Cache<String, Arc<Option<String>>>,
     // Swapped out by `update_config` so a new install path starts watching the
     // new Data dir and the old watcher (dropped here) stops firing.
     watcher: Mutex<RecommendedWatcher>,
@@ -87,11 +91,14 @@ impl Dal {
         let scripts: Cache<String, Arc<Option<String>>> =
             Cache::builder().max_capacity(1024).build();
         let gui_tree: Cache<(), Arc<GuiFolder>> = Cache::builder().max_capacity(1).build();
+        let components: Cache<String, Arc<Option<String>>> =
+            Cache::builder().max_capacity(1024).build();
 
         let game_root = PathBuf::from(&config.game_install_path);
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
             &item_drops, &bundles, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
+            &components,
         )?;
 
         Ok(Self {
@@ -111,6 +118,7 @@ impl Dal {
             sprites,
             scripts,
             gui_tree,
+            components,
             watcher: Mutex::new(watcher),
         })
     }
@@ -139,6 +147,7 @@ impl Dal {
             &self.sprites,
             &self.scripts,
             &self.gui_tree,
+            &self.components,
         )?;
 
         *self.config.write().unwrap() = new_config;
@@ -160,6 +169,7 @@ impl Dal {
         self.sprites.invalidate_all();
         self.scripts.invalidate_all();
         self.gui_tree.invalidate_all();
+        self.components.invalidate_all();
 
         Ok(())
     }
@@ -191,6 +201,7 @@ fn build_watcher(
     sprites: &Cache<String, Arc<Option<String>>>,
     scripts: &Cache<String, Arc<Option<String>>>,
     gui_tree: &Cache<(), Arc<GuiFolder>>,
+    components: &Cache<String, Arc<Option<String>>>,
 ) -> Result<RecommendedWatcher, String> {
     let data_dir = game_root.join("Data");
     let scripts_dir = game_root.join("Scripts");
@@ -269,6 +280,10 @@ fn build_watcher(
     // the next read re-walks. Captured separately from the exact-path invalidators,
     // like the Scripts/ wholesale rule.
     let gui_cache = gui_tree.clone();
+    // Component `.xml` bodies are cached per-basename; like Scripts/, we can't
+    // cheaply map a changed gui file back to its logical name, so any change under
+    // gui/ invalidates the whole components cache wholesale.
+    let components_cache = components.clone();
     let gui_dir_match = gui_dir.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
@@ -289,9 +304,11 @@ fn build_watcher(
                 scripts_cache.invalidate_all();
             }
             // Any change anywhere under gui/ (the recursive watch covers nested
-            // folders) invalidates the single tree cache key.
+            // folders) invalidates the single tree cache key and every cached
+            // component body (wholesale, like the Scripts/ rule).
             if path.starts_with(&gui_dir_match) {
                 gui_cache.invalidate(&());
+                components_cache.invalidate_all();
             }
         }
     })

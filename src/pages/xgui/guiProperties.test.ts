@@ -168,6 +168,14 @@ describe("fieldsForTag", () => {
     expect(panel.find((f) => f.name === "backgroundColor")?.kind).toBe("color");
     expect(panel.find((f) => f.name === "position")?.kind).toBe("compound");
   });
+
+  it("gives Event editable name + handler as plain text fields (thin model)", () => {
+    // Events are now edited in the Properties panel (the dedicated events panel is
+    // gone): name→handler, both verbatim literal strings, not bindable/compound.
+    const fields = fieldsForTag("Event");
+    expect(fields.map((f) => f.name)).toEqual(["name", "handler"]);
+    expect(fields.every((f) => f.kind === "text")).toBe(true);
+  });
 });
 
 describe("freeformAttrs", () => {

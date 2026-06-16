@@ -42,8 +42,9 @@
  *  • F9c (events) — `<Event>` children of `<View>` are ordinary nodes in `root`,
  *    so ADD flows through the same `addChildNode` action as F9a, and REMOVE uses
  *    the `removeNode` action (the immutable detach lives in the pure
- *    `guiTreeEdit.removeNode`). The events panel is the only caller of `removeNode`
- *    today — general tree delete stays deferred.
+ *    `guiTreeEdit.removeNode`). The structure TREE is the only caller of
+ *    `removeNode` today — and only for `<Event>` rows — so general tree delete
+ *    stays deferred.
  *  • F10 (controller tab) — `activeTab` toggles View/Controller. The controller
  *    TEXT lives in `open.controllerText` (`null` = not-yet-loaded). Three actions
  *    feed it: `loadControllerText` seats disk contents WITHOUT dirtying (the tab

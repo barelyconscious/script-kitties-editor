@@ -5,8 +5,8 @@
  *
  * This first runnable slice wires:
  *  • LEFT — the {@link ComponentList} (folder tree + create flow + open flow).
- *  • CENTER-LEFT — a clearly-marked SEAM for the structure column (F9a tree /
- *    F9b properties / F9c events). Empty placeholder for now.
+ *  • CENTER-LEFT — the structure column: the F9a tree over the F9b properties
+ *    panel. Events are ordinary tree nodes, so there is no separate events slice.
  *  • MAIN — when a component is open, the existing F3 {@link GuiPreviewHost}
  *    (preview + Data Model panel) renders it, fed from the shared store. A
  *    clearly-marked SEAM marks where the View/Controller tab bar (F10) lands.
@@ -26,7 +26,6 @@ import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { ControllerTab } from "./xgui/ControllerTab";
 import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
-import { EventsPanel } from "./xgui/EventsPanel";
 import { EditorStateProvider, type EditorTab, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
 import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
@@ -70,8 +69,10 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
             <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
           )}
 
-          {/* Structure column: the tree (F9a), properties (F9b), and events (F9c)
-            slices stacked top-to-bottom — now all live. */}
+          {/* Structure column: the tree (F9a) over properties (F9b), stacked
+            top-to-bottom. Events are ordinary <Event> tree nodes now — added,
+            labeled, edited (in Properties), and removed through these two slices —
+            so the dedicated events panel is gone. */}
           <StructureColumn />
 
           {/* MAIN content — the preview (+ Data Model) for the open component. */}
@@ -83,13 +84,14 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
 }
 
 /**
- * The structure column (tree + properties + events), all three slices live: the
- * TREE slice (top, {@link StructureTree}), the PROPERTIES slice (middle,
- * {@link PropertiesPanel}) reflecting the current selection, and the EVENTS slice
- * (bottom, {@link EventsPanel}) listing the View's `<Event>` registrations.
+ * The structure column — TWO slices: the TREE slice (top, {@link StructureTree})
+ * and the PROPERTIES slice (bottom, {@link PropertiesPanel}) reflecting the current
+ * selection. `<Event>` registrations are ordinary tree nodes (labeled by name,
+ * added/removed via the tree, edited via Properties), so there is no longer a
+ * dedicated events slice.
  *
- * Each slice scrolls independently within its own region so a deep tree, a long
- * property list, and a long event list don't fight for the column's height.
+ * Each slice scrolls independently within its own region so a deep tree and a long
+ * property list don't fight for the column's height.
  */
 function StructureColumn() {
   return (
@@ -101,13 +103,9 @@ function StructureColumn() {
       <div className="flex min-h-0 flex-[1.2] flex-col">
         <StructureTree />
       </div>
-      {/* PROPERTIES slice (F9b) — middle region, scrolls independently. */}
+      {/* PROPERTIES slice (F9b) — lower region, scrolls independently. */}
       <div className="flex min-h-0 flex-1 flex-col">
         <PropertiesPanel />
-      </div>
-      {/* EVENTS slice (F9c) — lower region, scrolls independently. */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <EventsPanel />
       </div>
     </aside>
   );

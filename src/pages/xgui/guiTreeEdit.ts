@@ -21,6 +21,30 @@
 import { type GuiNode, type GuiTag, mintNodeId } from "../../lib/guiNode";
 import type { GuiFolder } from "./guiTree";
 
+/** The placeholder shown for an `<Event>` row whose `name` attr is empty. */
+export const EVENT_PLACEHOLDER_LABEL = "(event)";
+
+/**
+ * The secondary label for a tree row, beside its tag chip:
+ *  - `<Event>` nodes have NO `id` (events are name→handler, not id'd), so they are
+ *    labeled by their `name` attribute — falling back to {@link EVENT_PLACEHOLDER_LABEL}
+ *    when the name is blank/whitespace so a freshly-added event is still visible and
+ *    selectable in the tree.
+ *  - Every other tag keeps its authored `id` (trimmed) as the secondary label, or
+ *    `null` when it has none (the panel then shows just the tag chip).
+ *
+ * Pure (no React) so the labeling rule is unit-tested without rendering the tree;
+ * the {@link StructureTree} row is a thin consumer of this.
+ */
+export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | null } {
+  if (node.tag === "Event") {
+    const name = node.attrs.name?.trim();
+    return { tag: node.tag, secondary: name ? name : EVENT_PLACEHOLDER_LABEL };
+  }
+  const id = node.attrs.id?.trim();
+  return { tag: node.tag, secondary: id ? id : null };
+}
+
 /**
  * The tags a user can ADD as a child under a parent of the given tag, honoring the
  * phase-1 structural rules:
@@ -72,7 +96,7 @@ export function canAddChild(parentTag: GuiTag, childTag: GuiTag): boolean {
  *    also gets placeholder `text` so it paints something.
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
- *  - `<Event>` gets empty `name`/`handler` the Events slice (F9c) fills in.
+ *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
  *
  * `id` is intentionally left UNSET — the local id is the user's to choose in the
  * Properties panel (F9b); the design's computed-id is derived from the hierarchy,
@@ -169,10 +193,11 @@ export function setNodeAttrs(
  * UNCHANGED (same reference) — callers (and the store) treat an unchanged
  * reference as a no-op (don't dirty on a phantom remove).
  *
- * SCOPE (F9c): the only remove affordance in the editor today is the Events panel
- * deleting an `<Event>` child of `<View>`. General element delete from the tree is
- * still deferred (design subsection 2 / task 452) — this function is the shared
- * immutable primitive, but no tree delete UI calls it yet.
+ * SCOPE (F9c): the only remove affordance in the editor today is the structure
+ * TREE deleting an `<Event>` child of `<View>` (right-click "Remove event" / the
+ * inline trash button). General element delete from the tree is still deferred
+ * (design subsection 2 / task 452) — this function is the shared immutable
+ * primitive, scoped to `<Event>` removal by its sole caller.
  */
 export function removeNode(root: GuiNode, nodeId: string): GuiNode {
   // The root is never removable — only descendants.

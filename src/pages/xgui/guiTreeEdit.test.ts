@@ -6,9 +6,11 @@ import {
   allowedChildTags,
   canAddChild,
   componentPickItems,
+  EVENT_PLACEHOLDER_LABEL,
   filterPickItems,
   findNode,
   makeChildNode,
+  nodeLabel,
   nodePath,
   removeNode,
   setNodeAttrs,
@@ -16,6 +18,11 @@ import {
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
+}
+
+/** A node with explicit attrs, for label/attr-sensitive tests. */
+function nodeWith(tag: GuiTag, attrs: Record<string, string>): GuiNode {
+  return { nodeId: `${tag}-x`, tag, attrs, children: [] };
 }
 
 describe("allowedChildTags / canAddChild — element rules", () => {
@@ -49,6 +56,37 @@ describe("allowedChildTags / canAddChild — element rules", () => {
     expect(canAddChild("View", "Event")).toBe(true);
     expect(canAddChild("Panel", "Event")).toBe(false);
     expect(canAddChild("Component", "Event")).toBe(false);
+  });
+});
+
+describe("nodeLabel — tree row labeling", () => {
+  it("labels an <Event> by its name attribute (events have no id)", () => {
+    const ev = nodeWith("Event", { name: "Battle:OnCreatureDied", handler: "onDied" });
+    expect(nodeLabel(ev)).toEqual({ tag: "Event", secondary: "Battle:OnCreatureDied" });
+  });
+
+  it("uses the placeholder when an <Event> name is empty or whitespace", () => {
+    expect(nodeLabel(nodeWith("Event", { name: "", handler: "" })).secondary).toBe(
+      EVENT_PLACEHOLDER_LABEL,
+    );
+    expect(nodeLabel(nodeWith("Event", { name: "   " })).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
+    // A missing name attr (not just empty) also falls back to the placeholder.
+    expect(nodeLabel(nodeWith("Event", {})).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
+  });
+
+  it("ignores an <Event> id even if one is somehow present (events label by name)", () => {
+    const ev = nodeWith("Event", { id: "evt1", name: "Tick" });
+    expect(nodeLabel(ev).secondary).toBe("Tick");
+  });
+
+  it("labels non-Event tags by their trimmed id", () => {
+    expect(nodeLabel(nodeWith("Panel", { id: "  stats " })).secondary).toBe("stats");
+    expect(nodeLabel(nodeWith("View", { id: "view" }))).toEqual({ tag: "View", secondary: "view" });
+  });
+
+  it("gives a non-Event node with no id a null secondary label", () => {
+    expect(nodeLabel(nodeWith("Panel", {})).secondary).toBeNull();
+    expect(nodeLabel(nodeWith("Text", { id: "  " })).secondary).toBeNull();
   });
 });
 

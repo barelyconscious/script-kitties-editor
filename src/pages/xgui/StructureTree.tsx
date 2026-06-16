@@ -15,26 +15,23 @@
  * and adds once the user chooses a basename for `src`. Both mutate the store's tree
  * (so the preview updates) and select the new node.
  *
- * SCOPE (F9a): ADD only. There is no delete/reparent affordance here — those are
- * deferred (task 452 / design subsection 2).
+ * Remove: `<Event>` rows carry a remove affordance (right-click "Remove event" /
+ * an inline trash button) wired to the store's `removeNode` action — events are
+ * managed entirely through the tree + Properties now that the dedicated events
+ * panel is gone. General element delete/reparent stays deferred (task 452 / design
+ * subsection 2), so remove is scoped to `<Event>` nodes only.
  *
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
 
-import { ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
-import { allowedChildTags, makeChildNode } from "./guiTreeEdit";
-
-/** A short label for an element row: its tag plus its authored `id` if present. */
-function nodeLabel(node: GuiNode): { tag: GuiTag; id: string | null } {
-  const id = node.attrs.id?.trim();
-  return { tag: node.tag, id: id ? id : null };
-}
+import { allowedChildTags, EVENT_PLACEHOLDER_LABEL, makeChildNode, nodeLabel } from "./guiTreeEdit";
 
 /** Per-tag accent for the tag chip, so the tree reads at a glance. */
 function tagChipClass(tag: GuiTag): string {
@@ -86,6 +83,13 @@ export function StructureTree() {
     setPickerParentId(null);
   };
 
+  // Remove a node from the tree (history-tracked `removeNode`). The tree exposes
+  // this only for `<Event>` nodes for now — general element delete stays deferred
+  // (task 452) — but events MUST be removable now that the events panel is gone.
+  const handleRemove = (nodeId: string) => {
+    dispatch({ type: "removeNode", nodeId });
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-1">
       <ul>
@@ -95,6 +99,7 @@ export function StructureTree() {
           selectedNodeId={selectedNodeId}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
+          onRemove={handleRemove}
         />
       </ul>
 
@@ -118,14 +123,23 @@ type TreeRowProps = {
   selectedNodeId: string | null;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
+  onRemove: (nodeId: string) => void;
 };
 
-function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd }: TreeRowProps) {
+function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: TreeRowProps) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
-  const { tag, id } = nodeLabel(node);
+  const { tag, secondary } = nodeLabel(node);
+  // Events label by name (no `#` prefix); other tags prefix their id with `#`.
+  const isEvent = tag === "Event";
   const selected = node.nodeId === selectedNodeId;
   const addable = allowedChildTags(tag);
+  // Remove is scoped to <Event> nodes for now (general element delete deferred,
+  // task 452) — but events must be removable now that the events panel is gone.
+  const removable = isEvent;
+  // The row carries a context menu when there's anything to do on it: add a child
+  // (containers) or remove it (events).
+  const hasMenu = addable.length > 0 || removable;
 
   return (
     <li>
@@ -163,7 +177,20 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd }: TreeRowProps)
               className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             >
               <span className={cn("shrink-0 font-medium font-mono", tagChipClass(tag))}>{tag}</span>
-              {id && <span className="min-w-0 truncate text-muted-foreground">#{id}</span>}
+              {secondary && (
+                <span
+                  className={cn(
+                    "min-w-0 truncate text-muted-foreground",
+                    // The placeholder for an unnamed event reads as muted/italic so an
+                    // empty event is clearly a stub waiting for a name.
+                    isEvent &&
+                      secondary === EVENT_PLACEHOLDER_LABEL &&
+                      "text-muted-foreground/60 italic",
+                  )}
+                >
+                  {isEvent ? secondary : `#${secondary}`}
+                </span>
+              )}
               {tag === "Component" && node.attrs.src && (
                 <span className="min-w-0 truncate text-muted-foreground/70 italic">
                   {node.attrs.src}
@@ -176,26 +203,50 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd }: TreeRowProps)
               // menu, so add-child is discoverable without knowing about it.
               <AddMenu node={node} addable={addable} onAdd={onAdd} />
             )}
+            {removable && (
+              // A visible remove affordance on hover mirrors the right-click menu, so
+              // deleting an event is discoverable without knowing the context menu.
+              <button
+                type="button"
+                aria-label="Remove event"
+                onClick={() => onRemove(node.nodeId)}
+                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            )}
           </div>
         </ContextMenu.Trigger>
-        {addable.length > 0 && (
+        {hasMenu && (
           <ContextMenu.Portal>
             <ContextMenu.Content className="z-50 min-w-40 overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground text-xs shadow-md ring-1 ring-foreground/10">
-              <ContextMenu.Label className="px-2 py-1 text-muted-foreground">
-                Add child
-              </ContextMenu.Label>
-              {addable.map((childTag) => (
+              {addable.length > 0 && (
+                <>
+                  <ContextMenu.Label className="px-2 py-1 text-muted-foreground">
+                    Add child
+                  </ContextMenu.Label>
+                  {addable.map((childTag) => (
+                    <ContextMenu.Item
+                      key={childTag}
+                      onSelect={() => onAdd(node.nodeId, childTag)}
+                      className="cursor-pointer rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                    >
+                      {`<${childTag}>`}
+                      {childTag === "Component" && (
+                        <span className="ml-1 text-muted-foreground">…</span>
+                      )}
+                    </ContextMenu.Item>
+                  ))}
+                </>
+              )}
+              {removable && (
                 <ContextMenu.Item
-                  key={childTag}
-                  onSelect={() => onAdd(node.nodeId, childTag)}
-                  className="cursor-pointer rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                  onSelect={() => onRemove(node.nodeId)}
+                  className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-destructive outline-none data-[highlighted]:bg-muted"
                 >
-                  {`<${childTag}>`}
-                  {childTag === "Component" && (
-                    <span className="ml-1 text-muted-foreground">…</span>
-                  )}
+                  <Trash2 className="size-3" /> Remove event
                 </ContextMenu.Item>
-              ))}
+              )}
             </ContextMenu.Content>
           </ContextMenu.Portal>
         )}
@@ -211,6 +262,7 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd }: TreeRowProps)
               selectedNodeId={selectedNodeId}
               onSelect={onSelect}
               onAdd={onAdd}
+              onRemove={onRemove}
             />
           ))}
         </ul>

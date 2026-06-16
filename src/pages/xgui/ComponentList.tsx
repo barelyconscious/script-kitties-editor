@@ -23,7 +23,7 @@ import {
   Plus,
   SearchIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -37,13 +37,12 @@ import {
   isValidBasename,
   toComponentBasename,
 } from "./guiTree";
+import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
 import { buildOpenComponent } from "./openComponent";
 import { decideSwitch, type SwitchChoice } from "./switchGuard";
 import { UnsavedSwitchDialog } from "./UnsavedSwitchDialog";
 import { useComponentSave } from "./useComponentSave";
-
-const EMPTY_TREE: GuiFolder = { name: "", path: "", folders: [], components: [] };
 
 /** Filter the tree to folders/components matching a query, keeping folder paths. */
 function filterTree(tree: GuiFolder, query: string): GuiFolder {
@@ -72,9 +71,13 @@ export type ComponentListProps = {
 export function ComponentList({ collapsed, className }: ComponentListProps) {
   const { state, dispatch } = useEditorStore();
   const { save, saving: savingSwitch } = useComponentSave();
-  const [tree, setTree] = useState<GuiFolder>(EMPTY_TREE);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Tree state + the get_gui_tree refetch are shared (lifted to the page) so F13's
+  // live-reload glue can refresh the list on external edits and surface its
+  // disk-change notice on the main editor pane.
+  const { tree, loading, error: treeError, reload } = useGuiTreeStore();
+  // An open/parse failure surfaced inline by THIS panel (distinct from the tree
+  // load error, which lives in the shared store).
+  const [openError, setOpenError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // Collapsed folder paths. Empty = everything expanded.
   const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(() => new Set());
@@ -83,24 +86,8 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
 
-  const reload = useCallback(async (): Promise<GuiFolder | null> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<GuiFolder>("get_gui_tree");
-      setTree(result);
-      return result;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load the gui/ tree.");
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  // The panel shows either kind of error: a failed tree load or a failed open.
+  const error = treeError ?? openError;
 
   const filtered = useMemo(() => filterTree(tree, query), [tree, query]);
   // When searching, force everything expanded so matches deep in the tree show.
@@ -125,11 +112,11 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   // failure or read error surfaces inline without clearing the current open doc.
   const openComponent = useCallback(
     async (ref: GuiComponentRef) => {
-      setError(null);
+      setOpenError(null);
       try {
         const xml = await invoke<string | null>("get_component", { name: ref.name });
         if (xml == null) {
-          setError(
+          setOpenError(
             `Component "${ref.name}" could not be found on disk — it may have been deleted.`,
           );
           return;
@@ -143,7 +130,7 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
             : err instanceof Error
               ? err.message
               : String(err);
-        setError(message);
+        setOpenError(message);
       }
     },
     [dispatch],

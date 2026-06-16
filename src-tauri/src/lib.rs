@@ -190,10 +190,18 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .manage(dal)
-        .setup(|_app| {
+        .setup(|app| {
+            use tauri::Manager;
+
+            // Hand the DAL's filesystem watcher the AppHandle it emits through.
+            // The watcher was built in `Dal::new` (before the app existed) with an
+            // empty emit slot; this fills it so external edits under gui/ now emit
+            // the `gui-changed` event the XGUI editor live-reloads from.
+            app.state::<Dal>().set_app_handle(app.handle().clone());
+
             // Kill WebView2's native form autofill ("Saved info") app-wide.
             #[cfg(windows)]
-            disable_webview_autofill(_app);
+            disable_webview_autofill(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

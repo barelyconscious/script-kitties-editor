@@ -296,4 +296,67 @@ describe("editorReducer", () => {
       expect(next.dirty).toBe(false);
     });
   });
+
+  describe("reloadOpen (F13 live external-edit sync)", () => {
+    it("replaces the open doc, sets the remapped selection, and clears dirty", () => {
+      const state: EditorState = {
+        open: openDoc({ root: { nodeId: "old", tag: "View", attrs: {}, children: [] } }),
+        selectedNodeId: "old-sel",
+        activeTab: "view",
+        dirty: true,
+      };
+      const reloaded = openDoc({
+        root: { nodeId: "new", tag: "View", attrs: { id: "x" }, children: [] },
+      });
+      const next = editorReducer(state, {
+        type: "reloadOpen",
+        component: reloaded,
+        selectedNodeId: "new-sel",
+      });
+      expect(next.open?.root.nodeId).toBe("new");
+      expect(next.open?.root.attrs).toEqual({ id: "x" });
+      expect(next.selectedNodeId).toBe("new-sel");
+      // The editor now matches disk — nothing unsaved.
+      expect(next.dirty).toBe(false);
+    });
+
+    it("PRESERVES the active tab (a live swap must not yank the user off Controller)", () => {
+      const state: EditorState = {
+        open: openDoc(),
+        selectedNodeId: null,
+        activeTab: "controller",
+        dirty: false,
+      };
+      const next = editorReducer(state, {
+        type: "reloadOpen",
+        component: openDoc(),
+        selectedNodeId: null,
+      });
+      expect(next.activeTab).toBe("controller");
+    });
+
+    it("drops a dangling selection when the node is gone (selectedNodeId null)", () => {
+      const state: EditorState = {
+        open: openDoc(),
+        selectedNodeId: "was-selected",
+        activeTab: "view",
+        dirty: false,
+      };
+      const next = editorReducer(state, {
+        type: "reloadOpen",
+        component: openDoc(),
+        selectedNodeId: null,
+      });
+      expect(next.selectedNodeId).toBeNull();
+    });
+
+    it("is a no-op when nothing is open", () => {
+      const next = editorReducer(CLEAN, {
+        type: "reloadOpen",
+        component: openDoc(),
+        selectedNodeId: null,
+      });
+      expect(next).toBe(CLEAN);
+    });
+  });
 });

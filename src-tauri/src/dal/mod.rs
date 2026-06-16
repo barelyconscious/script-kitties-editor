@@ -8,6 +8,7 @@ use std::{
 use moka::sync::Cache;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 use crate::{
     config::EditorConfig,
@@ -33,10 +34,27 @@ pub mod palette;
 pub mod scripts;
 pub mod sprites;
 
+/// The Tauri event name emitted to the frontend when anything under `gui/`
+/// changes on disk (external editor, file move, etc.). The payload is the
+/// gui-relative path of the changed file when it can be derived, else `null`
+/// (a coarse "something under gui/ changed" signal). The XGUI editor listens
+/// for this to live-reload an open component and refresh the component list.
+pub const GUI_CHANGED_EVENT: &str = "gui-changed";
+
+/// A shared slot holding the `AppHandle` the filesystem watcher emits through.
+/// The watcher is built inside `Dal::new`, BEFORE the Tauri app (and thus its
+/// `AppHandle`) exists, so the watcher captures this empty slot and the setup
+/// hook fills it once the handle is available (see [`Dal::set_app_handle`]).
+/// Until then, watcher fires simply invalidate caches without emitting.
+type EmitSlot = Arc<Mutex<Option<AppHandle>>>;
+
 pub struct Dal {
     // Config is mutable at runtime via `update_config`; readers take a snapshot
     // through a short-lived read lock so they don't hold it across file I/O.
     config: RwLock<EditorConfig>,
+    // Shared with every watcher built for this Dal so a re-watch (config change)
+    // keeps emitting through the same handle without re-plumbing setup.
+    emit_slot: EmitSlot,
     pub(crate) abilities: Cache<(), Arc<Vec<Ability>>>,
     pub(crate) biograms: Cache<(), Arc<Vec<Biogram>>>,
     pub(crate) charms: Cache<(), Arc<Vec<Charm>>>,
@@ -95,14 +113,16 @@ impl Dal {
             Cache::builder().max_capacity(1024).build();
 
         let game_root = PathBuf::from(&config.game_install_path);
+        let emit_slot: EmitSlot = Arc::new(Mutex::new(None));
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
             &item_drops, &bundles, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
-            &components,
+            &components, &emit_slot,
         )?;
 
         Ok(Self {
             config: RwLock::new(config),
+            emit_slot,
             abilities,
             biograms,
             charms,
@@ -148,6 +168,9 @@ impl Dal {
             &self.scripts,
             &self.gui_tree,
             &self.components,
+            // Reuse the same slot so the rebuilt watcher keeps emitting through
+            // the AppHandle the setup hook already installed.
+            &self.emit_slot,
         )?;
 
         *self.config.write().unwrap() = new_config;
@@ -178,6 +201,15 @@ impl Dal {
         self.config.read().unwrap().clone()
     }
 
+    /// Install the `AppHandle` the filesystem watcher emits frontend events
+    /// through. Called once from the Tauri `setup` hook, after the app (and its
+    /// handle) exists — the watcher itself is built earlier, in `Dal::new`, so it
+    /// captures an initially-empty slot this fills in. Idempotent: a later call
+    /// just replaces the stored handle.
+    pub fn set_app_handle(&self, handle: AppHandle) {
+        *self.emit_slot.lock().unwrap() = Some(handle);
+    }
+
     pub(crate) fn data_dir(&self) -> PathBuf {
         Path::new(&self.config.read().unwrap().game_install_path).join("Data")
     }
@@ -202,6 +234,7 @@ fn build_watcher(
     scripts: &Cache<String, Arc<Option<String>>>,
     gui_tree: &Cache<(), Arc<GuiFolder>>,
     components: &Cache<String, Arc<Option<String>>>,
+    emit_slot: &EmitSlot,
 ) -> Result<RecommendedWatcher, String> {
     let data_dir = game_root.join("Data");
     let scripts_dir = game_root.join("Scripts");
@@ -285,6 +318,10 @@ fn build_watcher(
     // gui/ invalidates the whole components cache wholesale.
     let components_cache = components.clone();
     let gui_dir_match = gui_dir.clone();
+    // The handle the gui/ branch emits `gui-changed` through. Cloned into the
+    // closure; empty until the setup hook installs the AppHandle, at which point
+    // every subsequent gui/ change emits to the frontend.
+    let emit_slot = emit_slot.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
         // Ignore access-only events; only react when the file's bytes change.
@@ -309,6 +346,16 @@ fn build_watcher(
             if path.starts_with(&gui_dir_match) {
                 gui_cache.invalidate(&());
                 components_cache.invalidate_all();
+                // Emit AFTER invalidation so the frontend's re-fetch (get_gui_tree
+                // / get_component) reads fresh data, never the stale cache. The
+                // payload is the gui-relative path (forward-slashed) so the editor
+                // can tell whether the CURRENTLY-OPEN component changed; if the
+                // path can't be made relative it falls back to `None` (a coarse
+                // "something under gui/ changed" signal — the list still refreshes).
+                if let Some(handle) = emit_slot.lock().unwrap().as_ref() {
+                    let rel = gui_relative_path(&gui_dir_match, path);
+                    let _ = handle.emit(GUI_CHANGED_EVENT, rel);
+                }
             }
         }
     })
@@ -337,6 +384,18 @@ fn build_watcher(
     let _ = watcher.watch(&gui_dir, RecursiveMode::Recursive);
 
     Ok(watcher)
+}
+
+/// Derive the gui-relative, forward-slashed path of a changed file for the
+/// `gui-changed` event payload. Returns `Some("widgets/bag.xml")` when `path`
+/// lives under `gui_dir`, or `None` when it can't be made relative (a coarse
+/// "something under gui/ changed" signal — the editor still refreshes the list).
+/// Backslashes are normalized to `/` so the payload matches the gui-relative
+/// `path` the frontend's `get_gui_tree` refs already use on every platform.
+fn gui_relative_path(gui_dir: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(gui_dir)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
 }
 
 /// Pretty-print a serializable value with 4-space indent and a trailing newline,
@@ -393,6 +452,32 @@ mod tests {
         // Existing .json writes must stage in the identical temp path as before.
         let p = Path::new("/games/install/Data/charms.json");
         assert_eq!(tmp_sibling(p), PathBuf::from("/games/install/Data/charms.json.tmp"));
+    }
+
+    #[test]
+    fn gui_relative_path_strips_gui_dir_and_forward_slashes() {
+        // A nested change yields the gui-relative path the frontend's tree refs use.
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/widgets/bag.xml");
+        assert_eq!(
+            gui_relative_path(gui_dir, changed),
+            Some("widgets/bag.xml".to_string())
+        );
+    }
+
+    #[test]
+    fn gui_relative_path_handles_top_level_file() {
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/main.xml");
+        assert_eq!(gui_relative_path(gui_dir, changed), Some("main.xml".to_string()));
+    }
+
+    #[test]
+    fn gui_relative_path_returns_none_when_outside_gui_dir() {
+        // A path not under gui/ can't be made relative → coarse signal (None).
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/Data/items.json");
+        assert_eq!(gui_relative_path(gui_dir, changed), None);
     }
 
     #[test]

@@ -25,9 +25,11 @@ import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { ControllerTab } from "./xgui/ControllerTab";
+import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
 import { EventsPanel } from "./xgui/EventsPanel";
 import { EditorStateProvider, type EditorTab, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
+import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
@@ -50,23 +52,25 @@ export interface XguiProps {
 export default function Xgui({ componentListCollapsed }: XguiProps) {
   return (
     <EditorStateProvider>
-      <div className="flex h-full min-h-0">
-        <ComponentList collapsed={componentListCollapsed} />
+      <GuiTreeStoreProvider>
+        <div className="flex h-full min-h-0">
+          <ComponentList collapsed={componentListCollapsed} />
 
-        {/* When the list is collapsed, leave a slim labelled rail in its place so
+          {/* When the list is collapsed, leave a slim labelled rail in its place so
             it's obvious the panel exists and how to bring it back — matching the
             Workbench's collapsed-list affordance. */}
-        {componentListCollapsed && (
-          <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
-        )}
+          {componentListCollapsed && (
+            <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
+          )}
 
-        {/* Structure column: the tree (F9a), properties (F9b), and events (F9c)
+          {/* Structure column: the tree (F9a), properties (F9b), and events (F9c)
             slices stacked top-to-bottom — now all live. */}
-        <StructureColumn />
+          <StructureColumn />
 
-        {/* MAIN content — the preview (+ Data Model) for the open component. */}
-        <MainContent />
-      </div>
+          {/* MAIN content — the preview (+ Data Model) for the open component. */}
+          <MainContent />
+        </div>
+      </GuiTreeStoreProvider>
     </EditorStateProvider>
   );
 }
@@ -113,6 +117,10 @@ function MainContent() {
   const activeTab = state.activeTab;
   const dirty = state.dirty;
   const { save, saving, error, clearError } = useComponentSave();
+  // F13: the open component's file changed on disk while it had unsaved edits.
+  // The notice lets the user reload (discarding their draft) or keep their work —
+  // we never stomp it silently.
+  const { live } = useGuiTreeStore();
 
   // Warn on app close / reload while the open component is dirty — nothing
   // auto-saves, so an intentional reload must confirm before discarding edits.
@@ -181,6 +189,17 @@ function MainContent() {
           </Button>
         )}
       </div>
+
+      {/* F13: the open file changed on disk under unsaved edits. Non-destructive —
+          default keeps the draft; Reload is the deliberate discard. Shown only when
+          the notice still refers to the open component. */}
+      {live.diskChangeNotice != null && live.diskChangeNotice === open?.name && (
+        <DiskChangeNotice
+          componentName={live.diskChangeNotice}
+          onReload={live.reloadFromDisk}
+          onKeep={live.keepLocalChanges}
+        />
+      )}
 
       {/* A failed save surfaces here and KEEPS the component dirty (design risk
           #5) so the user knows the save didn't land and can retry. */}

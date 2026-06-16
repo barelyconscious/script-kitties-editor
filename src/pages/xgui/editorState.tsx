@@ -176,7 +176,23 @@ export type EditorAction =
    */
   | { type: "addController"; fileName: string }
   /** Clear the dirty flag after a successful save (F11). */
-  | { type: "markSaved" };
+  | { type: "markSaved" }
+  /**
+   * Live-reload the open component from disk after an EXTERNAL edit (F13): replace
+   * the parsed `root`, `controllerFileName`, and `path` with the freshly re-read +
+   * re-parsed version, set the (already-remapped) `selectedNodeId`, and clear
+   * dirty — the editor now matches disk. PRESERVES the active tab (unlike `open`,
+   * which resets it) so a live swap doesn't yank the user off the Controller tab.
+   * Resets `controllerText` to `null` so the controller buffer lazily re-reads the
+   * (possibly changed) `.lua` on next view. A no-op if nothing is open. The caller
+   * (F13 listener) only dispatches this when the open component is CLEAN — a dirty
+   * editor gets the non-destructive notice instead, never this stomp.
+   */
+  | {
+      type: "reloadOpen";
+      component: OpenComponent;
+      selectedNodeId: string | null;
+    };
 
 const initialState: EditorState = {
   open: null,
@@ -287,6 +303,18 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
     case "markSaved":
       return { ...state, dirty: false };
+    case "reloadOpen":
+      // Only meaningful when something is open; a live-reload of nothing is a no-op.
+      if (!state.open) return state;
+      return {
+        ...state,
+        open: action.component,
+        // Selection is pre-remapped by the caller (the new tree re-mints nodeIds,
+        // so the old id is meaningless); `null` when the selected node is gone.
+        selectedNodeId: action.selectedNodeId,
+        // Editor now matches disk — nothing unsaved.
+        dirty: false,
+      };
     default: {
       // Exhaustiveness guard: a new action variant must be handled above.
       const _never: never = action;

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::dal::Dal;
+use crate::dal::{atomic_write, Dal};
 use crate::model::{GuiComponentKind, GuiComponentRef, GuiFolder};
 
 impl Dal {
@@ -45,6 +45,84 @@ impl Dal {
             });
         }
         walk_folder(&root, "")
+    }
+
+    /// Overwrite an **already-registered** component's `.xml` layout and, if
+    /// present, its controller `.lua` together. This is the per-component "Save"
+    /// of the GUI editor (design section 7) — the manual save that persists the
+    /// open component's XML and its controller script in one action.
+    ///
+    /// `name` is the component's bare basename (`"bag"`), resolved to `"bag.xml"`
+    /// through the asset manifest exactly as the runtime resolves `<Component
+    /// src>`. `controller`, when `Some`, is `(filename, contents)` — e.g.
+    /// `("bag_controller.lua", "…")` — and the filename is likewise resolved
+    /// through the manifest.
+    ///
+    /// **Save is a separate door from create.** Like [`Dal::save_script`] versus
+    /// [`Dal::create_script`], `save_component` REFUSES any `name` (or controller
+    /// filename) that does not already resolve through `assets.json` — it never
+    /// creates a not-yet-registered component, never inserts a manifest entry, and
+    /// never touches the manifest at all. First-time creation is `create_component`
+    /// (design section (1)), which keeps the two doors distinct.
+    ///
+    /// **Write order: controller first, then XML** (design risk #5), mirroring the
+    /// "land the rollback-able-ordered thing first" discipline of `create_script`.
+    /// Both writes are individually atomic ([`atomic_write`] — temp + rename), so
+    /// no single file is ever left half-written. The pre-flight resolution of BOTH
+    /// targets happens *before* either write, so a missing registration is refused
+    /// up front (nothing written). If a write nonetheless fails, the **single**
+    /// error is surfaced and propagated — the operation reports failure rather than
+    /// masquerading as success, so the caller keeps its dirty indicator set and the
+    /// user knows the save did not fully land. (There is no manifest step to roll
+    /// back; the only persistence here is the two file overwrites.)
+    pub fn save_component(
+        &self,
+        name: &str,
+        xml: String,
+        controller: Option<(String, String)>,
+    ) -> Result<(), String> {
+        // Pre-flight: resolve BOTH targets through the manifest before writing
+        // anything. A name (or controller filename) absent from the manifest is a
+        // refusal — save never creates, and we want zero residue on a refusal.
+        let xml_name = format!("{name}.xml");
+        let Some(xml_path) = self.resolve_asset(&xml_name)? else {
+            return Err(format!(
+                "refusing to save component '{name}': '{xml_name}' is not registered in the asset \
+                 manifest. Creating new components is not supported by save (use create_component)."
+            ));
+        };
+
+        // Resolve the controller path too (if a controller was supplied), so an
+        // unregistered controller is refused before the .xml is touched.
+        let controller_target = match &controller {
+            Some((file_name, contents)) => {
+                let Some(path) = self.resolve_asset(file_name)? else {
+                    return Err(format!(
+                        "refusing to save component '{name}': controller '{file_name}' is not \
+                         registered in the asset manifest. Creating new controllers is not \
+                         supported by save (use create_component / the Add-script flow)."
+                    ));
+                };
+                Some((path, contents.clone()))
+            }
+            None => None,
+        };
+
+        // Step 1: write the controller first (the safe-to-land-first half), if any.
+        // atomic_write self-cleans on its own failure; a failure here means the
+        // .xml was never touched — propagate the single error.
+        if let Some((controller_path, contents)) = controller_target {
+            atomic_write(&controller_path, contents.as_bytes())?;
+        }
+
+        // Step 2: write the .xml layout. A failure here is surfaced as the single
+        // error; per design risk #5 we do NOT pretend success, so the caller keeps
+        // its dirty indicator set. (The controller already written stays as-is —
+        // the design accepts a controller-newer-than-xml inconsistency over a lost
+        // save, and the surfaced error tells the user the save didn't fully land.)
+        atomic_write(&xml_path, xml.as_bytes())?;
+
+        Ok(())
     }
 }
 
@@ -332,6 +410,17 @@ mod tests {
         .unwrap()
     }
 
+    /// Build a Dal pointing at `root` with the given manifest JSON written out
+    /// (for save_component, which resolves the component/controller through the
+    /// manifest exactly like the runtime resolves `<Component src>`).
+    fn dal_with_manifest(root: &Path, manifest_json: &str) -> Dal {
+        std::fs::write(root.join("assets.json"), manifest_json).unwrap();
+        Dal::new(EditorConfig {
+            game_install_path: root.to_string_lossy().to_string(),
+        })
+        .unwrap()
+    }
+
     /// Locate a subfolder by gui-relative path within a tree.
     fn folder_at<'a>(root: &'a GuiFolder, path: &str) -> Option<&'a GuiFolder> {
         if root.path == path {
@@ -481,5 +570,145 @@ mod tests {
             2,
             "next read after invalidation must re-walk and see the new file"
         );
+    }
+
+    // ---- save_component: two-file ordered save over registered components ----
+
+    /// Manifest registering a `bag` component (`bag.xml`) and its controller
+    /// (`bag_controller.lua`) under `gui/`, both backslash-pathed like the real
+    /// manifest. Mirrors what `create_component` would have written.
+    const BAG_MANIFEST: &str = r#"{
+  "bag.xml": { "filepath": "gui\\bag.xml" },
+  "bag_controller.lua": { "filepath": "gui\\bag_controller.lua" }
+}"#;
+
+    /// Write the on-disk pair `create_component` would have left, so a save has
+    /// existing files to overwrite. Returns (xml_path, controller_path).
+    fn seed_bag_files(root: &Path) -> (PathBuf, PathBuf) {
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        let xml = gui.join("bag.xml");
+        let ctrl = gui.join("bag_controller.lua");
+        std::fs::write(&xml, "<View><Panel id=\"old\"/></View>").unwrap();
+        std::fs::write(&ctrl, "-- old controller\n").unwrap();
+        (xml, ctrl)
+    }
+
+    #[test]
+    fn save_writes_both_files_in_order_for_a_registered_component() {
+        let root = temp_install();
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        dal.save_component(
+            "bag",
+            "<View><Panel id=\"new\"/></View>".to_string(),
+            Some(("bag_controller.lua".to_string(), "-- new controller\n".to_string())),
+        )
+        .unwrap();
+
+        // Both files updated to the new contents.
+        assert_eq!(
+            std::fs::read_to_string(&xml_path).unwrap(),
+            "<View><Panel id=\"new\"/></View>"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ctrl_path).unwrap(),
+            "-- new controller\n"
+        );
+        // No temp sidecar from either atomic_write.
+        assert!(!root.join("gui").join("bag.xml.tmp").exists());
+        assert!(!root.join("gui").join("bag_controller.lua.tmp").exists());
+    }
+
+    #[test]
+    fn save_xml_only_when_no_controller_supplied() {
+        let root = temp_install();
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        dal.save_component("bag", "<View id=\"x\"/>".to_string(), None)
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&xml_path).unwrap(), "<View id=\"x\"/>");
+        // The controller is left untouched — a None controller is not a delete.
+        assert_eq!(
+            std::fs::read_to_string(&ctrl_path).unwrap(),
+            "-- old controller\n"
+        );
+    }
+
+    #[test]
+    fn save_refuses_unregistered_component_and_writes_nothing() {
+        let root = temp_install();
+        // gui/ exists but the component is NOT in the manifest.
+        std::fs::create_dir_all(root.join("gui")).unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        let err = dal
+            .save_component("ghost", "<View/>".to_string(), None)
+            .expect_err("saving an unregistered component must be refused");
+        assert!(
+            err.contains("ghost") && err.contains("ghost.xml"),
+            "refusal should name the component, got: {err}"
+        );
+
+        // No file (or temp sidecar) may be created for a refused save.
+        assert!(!root.join("gui").join("ghost.xml").exists());
+        assert!(!root.join("gui").join("ghost.xml.tmp").exists());
+    }
+
+    #[test]
+    fn save_refuses_unregistered_controller_and_leaves_xml_untouched() {
+        let root = temp_install();
+        let (xml_path, _) = seed_bag_files(&root);
+        // Manifest registers the .xml but NOT the controller name we will pass.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#,
+        );
+
+        let err = dal
+            .save_component(
+                "bag",
+                "<View id=\"new\"/>".to_string(),
+                Some(("unregistered_controller.lua".to_string(), "-- x\n".to_string())),
+            )
+            .expect_err("an unregistered controller must refuse the whole save");
+        assert!(
+            err.contains("unregistered_controller.lua"),
+            "refusal should name the controller, got: {err}"
+        );
+
+        // The refusal is pre-flight: the .xml must NOT have been overwritten, and
+        // no orphan controller file may appear.
+        assert_eq!(
+            std::fs::read_to_string(&xml_path).unwrap(),
+            "<View><Panel id=\"old\"/></View>",
+            "a controller refusal must not write the .xml"
+        );
+        assert!(!root.join("gui").join("unregistered_controller.lua").exists());
+    }
+
+    #[test]
+    fn save_never_mutates_the_asset_manifest() {
+        let root = temp_install();
+        seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        let before = std::fs::read_to_string(root.join("assets.json")).unwrap();
+
+        dal.save_component(
+            "bag",
+            "<View id=\"after\"/>".to_string(),
+            Some(("bag_controller.lua".to_string(), "-- after\n".to_string())),
+        )
+        .unwrap();
+
+        // The manifest on disk is byte-identical — save touches files, never the
+        // manifest (create_component owns registration).
+        let after = std::fs::read_to_string(root.join("assets.json")).unwrap();
+        assert_eq!(before, after, "save_component must not mutate assets.json");
+        assert!(!root.join("assets.json.tmp").exists());
     }
 }

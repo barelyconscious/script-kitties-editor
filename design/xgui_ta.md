@@ -273,6 +273,55 @@ To reach the **root model** from inside a repeated subtree, use the explicit `$`
 | Empty / unresolved | zero instances; template node persists in tree |
 | Nesting | lexical shadowing; nearest item wins |
 
+#### Component child data scope resolved (architect)
+
+> **F6b one-liner:** A mounted `<Component>` child resolves its `{token}`s against **its override attributes only, as a fresh root** (no parent data, no parent `$`); the parent **pre-resolves** each override value in its own scope (forEach item scope included) and hands the child concrete values — so the override boundary is a *value* boundary, not a token boundary.
+
+This settles architect risk #4 and is the second scope boundary in the renderer (the first being `forEach`). It is built to compose with the already-locked `forEach` scope-stack rules above — bare = item-scoped, `$.` = root, lexical shadowing, no root fall-through, no intermediate escape — without contradicting any of them. The governing principle is the same: **a component is a reusable unit; its internals must be reasonable in isolation, never coupled to whichever parent happens to mount it.**
+
+**(a) What scope a mounted child sees — overrides-only, as a *fresh root*. No parent data, no parent `$`.**
+
+When the preview mounts `<Component src="child.xml" actionText="Sell" qty="3"/>`, the data model the child's subtree resolves against is **exactly the override attributes on that `<Component>` element** — `{ actionText: "Sell", qty: "3" }` — and nothing else.
+
+- The child does **not** see the parent's data model. A bare `{actionText}` inside `child.xml` resolves to the override; a bare `{money}` that the parent's model happens to define resolves to **nothing** (renders as an unresolved-but-styled token), because `money` was not passed in. This is the prop boundary: the only way data crosses into a child is by being named on the `<Component>` element.
+- **`$.` inside the child means the child's own root, which *is* the overrides — not the parent's root.** There is one root per *mount*, and a `<Component>` mount starts a fresh one. So `{$.qty}` inside `child.xml` equals `{qty}` equals the `qty` override. The child cannot reach the parent's `$` root. (This is the one place the earlier *recommendation* left open — "plus the same `$` root if the runtime exposes one globally" — and it is closed in favor of **no parent-`$` leak**. A global-`$` escape would let any child silently bind to whatever top-level model it is dropped into, which is exactly the accidental coupling the whole boundary exists to prevent; if a child genuinely needs a global value, the parent passes it explicitly as an override, e.g. `currency="{$.currency}"`.)
+- Consequence for the preview evaluator: **mounting a `<Component>` pushes a new scope stack whose bottom (root) is the resolved overrides object**, not a continuation of the parent's stack. The parent's stack does not bleed across the mount. (Inside the child, a `forEach` then pushes item scopes onto *the child's* stack exactly as in section (c) of the forEach rules — the two mechanisms nest cleanly because each `<Component>` mount reseats the stack bottom.)
+
+**(b) A `forEach`-stamped `<Component>` — overrides resolve in the PARENT's item scope; the child's own scope is independent.**
+
+For `<Component src="biogram_slot.xml" forEach="{biograms}" key="{id}" label="{name}" tint="{$.theme}"/>`:
+
+- The `<Component>` element sits **in the parent scope**. Its override values are therefore resolved against the parent's current scope stack — which, because this element carries `forEach`, is the **current item scope** (the current biogram). So `label="{name}"` resolves to *this biogram's* `name`, and `tint="{$.theme}"` resolves to the parent root's `theme`, all per the locked `forEach` rules (bare = item, `$.` = parent root, no fall-through). Each stamped instance gets its own resolved override set.
+- Those resolved values become the instance's overrides — i.e. that instance's child-root. **Inside `biogram_slot.xml`, `{label}` is the concrete value already computed in the parent's item scope.** The child does not know it was stamped by a `forEach`, does not see `{biograms}`, and cannot reach the item scope or the parent root directly. It only sees its own resolved props.
+- This is the clean composition the boundary buys: the parent's item scope is used to *fill the props*; the child's scope is sealed off from it. There is no third "look at the loop item from inside the child" path, mirroring the deliberate "no intermediate ancestor escape" decision in the `forEach` rules.
+
+**(c) Override values are PRE-RESOLVED in the parent scope and passed as concrete values — not passed as raw token strings re-resolved in the child.**
+
+This is the linchpin that makes (a) and (b) hold. When the preview mounts a child:
+
+1. For each override attribute on the `<Component>`, **resolve its value in the parent's current scope** (item scope if under a `forEach`, root otherwise) — turning `label="{name}"` into `label = "Bitlynx"`.
+2. Build the child's root model from those **resolved, concrete values**.
+3. Render the child against that model; the child's `{token}`s read concrete props.
+
+The override boundary is therefore a **value boundary, not a token boundary.** A raw-token model — where `label="{name}"` is handed into the child as the *string* `"{name}"` and re-resolved against the child's model — is explicitly **rejected**: it would make the child re-resolve a parent's token namespace, silently coupling child internals to whatever the parent's fields happen to be named, and would make `forEach`-item tokens (which only exist in the parent's scope) meaningless or wrongly-resolved inside the child. Pre-resolution severs that coupling: by the time a value reaches the child, it is data, not a reference into someone else's scope.
+
+- **Literal overrides** (`actionText="Sell"`) are already concrete and pass straight through.
+- **Token overrides** (`label="{name}"`, `tint="{$.theme}"`) are resolved in the parent scope per the rules above, then passed.
+- **Unresolved-in-parent overrides** stay unresolved-but-styled and are passed as their unresolved form, so a missing parent field surfaces visibly at the boundary rather than silently re-resolving inside the child.
+
+**Editor obligation (thin, consistent with the rest of the renderer):** the preview's mount step resolves overrides in the parent scope, seats them as the child's fresh root, and recurses — it does **not** merge parent and child models, does **not** expose parent `$` to the child, and does **not** validate that the child actually consumes a given override. Unconsumed overrides are harmless; unresolved child tokens render literally-but-styled exactly as everywhere else. The cycle guard and missing-`src` placeholder (section (3)) wrap this same mount step.
+
+**Summary of the child-scope rule set:**
+| Concern | Rule |
+|---|---|
+| Child's data model | the `<Component>`'s override attributes **only** — a fresh root |
+| Parent data visible to child | none, except what the parent passes as an override |
+| `$.` inside the child | the child's own root (= its overrides), **not** the parent root |
+| Override token like `{name}` under a `forEach` | resolved in the **parent's item scope**, then passed as a value |
+| Override token like `{$.theme}` | resolved against the **parent's** root, then passed as a value |
+| Pass mode | **pre-resolved concrete values**, never raw tokens re-resolved in the child |
+| Scope stack | a `<Component>` mount **reseats the stack bottom** to the resolved overrides |
+
 ### High Level Visual Layout
 
 The editor has three working columns, left to right: the **component list** (collapsible), the **structure column** (tree + properties + events), and the **main content** (tabbed preview/controller, with a collapsible Data Model panel on its right).
@@ -526,7 +575,7 @@ These are *not* on the deferred list but surfaced while resolving the three abov
 
 3. **`<Component src="...">` resolution + cycle safety in the preview.** Nested-component preview (workflow 9) recursively mounts `src` files. Two structural holes: (a) **resolution** — `src="bag_slot.xml"` resolves to `gui/bag_slot.xml` (a flat-folder name lookup), and a missing `src` must render a visible placeholder box, not crash the preview; (b) **cycles** — A embeds B embeds A would infinite-loop the renderer. The editor must guard with a **mount-depth cap or an ancestor-set check** and render a "recursive component" stub at the limit. This is editor-render robustness, not runtime semantics, so it is in the editor's court. Name the depth cap (recommend ancestor-set detection — exact, no false positives — over a blunt depth cap).
 
-4. **Override properties cross a component boundary the preview must model.** A `<Component>` instance sets freeform overrides (`actionText="..."`) that the *child component's* tree reads as tokens against *its* data model. Structurally: when the preview mounts a child component, **what data model does the child's `{token}`s resolve against** — the parent's data model, the override attributes, or a merge? Recommended: a child component instance renders with a data scope built from **its override attributes only** (the overrides are the child's "props"), independent of the parent's data model, *plus* the same `$` root if the runtime exposes one globally. This is a real scope-boundary decision that interacts with the `forEach` scoping rules above (a `forEach` of `<Component>` stamps each instance with item-derived overrides). It is the second-most-likely place for accidental coupling after the layer/nesting tension — settle the child-scope rule explicitly or the preview will resolve nested-component tokens inconsistently with the runtime.
+4. **Override properties cross a component boundary the preview must model.** A `<Component>` instance sets freeform overrides (`actionText="..."`) that the *child component's* tree reads as tokens against *its* data model. Structurally: when the preview mounts a child component, **what data model does the child's `{token}`s resolve against** — the parent's data model, the override attributes, or a merge? **RESOLVED — see "Component child data scope resolved (architect)" under the `forEach` section.** The recommendation (overrides-as-props) is now locked, with the two sub-rules it left open settled: the child gets a *fresh* root (no parent-`$` leak), and override values are pre-resolved in the parent scope before being handed in. This was the second-most-likely accidental-coupling site after the layer/nesting tension; it is now closed for the F6b build.
 
 5. **Save atomicity across two files.** Save persists a component's XML **and** its controller `.lua` together (section 7). If the XML write succeeds and the `.lua` write fails (or vice-versa), the on-disk pair is inconsistent and the "unsaved dot" state is ambiguous. Recommend a defined order (write controller first, then XML, mirroring the create_script "write the rollback-able thing first" discipline) and a single surfaced error that leaves the dirty indicator *set* if either write fails, so the user knows the save didn't fully land. Small, but it is a trust-breaking moment exactly like the warn-on-switch guard the design already prioritizes.
 

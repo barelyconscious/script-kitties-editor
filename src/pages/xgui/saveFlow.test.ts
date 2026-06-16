@@ -33,7 +33,15 @@ function openComponent(): OpenComponent {
 }
 
 function dirtyState(): EditorState {
-  return { open: openComponent(), selectedNodeId: null, activeTab: "view", dirty: true };
+  return {
+    open: openComponent(),
+    selectedNodeId: null,
+    activeTab: "view",
+    dirty: true,
+    past: [],
+    future: [],
+    lastCoalesceKey: null,
+  };
 }
 
 /**
@@ -85,6 +93,9 @@ describe("save flow dirty discipline", () => {
       selectedNodeId: null,
       activeTab: "view",
       dirty: false,
+      past: [],
+      future: [],
+      lastCoalesceKey: null,
     };
     const { ok } = await runSave(clean);
     expect(ok).toBe(true);

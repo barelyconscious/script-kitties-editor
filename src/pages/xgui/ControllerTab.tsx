@@ -132,7 +132,12 @@ export function ControllerTab() {
       <div className="min-h-0 flex-1">
         <ScriptEditor
           value={text}
-          onChange={(value) => dispatch({ type: "setControllerText", text: value })}
+          // `coalesceKey: "controller"` folds a continuous typing burst into ONE
+          // undo step (task 470) instead of one per keystroke; any other document
+          // action (a tree/property edit) naturally opens a new step.
+          onChange={(value) =>
+            dispatch({ type: "setControllerText", text: value, coalesceKey: "controller" })
+          }
         />
       </div>
     </div>

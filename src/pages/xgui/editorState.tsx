@@ -67,6 +67,7 @@
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
 import { addChild, removeNode, setNodeAttrs } from "./guiTreeEdit";
+import { remapSelection } from "./liveReload";
 
 /** Which main-content tab is showing (design section 4). */
 export type EditorTab = "view" | "controller";
@@ -102,6 +103,22 @@ export type OpenComponent = {
   controllerText: string | null;
 };
 
+/**
+ * A captured snapshot of the open component's UNDOABLE document — the parts an
+ * undo/redo restores. This is just the tree, the controller draft, and the
+ * controller filename (the only document fields a mutating action can change);
+ * selection, active tab, dirty, and the Data Model JSON scratch are deliberately
+ * NOT here, because they are view/scratch state, not the saved artifact. The
+ * `controller` attribute that `addController` writes lives inside `root.attrs`,
+ * so capturing `root` already covers it; `controllerFileName` is captured
+ * separately so undoing an Add-script restores the controller-less state.
+ */
+export type DocSnapshot = {
+  root: GuiNode;
+  controllerText: string | null;
+  controllerFileName: string | null;
+};
+
 /** The whole editor store state. */
 export type EditorState = {
   /** The open component, or `null` when nothing is open. */
@@ -112,11 +129,44 @@ export type EditorState = {
   activeTab: EditorTab;
   /** True when the open component has unsaved edits (F11 reads; save clears). */
   dirty: boolean;
+  /**
+   * Undo stack: document snapshots taken JUST BEFORE each committed edit step,
+   * oldest first. `undo` pops the top, pushing the current doc onto {@link future}.
+   * Reset (emptied) whenever the open document is established or replaced wholesale
+   * (`open`/`close`/`reloadOpen`) — you cannot undo across an open/switch/reload.
+   */
+  past: DocSnapshot[];
+  /** Redo stack: snapshots `undo` set aside, to be replayed by `redo`. A fresh edit clears it. */
+  future: DocSnapshot[];
+  /**
+   * The coalescing key of the LAST committed edit step (or `null` if the last edit
+   * had no key / a boundary was committed). A mutating action whose `coalesceKey`
+   * MATCHES this folds into the current step (no new `past` entry) — so one drag
+   * gesture or one burst of typing in a field is ONE undo step, not one per
+   * pointermove/keystroke. A different (or absent) key opens a new step. See the
+   * COALESCING note on {@link EditorAction}.
+   */
+  lastCoalesceKey: string | null;
 };
 
 /**
  * The action set. Each later feature adds a variant here rather than reaching
  * around the reducer with an ad-hoc setter — see EXTENSION POINTS above.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * UNDO/REDO + COALESCING (task 470)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Document mutations (`replaceRoot`, `addChildNode`, `setNodeAttrs`, `removeNode`,
+ * `setControllerText`, `addController`) push an undo step. Some carry an optional
+ * `coalesceKey`: consecutive mutations sharing the SAME key collapse into ONE undo
+ * step instead of one each — this is what makes a whole drag gesture (a burst of
+ * `setNodeAttrs` on every pointermove, all keyed by one gesture id) a single
+ * Ctrl+Z, and continuous typing in one field (keyed per node/field) coalesce too.
+ * Switching field/node, ending the gesture, or committing a boundary
+ * (`commitHistory`) breaks the run so the next edit opens a fresh step. The
+ * reducer follows the same commit-boundary model as {@link import("../../lib/useHistoryState").useHistoryState}
+ * — it just lives in the reducer because the document is reducer-owned. Selection,
+ * tab, and the Data Model scratch are NOT undoable (they are view/scratch state).
  */
 export type EditorAction =
   /** Seat a freshly-parsed component (F8 open-flow). Resets selection/tab/dirty. */
@@ -144,7 +194,18 @@ export type EditorAction =
    * node is not found. The immutable replace is delegated to the pure
    * {@link setNodeAttrs} so the mutation is tested off-store.
    */
-  | { type: "setNodeAttrs"; nodeId: string; attrs: Record<string, string> }
+  | {
+      type: "setNodeAttrs";
+      nodeId: string;
+      attrs: Record<string, string>;
+      /**
+       * Optional coalescing key (task 470). All `setNodeAttrs` of one drag gesture
+       * share a per-gesture key so the gesture is ONE undo step; property-field
+       * typing keys per node/field so a burst of edits to the same field coalesces
+       * but switching fields opens a new step. Omit for a discrete, standalone step.
+       */
+      coalesceKey?: string;
+    }
   /**
    * Remove the node identified by `nodeId` from the tree (F9c events delete) —
    * marks dirty. A no-op (no dirty) if nothing is open, the node is not found, or
@@ -165,7 +226,15 @@ export type EditorAction =
    * no-op if nothing is open. F11's Save reads `open.controllerText` and persists
    * it to `open.controllerFileName`.
    */
-  | { type: "setControllerText"; text: string }
+  | {
+      type: "setControllerText";
+      text: string;
+      /**
+       * Optional coalescing key (task 470) — pass a stable key (e.g. "controller")
+       * so a continuous typing burst in the controller editor is ONE undo step.
+       */
+      coalesceKey?: string;
+    }
   /**
    * Add-script flow (F10): attach a brand-new controller to a controller-less
    * component WITHOUT touching disk. Sets the root `<View controller="{name}">`
@@ -177,6 +246,31 @@ export type EditorAction =
   | { type: "addController"; fileName: string }
   /** Clear the dirty flag after a successful save (F11). */
   | { type: "markSaved" }
+  /**
+   * Undo the last committed document step (task 470): restore the previous
+   * document snapshot, pushing the current one onto the redo stack. Preserves the
+   * selection if the selected node still exists in the restored tree (else clears
+   * it), via the same structural {@link remapSelection} F13 uses. Marks dirty (an
+   * undo moves the document away from whatever was last seated). A no-op when the
+   * undo stack is empty or nothing is open. Selection/tab are NOT undone — undo
+   * only rewinds the DOCUMENT.
+   */
+  | { type: "undo" }
+  /**
+   * Redo the last undone document step (task 470): replay the snapshot `undo` set
+   * aside, pushing the current one back onto the undo stack. Same selection
+   * preservation and dirty behavior as `undo`. A no-op when the redo stack is empty
+   * or nothing is open.
+   */
+  | { type: "redo" }
+  /**
+   * Close the current coalescing run (task 470) WITHOUT changing the document, so
+   * the next mutating edit opens a fresh undo step. Dispatched on blur of a
+   * property/controller field (the commit-on-blur boundary), mirroring
+   * {@link import("../../lib/useHistoryState").useHistoryState}'s `commit`. Never
+   * marks dirty and never touches the stacks — it only resets `lastCoalesceKey`.
+   */
+  | { type: "commitHistory" }
   /**
    * Live-reload the open component from disk after an EXTERNAL edit (F13): replace
    * the parsed `root`, `controllerFileName`, and `path` with the freshly re-read +
@@ -199,7 +293,76 @@ const initialState: EditorState = {
   selectedNodeId: null,
   activeTab: "view",
   dirty: false,
+  past: [],
+  future: [],
+  lastCoalesceKey: null,
 };
+
+/** Capture the open component's undoable document as a snapshot for the undo stack. */
+function snapshotOf(open: OpenComponent): DocSnapshot {
+  return {
+    root: open.root,
+    controllerText: open.controllerText,
+    controllerFileName: open.controllerFileName,
+  };
+}
+
+/**
+ * Record a committed document edit on the undo history. Call this with the state
+ * BEFORE the edit and the action's `coalesceKey`, and merge the returned
+ * `{ past, future, lastCoalesceKey }` into the post-edit state.
+ *
+ * Coalescing: if `coalesceKey` is non-null and equals the previous step's key (and
+ * a step exists to fold into), the edit joins the current step — `past` is left
+ * untouched, so the snapshot already on top (the pre-run document) stays the undo
+ * target for the whole run. Otherwise a new step opens: the pre-edit snapshot is
+ * pushed and the redo stack is cleared (a fresh edit invalidates any redo).
+ */
+function pushHistory(
+  prev: EditorState,
+  coalesceKey: string | undefined,
+): Pick<EditorState, "past" | "future" | "lastCoalesceKey"> {
+  if (!prev.open) {
+    return { past: prev.past, future: prev.future, lastCoalesceKey: coalesceKey ?? null };
+  }
+  const coalesce =
+    coalesceKey != null && coalesceKey === prev.lastCoalesceKey && prev.past.length > 0;
+  if (coalesce) {
+    // Same run — keep the existing pre-run snapshot as the undo target; don't push.
+    return { past: prev.past, future: prev.future, lastCoalesceKey: coalesceKey };
+  }
+  return {
+    past: [...prev.past, snapshotOf(prev.open)],
+    future: [], // any fresh edit invalidates redo
+    lastCoalesceKey: coalesceKey ?? null,
+  };
+}
+
+/**
+ * Apply a restored {@link DocSnapshot} to the open component, carrying the
+ * selection across by structural position (the snapshot may not contain the
+ * currently-selected node). Shared by `undo` and `redo`.
+ */
+function restoreSnapshot(state: EditorState, snap: DocSnapshot): EditorState {
+  if (!state.open) return state;
+  return {
+    ...state,
+    open: {
+      ...state.open,
+      root: snap.root,
+      controllerText: snap.controllerText,
+      controllerFileName: snap.controllerFileName,
+    },
+    // Keep the selection if its node survives the restore (by structural address,
+    // since undo/redo never re-mint nodeIds this usually matches by id directly);
+    // drop it otherwise. Reuses the F13 remap helper.
+    selectedNodeId: remapSelection(state.open.root, snap.root, state.selectedNodeId),
+    // An undo/redo moves the document away from the seated/last-saved state.
+    dirty: true,
+    // A history jump ends any coalescing run.
+    lastCoalesceKey: null,
+  };
+}
 
 /**
  * The single pure reducer. Mutating actions (structural tree edits) set `dirty`;
@@ -210,13 +373,19 @@ const initialState: EditorState = {
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "open":
+      // Establishing a fresh document RESETS history — you cannot undo across an
+      // open/switch into a different component.
       return {
         open: action.component,
         selectedNodeId: null,
         activeTab: "view",
         dirty: false,
+        past: [],
+        future: [],
+        lastCoalesceKey: null,
       };
     case "close":
+      // Clears the document and its history alike.
       return initialState;
     case "select":
       return { ...state, selectedNodeId: action.nodeId };
@@ -229,7 +398,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, open: { ...state.open, modelText: action.text } };
     case "replaceRoot":
       if (!state.open) return state;
-      return { ...state, open: { ...state.open, root: action.root }, dirty: true };
+      return {
+        ...state,
+        open: { ...state.open, root: action.root },
+        dirty: true,
+        ...pushHistory(state, undefined),
+      };
     case "addChildNode": {
       if (!state.open) return state;
       const nextRoot = addChild(state.open.root, action.parentNodeId, action.child);
@@ -243,6 +417,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // immediately — the user sees what they just added.
         selectedNodeId: action.child.nodeId,
         dirty: true,
+        // A discrete add is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
       };
     }
     case "setNodeAttrs": {
@@ -251,7 +427,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // Node not found → setNodeAttrs returns the SAME reference → no-op (don't
       // dirty on a phantom write).
       if (nextRoot === state.open.root) return state;
-      return { ...state, open: { ...state.open, root: nextRoot }, dirty: true };
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        dirty: true,
+        // Coalesces by gesture (drag) / field (typing) via `coalesceKey`.
+        ...pushHistory(state, action.coalesceKey),
+      };
     }
     case "removeNode": {
       if (!state.open) return state;
@@ -265,6 +447,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // If the removed node was selected, drop the dangling selection.
         selectedNodeId: state.selectedNodeId === action.nodeId ? null : state.selectedNodeId,
         dirty: true,
+        // A discrete remove is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
       };
     }
     case "loadControllerText":
@@ -274,7 +458,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, open: { ...state.open, controllerText: action.text } };
     case "setControllerText":
       if (!state.open) return state;
-      return { ...state, open: { ...state.open, controllerText: action.text }, dirty: true };
+      return {
+        ...state,
+        open: { ...state.open, controllerText: action.text },
+        dirty: true,
+        // Continuous typing coalesces when the caller passes a stable key.
+        ...pushHistory(state, action.coalesceKey),
+      };
     case "addController": {
       if (!state.open) return state;
       // Already has a controller → Add-script is meaningless; leave it be.
@@ -299,6 +489,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Show the user the editor they just created.
         activeTab: "controller",
         dirty: true,
+        // A discrete Add-script is its own undo step; undoing it restores the
+        // controller-less document (root attr + controllerFileName + buffer).
+        ...pushHistory(state, undefined),
       };
     }
     case "markSaved":
@@ -314,7 +507,40 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         selectedNodeId: action.selectedNodeId,
         // Editor now matches disk — nothing unsaved.
         dirty: false,
+        // A live external reload RESETS history — you cannot undo across a disk
+        // swap into the pre-reload draft (the nodeIds were re-minted anyway).
+        past: [],
+        future: [],
+        lastCoalesceKey: null,
       };
+    case "undo": {
+      if (!state.open || state.past.length === 0) return state;
+      const past = state.past.slice(0, -1);
+      const snap = state.past[state.past.length - 1];
+      const restored = restoreSnapshot(state, snap);
+      return {
+        ...restored,
+        past,
+        // Stash the CURRENT document so redo can replay it.
+        future: [...state.future, snapshotOf(state.open)],
+      };
+    }
+    case "redo": {
+      if (!state.open || state.future.length === 0) return state;
+      const future = state.future.slice(0, -1);
+      const snap = state.future[state.future.length - 1];
+      const restored = restoreSnapshot(state, snap);
+      return {
+        ...restored,
+        // Re-push the current document so undo can rewind it again.
+        past: [...state.past, snapshotOf(state.open)],
+        future,
+      };
+    }
+    case "commitHistory":
+      // Pure boundary: close the coalescing run, touch nothing else.
+      if (state.lastCoalesceKey === null) return state;
+      return { ...state, lastCoalesceKey: null };
     default: {
       // Exhaustiveness guard: a new action variant must be handled above.
       const _never: never = action;

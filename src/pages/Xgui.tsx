@@ -34,6 +34,7 @@ import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
 import { useComponentSave } from "./xgui/useComponentSave";
+import { useEditorKeyboard } from "./xgui/useEditorKeyboard";
 
 export interface XguiProps {
   /**
@@ -42,6 +43,12 @@ export interface XguiProps {
    * tool switches — mirroring the Workbench's object-list pattern.
    */
   componentListCollapsed?: boolean;
+  /**
+   * Whether the GUI Editor is the FOREGROUND tool. The page stays mounted across
+   * tool switches, so its global keyboard commands (Cmd+S save, Cmd+Z undo) must
+   * only fire when the editor is actually in front — see {@link useEditorKeyboard}.
+   */
+  active?: boolean;
 }
 
 /**
@@ -49,7 +56,7 @@ export interface XguiProps {
  * the component list, structure column, and main content all act on one open
  * component, then lays out the three columns.
  */
-export default function Xgui({ componentListCollapsed }: XguiProps) {
+export default function Xgui({ componentListCollapsed, active = false }: XguiProps) {
   return (
     <EditorStateProvider>
       <GuiTreeStoreProvider>
@@ -68,7 +75,7 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
           <StructureColumn />
 
           {/* MAIN content — the preview (+ Data Model) for the open component. */}
-          <MainContent />
+          <MainContent active={active} />
         </div>
       </GuiTreeStoreProvider>
     </EditorStateProvider>
@@ -111,12 +118,17 @@ function StructureColumn() {
  * {@link GuiPreviewHost}) or an empty state. The View/Controller tab bar (F10)
  * mounts at the marked seam.
  */
-function MainContent() {
+function MainContent({ active }: { active: boolean }) {
   const { state, dispatch } = useEditorStore();
   const open = state.open;
   const activeTab = state.activeTab;
   const dirty = state.dirty;
   const { save, saving, error, clearError } = useComponentSave();
+
+  // Cmd/Ctrl+S Save and Cmd/Ctrl+Z/Shift+Z/Ctrl+Y undo-redo, scoped to the
+  // foreground editor (the page stays mounted across tool switches). Save reuses
+  // the SAME `save()` the button calls; undo/redo drive the store's history.
+  useEditorKeyboard({ active, onSave: () => void save() });
   // F13: the open component's file changed on disk while it had unsaved edits.
   // The notice lets the user reload (discarding their draft) or keep their work —
   // we never stomp it silently.

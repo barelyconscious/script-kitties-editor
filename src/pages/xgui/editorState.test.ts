@@ -23,11 +23,15 @@ const CLEAN: EditorState = {
   selectedNodeId: null,
   activeTab: "view",
   dirty: false,
+  past: [],
+  future: [],
+  lastCoalesceKey: null,
 };
 
 describe("editorReducer", () => {
   it("open seats the component and resets selection/tab/dirty", () => {
     const dirtyState: EditorState = {
+      ...CLEAN,
       open: openDoc({ name: "old" }),
       selectedNodeId: "n9",
       activeTab: "controller",
@@ -42,6 +46,7 @@ describe("editorReducer", () => {
 
   it("close returns to the empty state", () => {
     const state: EditorState = {
+      ...CLEAN,
       open: openDoc(),
       selectedNodeId: "n1",
       activeTab: "view",
@@ -300,6 +305,7 @@ describe("editorReducer", () => {
   describe("reloadOpen (F13 live external-edit sync)", () => {
     it("replaces the open doc, sets the remapped selection, and clears dirty", () => {
       const state: EditorState = {
+        ...CLEAN,
         open: openDoc({ root: { nodeId: "old", tag: "View", attrs: {}, children: [] } }),
         selectedNodeId: "old-sel",
         activeTab: "view",
@@ -322,6 +328,7 @@ describe("editorReducer", () => {
 
     it("PRESERVES the active tab (a live swap must not yank the user off Controller)", () => {
       const state: EditorState = {
+        ...CLEAN,
         open: openDoc(),
         selectedNodeId: null,
         activeTab: "controller",
@@ -337,6 +344,7 @@ describe("editorReducer", () => {
 
     it("drops a dangling selection when the node is gone (selectedNodeId null)", () => {
       const state: EditorState = {
+        ...CLEAN,
         open: openDoc(),
         selectedNodeId: "was-selected",
         activeTab: "view",
@@ -357,6 +365,254 @@ describe("editorReducer", () => {
         selectedNodeId: null,
       });
       expect(next).toBe(CLEAN);
+    });
+  });
+
+  describe("undo/redo history (task 470)", () => {
+    // A small tree: root <View> with two <Panel> children, so attr edits and
+    // structural edits both have something to bite on.
+    function tree(): GuiNode {
+      return {
+        nodeId: "root",
+        tag: "View",
+        attrs: {},
+        children: [
+          { nodeId: "a", tag: "Panel", attrs: { id: "a" }, children: [] },
+          { nodeId: "b", tag: "Panel", attrs: { id: "b" }, children: [] },
+        ],
+      };
+    }
+
+    function opened(): EditorState {
+      return editorReducer(CLEAN, { type: "open", component: openDoc({ root: tree() }) });
+    }
+
+    it("a fresh open starts with empty history", () => {
+      const s = opened();
+      expect(s.past).toEqual([]);
+      expect(s.future).toEqual([]);
+      expect(s.lastCoalesceKey).toBeNull();
+    });
+
+    it("setNodeAttrs pushes one undo step; undo restores the prior attrs and re-dirties", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, {
+        type: "setNodeAttrs",
+        nodeId: "a",
+        attrs: { id: "a-renamed" },
+      });
+      expect(s1.past).toHaveLength(1);
+      expect(s1.dirty).toBe(true);
+
+      const undone = editorReducer(s1, { type: "undo" });
+      // The edited node is back to its original attrs.
+      expect(undone.open?.root.children[0].attrs).toEqual({ id: "a" });
+      expect(undone.past).toHaveLength(0);
+      expect(undone.future).toHaveLength(1);
+      // Undo moves away from the seated state → dirty.
+      expect(undone.dirty).toBe(true);
+    });
+
+    it("redo replays an undone step and re-pushes it onto past", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      const undone = editorReducer(s1, { type: "undo" });
+      const redone = editorReducer(undone, { type: "redo" });
+      expect(redone.open?.root.children[0].attrs).toEqual({ id: "x" });
+      expect(redone.past).toHaveLength(1);
+      expect(redone.future).toHaveLength(0);
+      expect(redone.dirty).toBe(true);
+    });
+
+    it("undo is a no-op when the past stack is empty", () => {
+      const s = opened();
+      expect(editorReducer(s, { type: "undo" })).toBe(s);
+    });
+
+    it("redo is a no-op when the future stack is empty", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      // No prior undo → nothing to redo.
+      expect(editorReducer(s1, { type: "redo" })).toBe(s1);
+    });
+
+    it("a drag gesture (same coalesceKey) collapses to ONE undo step", () => {
+      let s = opened();
+      const key = "drag:a:123";
+      // Simulate many pointermoves writing position on node "a".
+      for (let i = 1; i <= 5; i++) {
+        s = editorReducer(s, {
+          type: "setNodeAttrs",
+          nodeId: "a",
+          attrs: { id: "a", position: `0,0,${i},${i}` },
+          coalesceKey: key,
+        });
+      }
+      // Five moves, ONE undo step.
+      expect(s.past).toHaveLength(1);
+      const undone = editorReducer(s, { type: "undo" });
+      // One undo returns all the way to the pre-gesture position (no position attr).
+      expect(undone.open?.root.children[0].attrs).toEqual({ id: "a" });
+      expect(undone.past).toHaveLength(0);
+    });
+
+    it("a DIFFERENT coalesceKey opens a new step (two gestures = two undos)", () => {
+      let s = opened();
+      s = editorReducer(s, {
+        type: "setNodeAttrs",
+        nodeId: "a",
+        attrs: { id: "a", position: "0,0,1,1" },
+        coalesceKey: "drag:a:1",
+      });
+      s = editorReducer(s, {
+        type: "setNodeAttrs",
+        nodeId: "a",
+        attrs: { id: "a", position: "0,0,2,2" },
+        coalesceKey: "drag:a:2",
+      });
+      expect(s.past).toHaveLength(2);
+    });
+
+    it("commitHistory breaks coalescing so the next same-key edit opens a new step", () => {
+      let s = opened();
+      s = editorReducer(s, {
+        type: "setNodeAttrs",
+        nodeId: "a",
+        attrs: { id: "a1" },
+        coalesceKey: "attr:a:id",
+      });
+      // Blur commit boundary.
+      s = editorReducer(s, { type: "commitHistory" });
+      expect(s.lastCoalesceKey).toBeNull();
+      s = editorReducer(s, {
+        type: "setNodeAttrs",
+        nodeId: "a",
+        attrs: { id: "a2" },
+        coalesceKey: "attr:a:id",
+      });
+      // The commit boundary split the two bursts into two steps.
+      expect(s.past).toHaveLength(2);
+    });
+
+    it("a fresh edit AFTER an undo clears the redo stack", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      const undone = editorReducer(s1, { type: "undo" });
+      expect(undone.future).toHaveLength(1);
+      // A brand-new edit invalidates the redo.
+      const edited = editorReducer(undone, {
+        type: "setNodeAttrs",
+        nodeId: "b",
+        attrs: { id: "y" },
+      });
+      expect(edited.future).toHaveLength(0);
+      expect(edited.past).toHaveLength(1);
+    });
+
+    it("controller-text edits coalesce under their key and are undoable", () => {
+      let s = editorReducer(CLEAN, {
+        type: "open",
+        component: openDoc({ controllerFileName: "c.lua", controllerText: "" }),
+      });
+      s = editorReducer(s, { type: "setControllerText", text: "a", coalesceKey: "controller" });
+      s = editorReducer(s, { type: "setControllerText", text: "ab", coalesceKey: "controller" });
+      s = editorReducer(s, { type: "setControllerText", text: "abc", coalesceKey: "controller" });
+      expect(s.past).toHaveLength(1);
+      const undone = editorReducer(s, { type: "undo" });
+      expect(undone.open?.controllerText).toBe("");
+    });
+
+    it("addChildNode and removeNode are each their own undo step", () => {
+      const s0 = opened();
+      const child: GuiNode = { nodeId: "c", tag: "Panel", attrs: {}, children: [] };
+      const added = editorReducer(s0, { type: "addChildNode", parentNodeId: "root", child });
+      expect(added.past).toHaveLength(1);
+      const removed = editorReducer(added, { type: "removeNode", nodeId: "a" });
+      expect(removed.past).toHaveLength(2);
+      // Undo the remove → node "a" is back.
+      const undoRemove = editorReducer(removed, { type: "undo" });
+      expect(undoRemove.open?.root.children.map((c) => c.nodeId)).toContain("a");
+      // Undo the add → child "c" is gone.
+      const undoAdd = editorReducer(undoRemove, { type: "undo" });
+      expect(undoAdd.open?.root.children.map((c) => c.nodeId)).not.toContain("c");
+    });
+
+    it("addController is undoable, restoring the controller-less document", () => {
+      const s0 = editorReducer(CLEAN, {
+        type: "open",
+        component: openDoc({ controllerFileName: null, controllerText: null }),
+      });
+      const added = editorReducer(s0, { type: "addController", fileName: "bag.lua" });
+      expect(added.open?.controllerFileName).toBe("bag.lua");
+      expect(added.open?.root.attrs.controller).toBe("bag.lua");
+      const undone = editorReducer(added, { type: "undo" });
+      // Back to controller-less: filename, buffer, and the View attr all reverted.
+      expect(undone.open?.controllerFileName).toBeNull();
+      expect(undone.open?.controllerText).toBeNull();
+      expect(undone.open?.root.attrs.controller).toBeUndefined();
+    });
+
+    it("preserves the selection across undo when the node still exists", () => {
+      const s0 = { ...opened(), selectedNodeId: "b" };
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      const undone = editorReducer(s1, { type: "undo" });
+      // Node "b" survives the restore, so the selection holds.
+      expect(undone.selectedNodeId).toBe("b");
+    });
+
+    it("clears a dangling selection across undo when the node no longer exists", () => {
+      const s0 = opened();
+      const child: GuiNode = { nodeId: "c", tag: "Panel", attrs: {}, children: [] };
+      const added = editorReducer(s0, { type: "addChildNode", parentNodeId: "root", child });
+      // "c" was added and auto-selected; undoing the add removes it.
+      expect(added.selectedNodeId).toBe("c");
+      const undone = editorReducer(added, { type: "undo" });
+      expect(undone.open?.root.children.map((n) => n.nodeId)).not.toContain("c");
+      expect(undone.selectedNodeId).toBeNull();
+    });
+
+    it("RESETS history on open/switch", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      expect(s1.past).toHaveLength(1);
+      const switched = editorReducer(s1, {
+        type: "open",
+        component: openDoc({ name: "other", root: tree() }),
+      });
+      expect(switched.past).toHaveLength(0);
+      expect(switched.future).toHaveLength(0);
+      expect(switched.lastCoalesceKey).toBeNull();
+    });
+
+    it("RESETS history on a live reload (you cannot undo across an external reload)", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      const reloaded = editorReducer(s1, {
+        type: "reloadOpen",
+        component: openDoc({ root: tree() }),
+        selectedNodeId: null,
+      });
+      expect(reloaded.past).toHaveLength(0);
+      expect(reloaded.future).toHaveLength(0);
+      expect(reloaded.lastCoalesceKey).toBeNull();
+    });
+
+    it("RESETS history on close", () => {
+      const s0 = opened();
+      const s1 = editorReducer(s0, { type: "setNodeAttrs", nodeId: "a", attrs: { id: "x" } });
+      const closed = editorReducer(s1, { type: "close" });
+      expect(closed.past).toEqual([]);
+      expect(closed.future).toEqual([]);
+    });
+
+    it("selection/tab changes are NOT undo steps", () => {
+      const s0 = opened();
+      const selected = editorReducer(s0, { type: "select", nodeId: "a" });
+      const tabbed = editorReducer(selected, { type: "setTab", tab: "controller" });
+      const modeled = editorReducer(tabbed, { type: "setModelText", text: '{"x":1}' });
+      // None of these touched history.
+      expect(tabbed.past).toHaveLength(0);
+      expect(modeled.past).toHaveLength(0);
     });
   });
 });

@@ -68,17 +68,27 @@ export function PropertiesPanel() {
 
   // Write one attribute back to the selected node, immutably. The pure
   // `withAttr` set-or-clear keeps the XML minimal (clearing removes the attr).
+  // The `coalesceKey` (per node + attr) folds a continuous typing burst in ONE
+  // field into a single undo step (task 470); the field's blur commits a boundary
+  // (see `onBlur` below) so leaving it opens a fresh step.
   const setAttr = (name: string, value: string) => {
     dispatch({
       type: "setNodeAttrs",
       nodeId: node.nodeId,
       attrs: withAttr(node.attrs, name, value),
+      coalesceKey: `attr:${node.nodeId}:${name}`,
     });
   };
   // Replace the whole attrs map (used by freeform rename/remove, which can't be
-  // expressed as a single set-or-clear).
+  // expressed as a single set-or-clear). Keyed per node (the specific attr can
+  // change across a rename) so a rename burst still coalesces sensibly.
   const setAttrs = (attrs: Record<string, string>) => {
-    dispatch({ type: "setNodeAttrs", nodeId: node.nodeId, attrs });
+    dispatch({
+      type: "setNodeAttrs",
+      nodeId: node.nodeId,
+      attrs,
+      coalesceKey: `attrs:${node.nodeId}`,
+    });
   };
 
   const computed = computedId(path);
@@ -89,7 +99,16 @@ export function PropertiesPanel() {
         Properties · <span className="font-mono text-foreground">{node.tag}</span>
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-3 pb-3">
+      {/* Commit-on-blur boundary (task 470): when focus leaves any property field,
+          close the current coalescing run so the next field's edits open a fresh
+          undo step — mirrors useHistoryState's commit-on-blur. onBlur bubbles from
+          the inner inputs (React's onBlur is the focusout event), so one handler
+          here covers every control below. */}
+      {/** biome-ignore lint/a11y/noStaticElementInteractions: blur boundary on a container of focusable inputs; no interactive role needed */}
+      <div
+        className="min-h-0 overflow-y-auto px-3 pb-3"
+        onBlur={() => dispatch({ type: "commitHistory" })}
+      >
         {/* Computed read-only hierarchical id. */}
         <FieldRow label="computed id">
           <div

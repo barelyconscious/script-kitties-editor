@@ -84,10 +84,16 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
   // idempotent per-move, so writing the absolute (start-relative) delta every move
   // never drifts. Held in a ref (not state) so capturing it doesn't re-render.
   const dragBasePosition = useRef<string | undefined>(undefined);
+  // A per-GESTURE coalescing key (task 470): every `setNodeAttrs` of one drag
+  // shares it, so the whole gesture collapses to ONE undo step instead of one per
+  // pointermove. A fresh key is minted on each drag start, so the next gesture
+  // opens a new step. Held in a ref so minting it doesn't re-render.
+  const dragCoalesceKey = useRef<string>("");
 
   const handleDragStart = (nodeId: string) => {
     const node = findNode(root, nodeId);
     dragBasePosition.current = node?.attrs.position;
+    dragCoalesceKey.current = `drag:${nodeId}:${Date.now()}`;
   };
 
   const handleDragMove = (nodeId: string, totalDx: number, totalDy: number) => {
@@ -100,6 +106,8 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
       type: "setNodeAttrs",
       nodeId,
       attrs: withAttr(node.attrs, "position", nextPosition),
+      // One undo step per gesture (see `dragCoalesceKey`).
+      coalesceKey: dragCoalesceKey.current,
     });
   };
 

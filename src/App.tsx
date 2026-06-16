@@ -92,7 +92,10 @@ function App() {
             {/* The GUI Editor likewise stays mounted so an open component and its
               unsaved edits survive leaving and returning. */}
             <div className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "xgui" && "hidden")}>
-              <Xgui componentListCollapsed={componentListCollapsed} />
+              <Xgui
+                componentListCollapsed={componentListCollapsed}
+                active={activeTool === "xgui"}
+              />
             </div>
             {activeTool === "data-tables" && <DataTables />}
             {activeTool === "registry" && <Registry />}

@@ -40,16 +40,19 @@
 import type { CSSProperties } from "react";
 import {
   colorCodeToCss,
-  flatRootScope,
   type Palette,
   type ResolvedAttrs,
-  type ResolveScope,
   resolveAttrs,
 } from "../../lib/guiBinding";
+import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import { computeBoxGeometry, STAGE_HEIGHT, STAGE_WIDTH } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
+import { ScopeStack } from "../../lib/guiScope";
 import { isNodeSelected, NODE_ID_ATTR, nearestNodeId } from "../../lib/guiSelection";
 import { cn } from "../../lib/utils";
+
+/** The DOM attribute that disambiguates `forEach` instances sharing a node id. */
+export const INSTANCE_KEY_ATTR = "data-instance-key";
 
 /** A box-producing element tag. `View` is the stage; `Event` is non-visual. */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
@@ -85,9 +88,68 @@ function boxText(resolved: ResolvedAttrs): string {
 type GuiBoxProps = {
   node: GuiNode;
   selectedNodeId: string | null;
-  scope: ResolveScope;
+  /**
+   * The scope stack this box renders in. Bare tokens resolve against its current
+   * item, `$.` against its root. The root render passes a root-only stack; each
+   * `forEach` instance is rendered with the item pushed (see {@link renderChildren}).
+   */
+  scope: ScopeStack;
   palette: Palette;
+  /**
+   * The `forEach` instance key (`data-instance-key`), present only when this box
+   * is one stamped instance of a template. Omitted for ordinary (once-rendered)
+   * boxes. All instances of a template share `node.nodeId`, so selection still
+   * collapses to the template; this only disambiguates instances in the DOM.
+   */
+  instanceKey?: string;
 };
+
+/**
+ * Expand a node's visual children into the boxes to render, applying `forEach`:
+ * a template child is stamped into one box per item (each in its own item scope),
+ * a plain child renders once in the inherited scope. Returns the `<GuiBox>`
+ * elements so both the stage root and every box use the same expansion rule.
+ *
+ * `forEach` and the resulting per-instance scope live HERE (in the React shell),
+ * driven by the pure {@link stampForEach}/{@link ScopeStack}; `GuiBox` itself
+ * stays scope-agnostic beyond reading `scope.asScope()` for attribute resolution.
+ */
+function renderChildren(
+  children: GuiNode[],
+  selectedNodeId: string | null,
+  scope: ScopeStack,
+  palette: Palette,
+) {
+  return children
+    .filter((child) => isVisualTag(child.tag))
+    .flatMap((child) => {
+      if (!isForEachTemplate(child)) {
+        // Plain child: render once in the inherited scope.
+        return [
+          <GuiBox
+            key={child.nodeId}
+            node={child}
+            selectedNodeId={selectedNodeId}
+            scope={scope}
+            palette={palette}
+          />,
+        ];
+      }
+      // Template child: stamp one instance per item (zero when the collection is
+      // empty/unresolved — the template still exists in the editor tree, just
+      // renders nothing here). Each instance renders with its item pushed.
+      return stampForEach(child, scope).map((instance) => (
+        <GuiBox
+          key={`${child.nodeId}#${instance.instanceKey}`}
+          node={instance.node}
+          selectedNodeId={selectedNodeId}
+          scope={instance.scope}
+          palette={palette}
+          instanceKey={instance.instanceKey}
+        />
+      ));
+    });
+}
 
 /**
  * One rendered box plus its children. `position: absolute` inside its parent's
@@ -99,10 +161,12 @@ type GuiBoxProps = {
  * geometry/color/text are computed, and any attribute that didn't fully resolve
  * triggers the waiting-for-binding affordance on the box.
  */
-function GuiBox({ node, selectedNodeId, scope, palette }: GuiBoxProps) {
-  // Resolve the whole attribute bag once: geometry, colors, and text all read
-  // off the resolved values, and `unresolved` drives the waiting-binding styling.
-  const resolved = resolveAttrs(node.attrs, scope, palette);
+function GuiBox({ node, selectedNodeId, scope, palette, instanceKey }: GuiBoxProps) {
+  // Resolve the whole attribute bag once against this box's scope (the item scope
+  // for a forEach instance, the inherited scope otherwise): geometry, colors, and
+  // text all read off the resolved values, and `unresolved` drives the
+  // waiting-binding styling. The pure resolver only needs a `ResolveScope`.
+  const resolved = resolveAttrs(node.attrs, scope.asScope(), palette);
   const { attrs, unresolved } = resolved;
 
   // `visible="false"` (literal or bound) hides the box; any other value shows it.
@@ -147,6 +211,7 @@ function GuiBox({ node, selectedNodeId, scope, palette }: GuiBoxProps) {
   return (
     <div
       {...{ [NODE_ID_ATTR]: node.nodeId }}
+      {...(instanceKey !== undefined ? { [INSTANCE_KEY_ATTR]: instanceKey } : {})}
       data-gui-tag={node.tag}
       data-gui-waiting={waiting ? "" : undefined}
       className={cn(
@@ -162,17 +227,7 @@ function GuiBox({ node, selectedNodeId, scope, palette }: GuiBoxProps) {
       style={style}
     >
       {isText ? boxText(resolved) : null}
-      {node.children
-        .filter((child) => isVisualTag(child.tag))
-        .map((child) => (
-          <GuiBox
-            key={child.nodeId}
-            node={child}
-            selectedNodeId={selectedNodeId}
-            scope={scope}
-            palette={palette}
-          />
-        ))}
+      {renderChildren(node.children, selectedNodeId, scope, palette)}
     </div>
   );
 }
@@ -207,11 +262,11 @@ export type GuiPreviewProps = {
  * DOM `closest('[data-node-id]')` — the one piece that needs a browser — and
  * the resulting node id is handed to `onSelect`.
  *
- * F3: a flat-root resolution scope is built from `model` once and threaded down
- * to every box so token/palette resolution happens at render time. F4 swaps this
- * single scope for a stack-backed scope that pushes/pops item scopes inside a
- * `forEach` subtree — the box code is unchanged because it only calls
- * `scope.lookup`.
+ * F4: a root-only {@link ScopeStack} is built from `model` once and threaded
+ * down to every box. Descending into a `forEach` subtree pushes the current item
+ * onto a derived stack (see {@link renderChildren}/{@link stampForEach}), so bare
+ * tokens resolve item-relative and `$.` reaches the root. The box code only ever
+ * calls `scope.asScope().lookup`, so the F3 resolver is reused unchanged.
  */
 export function GuiPreview({
   root,
@@ -220,9 +275,11 @@ export function GuiPreview({
   model,
   palette = {},
 }: GuiPreviewProps) {
-  // One flat-root scope for the whole tree (F3). F4 replaces this with a
-  // stack-backed scope and pushes item scopes as it descends a forEach subtree.
-  const scope = flatRootScope(model);
+  // A root-only scope stack for the whole tree (F4). Descending into a `forEach`
+  // subtree pushes the current item (see `renderChildren`/`stampForEach`); with
+  // no `forEach` entered, the current item IS the root, so this is a strict
+  // superset of F3's flat-root scope.
+  const scope = ScopeStack.root(model);
   // The DOM half of the back-reference: walk outward from the click target to
   // the nearest box carrying a node id. `closest` matches the target itself
   // first, then ancestors — exactly the "nearest enclosing box" rule. Reading
@@ -251,17 +308,7 @@ export function GuiPreview({
         height: `${STAGE_HEIGHT}px`,
       }}
     >
-      {root.children
-        .filter((child) => isVisualTag(child.tag))
-        .map((child) => (
-          <GuiBox
-            key={child.nodeId}
-            node={child}
-            selectedNodeId={selectedNodeId}
-            scope={scope}
-            palette={palette}
-          />
-        ))}
+      {renderChildren(root.children, selectedNodeId, scope, palette)}
     </div>
   );
 }

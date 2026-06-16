@@ -25,6 +25,7 @@ import { ComponentList } from "./xgui/ComponentList";
 import { EventsPanel } from "./xgui/EventsPanel";
 import { EditorStateProvider, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
+import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
 
@@ -128,16 +129,17 @@ function MainContent() {
       </div>
 
       <div className="relative min-h-0 flex-1">
-        {open ? (
+        {mainContentMode(open) === "preview" && open ? (
           // Remount the host per open component (keyed by path) so its internal
           // Data Model + selection state resets cleanly when a different component
           // is opened. F3's host owns that local state today; F9/F10 will lift
           // selection into the shared store and this key can be reconsidered.
           <GuiPreviewHost key={open.path} root={open.root} initialModelText={open.modelText} />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-            Select a component to open it.
-          </div>
+          // Empty / first-run (F12): no component open — and an empty `gui/` folder
+          // reaches here the same way (nothing to pick → nothing open). Show the
+          // skeleton layout so a first-run user sees structure, not a blank panel.
+          <MainContentSkeleton />
         )}
       </div>
     </div>

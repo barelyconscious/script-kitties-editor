@@ -44,6 +44,12 @@ import {
   type ResolvedAttrs,
   resolveAttrs,
 } from "../../lib/guiBinding";
+import { type ComponentEntry, useComponent } from "../../lib/guiComponentCache";
+import {
+  mountDecision,
+  type PlaceholderReason,
+  resolveOverrides,
+} from "../../lib/guiComponentMount";
 import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import { computeBoxGeometry, STAGE_HEIGHT, STAGE_WIDTH } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
@@ -54,6 +60,9 @@ import { cn } from "../../lib/utils";
 
 /** The DOM attribute that disambiguates `forEach` instances sharing a node id. */
 export const INSTANCE_KEY_ATTR = "data-instance-key";
+
+/** The DOM attribute marking a `<Component>` mount's missing/recursive placeholder. */
+export const PLACEHOLDER_ATTR = "data-gui-placeholder";
 
 /** A box-producing element tag. `View` is the stage; `Event` is non-visual. */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
@@ -133,6 +142,14 @@ type GuiBoxProps = {
    * collapses to the template; this only disambiguates instances in the DOM.
    */
   instanceKey?: string;
+  /**
+   * The set of `<Component>` `src` basenames on the mount path TO this box (F6b
+   * cycle guard). Empty at the stage root; a `<Component>` mount adds its own
+   * basename before descending into the child, so a re-encounter of the same src
+   * deeper down is caught as `recursive` instead of looping. Plain (non-mounted)
+   * descent passes the set through unchanged.
+   */
+  ancestry: ReadonlySet<string>;
 };
 
 /**
@@ -152,6 +169,7 @@ function renderChildren(
   palette: Palette,
   parentKey: BoxKey,
   zOrder: ZOrderMap,
+  ancestry: ReadonlySet<string>,
 ) {
   return children
     .filter((child) => isVisualTag(child.tag))
@@ -167,6 +185,7 @@ function renderChildren(
             palette={palette}
             boxKey={makeBoxKey(parentKey, child.nodeId, undefined)}
             zOrder={zOrder}
+            ancestry={ancestry}
           />,
         ];
       }
@@ -183,6 +202,7 @@ function renderChildren(
           boxKey={makeBoxKey(parentKey, child.nodeId, instance.instanceKey)}
           zOrder={zOrder}
           instanceKey={instance.instanceKey}
+          ancestry={ancestry}
         />
       ));
     });
@@ -206,6 +226,7 @@ function GuiBox({
   boxKey,
   zOrder,
   instanceKey,
+  ancestry,
 }: GuiBoxProps) {
   // Resolve the whole attribute bag once against this box's scope (the item scope
   // for a forEach instance, the inherited scope otherwise): geometry, colors, and
@@ -284,7 +305,117 @@ function GuiBox({
       style={style}
     >
       {isText ? boxText(resolved) : null}
-      {renderChildren(node.children, selectedNodeId, scope, palette, boxKey, zOrder)}
+      {node.tag === "Component" ? (
+        // F6b: a <Component> mounts its src child (or a placeholder) IN PLACE of
+        // ordinary children. The child is mounted in a FRESH root scope built from
+        // this element's pre-resolved overrides (F6a) — never the parent's scope.
+        <ComponentMount node={node} parentScope={scope} palette={palette} ancestry={ancestry} />
+      ) : (
+        renderChildren(node.children, selectedNodeId, scope, palette, boxKey, zOrder, ancestry)
+      )}
+    </div>
+  );
+}
+
+/**
+ * The shared placeholder a `<Component>` renders when its `src` cannot be mounted
+ * (F6b). ONE component, parameterized by `reason`:
+ *
+ *   - `missing`   — the `src` is blank or does not resolve to a registered file
+ *                   (deleted / renamed / never created).
+ *   - `recursive` — the cycle guard tripped: this `src` is already on the mount
+ *                   path (A→B→A), so mounting it would loop.
+ *
+ * It fills the `<Component>` box (the box already carries the instance's own
+ * position/size, per design (3)) with a dashed error-styled panel naming the
+ * reason and the `src`, so layout never collapses and the author sees exactly what
+ * is wrong — never a silent blank, never a crash.
+ */
+function ComponentPlaceholder({ reason, src }: { reason: PlaceholderReason; src: string }) {
+  return (
+    <div
+      {...{ [PLACEHOLDER_ATTR]: reason }}
+      className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-[2px] border border-red-400/70 border-dashed bg-red-500/10 px-1 text-[11px] text-red-300 leading-tight"
+    >
+      <span className="truncate">
+        {reason}: {src || "(no src)"}
+      </span>
+    </div>
+  );
+}
+
+type ComponentMountProps = {
+  node: GuiNode;
+  parentScope: ScopeStack;
+  palette: Palette;
+  ancestry: ReadonlySet<string>;
+};
+
+/**
+ * Mount a `<Component>`'s `src` child (F6b). This is the one place the async child
+ * fetch enters the render — it is a component (not a helper) because it calls the
+ * {@link useComponent} hook; the fetched+parsed child trees are module-cached so a
+ * keystroke in the Data Model panel does not refetch.
+ *
+ * The decision pipeline:
+ *   1. {@link mountDecision} (pure) settles the no-I/O cases against the ancestry
+ *      set: a blank `src` → `missing` placeholder; a `src` already on the mount
+ *      path → `recursive` placeholder. Otherwise it yields the basename to fetch
+ *      plus the ancestry to carry INTO the child (parent set ∪ this basename).
+ *   2. {@link useComponent} fetches+parses the child. While loading, render nothing
+ *      (no placeholder flash). On `missing` (absent / broken / unparseable) render
+ *      the shared placeholder. On `ok`, mount the child subtree.
+ *   3. The child mounts in a FRESH ROOT scope built from the parent-pre-resolved
+ *      overrides (F6a): `ScopeStack.root(resolveOverrides(...))`. The parent scope
+ *      and its `$` root do NOT cross the boundary — the child sees ONLY its props.
+ *
+ * The mounted child gets its OWN z-order map (its `layer`s compete within this
+ * component box's local stacking context, not the parent stage's global one). This
+ * keeps the mount self-contained; cross-mount global z-order is out of F6b scope.
+ */
+function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMountProps) {
+  // Pure decision first: blank src / cycle are settled with no fetch.
+  const decision = mountDecision(node, ancestry);
+  // Hooks must run unconditionally, so always call the cache hook — but pass `null`
+  // when the pure step already decided not to fetch (placeholder), which short-
+  // circuits the hook to `missing` without an invoke.
+  const basename = decision.kind === "mount" ? decision.basename : null;
+  const entry: ComponentEntry = useComponent(basename);
+  const rawSrc = node.attrs.src ?? "";
+
+  // Pure placeholder decisions (blank src, recursion) win immediately.
+  if (decision.kind === "placeholder") {
+    return <ComponentPlaceholder reason={decision.reason} src={rawSrc} />;
+  }
+
+  // Fetch settled to a renderable result.
+  if (entry.status === "loading") return null; // in flight — no placeholder flash
+  if (entry.status === "missing") {
+    // Absent / broken install / unparseable — all the shared `missing:` box.
+    return <ComponentPlaceholder reason="missing" src={rawSrc} />;
+  }
+
+  // ok: mount the child subtree in a FRESH ROOT scope of pre-resolved overrides.
+  const overrides = resolveOverrides(node, parentScope);
+  const childScope = ScopeStack.root(overrides);
+  // The child mounts as its own little stage: its boxes are positioned/ordered
+  // within THIS <Component> box. A local z-order map ranks the child's own boxes.
+  const childZOrder = computeZOrder(entry.root, overrides);
+  return (
+    <div className="absolute inset-0" style={{ position: "absolute", zIndex: 0 }}>
+      {renderChildren(
+        entry.root.children,
+        // Selection inside a mounted child is out of F6b scope (the child's nodes
+        // belong to a different file). Pass `null` so child boxes never falsely
+        // read as selected against the PARENT file's selection id, and clicks fall
+        // through to the nearest enclosing <Component> box (which IS in this file).
+        null,
+        childScope,
+        palette,
+        "",
+        childZOrder,
+        decision.childAncestry,
+      )}
     </div>
   );
 }
@@ -377,7 +508,10 @@ export function GuiPreview({
         zIndex: 0,
       }}
     >
-      {renderChildren(root.children, selectedNodeId, scope, palette, "", zOrder)}
+      {renderChildren(root.children, selectedNodeId, scope, palette, "", zOrder, EMPTY_ANCESTRY)}
     </div>
   );
 }
+
+/** The empty `<Component>`-`src` ancestor set at the stage root (no mounts above). */
+const EMPTY_ANCESTRY: ReadonlySet<string> = new Set();

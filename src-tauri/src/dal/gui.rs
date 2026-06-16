@@ -124,6 +124,217 @@ impl Dal {
 
         Ok(())
     }
+
+    /// Create a brand-new GUI component: write its `.xml` (and optional controller
+    /// `.lua`) to disk and register BOTH in `assets.json`. This is the separate
+    /// "first-time creation" door that [`Dal::save_component`] deliberately refuses
+    /// — mirroring how [`Dal::create_script`] is kept distinct from `save_script`.
+    /// (design `xgui_ta.md` section (1) "Create-component flow".)
+    ///
+    /// `name` is the bare basename without extension (`"bag_slot"`). `folder_rel`
+    /// is the gui-relative destination folder (`""` for the `gui/` root, `"widgets"`,
+    /// `"profile/cards"`, …); the `.xml` lands at
+    /// `<gameInstallPath>/gui/<folder_rel>/<name>.xml`. `controller`, when `Some`, is
+    /// `(filename, contents)` — e.g. `("bag_slot_controller.lua", "…")` — and is
+    /// written as a sibling of the `.xml`. Manifest filepaths use the existing
+    /// backslash convention (`gui\<folder_rel>\<name>.xml`).
+    ///
+    /// **Both the `.xml` AND the controller `.lua` get manifest entries** — the
+    /// built-out runtime manifest-resolves both (product-confirmed), so the create
+    /// flow registers both immediately rather than waiting on a bulk rescan.
+    ///
+    /// **Pre-flight no-clobber, with TREE-WIDE basename uniqueness.** Refuse before
+    /// writing anything if `"{name}.xml"` already resolves ANYWHERE in the manifest
+    /// (not merely within `folder_rel` — the manifest is basename-keyed, so two
+    /// same-basename components in different folders would collide and make
+    /// `<Component src>` ambiguous; design section (3)), or if the controller name
+    /// already resolves, or if either target file already exists on disk.
+    ///
+    /// **Multi-write ordering and rollback — the `create_script` discipline, widened
+    /// to two files + two manifest inserts.** The invariant: never leave a manifest
+    /// entry pointing at no file, and never wedge the name so a retry is impossible.
+    /// Files land first, both manifest inserts last and adjacent (least-rollback-able):
+    /// 1. Write the controller `.lua` (if any). `atomic_write` self-cleans on its own
+    ///    failure, so a failure here leaves zero residue — propagate.
+    /// 2. Write the `.xml`. On failure, delete the controller from step 1 (best-effort),
+    ///    then propagate — zero residue.
+    /// 3. Insert the `.xml` manifest entry, then the controller entry (if any). If
+    ///    either insert fails, remove any entry inserted in this step and delete both
+    ///    files (best-effort), then propagate — zero residue, name not wedged.
+    /// 4. On full success, seed the manifest cache with the inserts' result and
+    ///    invalidate the gui tree cache so the new component lists without a watcher
+    ///    round-trip.
+    pub fn create_component(
+        &self,
+        folder_rel: &str,
+        name: &str,
+        xml: String,
+        controller: Option<(String, String)>,
+    ) -> Result<(), String> {
+        let xml_name = format!("{name}.xml");
+
+        // Pre-flight (a): TREE-WIDE basename uniqueness. Refuse if "{name}.xml"
+        // already resolves through the manifest ANYWHERE — a same-basename file in a
+        // *different* folder still collides on the basename-keyed manifest and would
+        // make <Component src> ambiguous. This is stricter than a per-folder check.
+        if self.resolve_asset(&xml_name)?.is_some() {
+            return Err(format!(
+                "refusing to create component '{name}': '{xml_name}' already resolves in the asset \
+                 manifest (component basenames must be unique across the whole gui/ tree)."
+            ));
+        }
+
+        // Pre-flight (b): if a controller is supplied, its name must be free too.
+        if let Some((controller_file_name, _)) = &controller {
+            if self.resolve_asset(controller_file_name)?.is_some() {
+                return Err(format!(
+                    "refusing to create component '{name}': controller '{controller_file_name}' \
+                     already resolves in the asset manifest."
+                ));
+            }
+        }
+
+        // Resolve on-disk target paths.
+        let folder_dir = self.gui_folder_path(folder_rel);
+        let xml_path = folder_dir.join(&xml_name);
+        let controller_path = controller
+            .as_ref()
+            .map(|(file_name, _)| folder_dir.join(file_name));
+
+        // Pre-flight (c): never clobber an existing on-disk file (even one absent
+        // from the manifest). Check both targets before writing anything.
+        if xml_path.exists() {
+            return Err(format!(
+                "refusing to create component '{name}': a file already exists at {}.",
+                xml_path.display()
+            ));
+        }
+        if let Some(path) = &controller_path {
+            if path.exists() {
+                return Err(format!(
+                    "refusing to create component '{name}': a controller file already exists at {}.",
+                    path.display()
+                ));
+            }
+        }
+
+        // Manifest filepaths the entries will point at, in the install's backslash
+        // convention: gui\<folder_rel-with-backslashes>\<file>.
+        let xml_filepath = gui_manifest_filepath(folder_rel, &xml_name);
+
+        // Ensure the destination folder exists before any write — atomic_write stages
+        // a `.tmp` sibling and renames, so it needs the parent dir to already exist
+        // (unlike create_script, which always writes into the pre-existing Scripts/).
+        // create-in-place into the gui/ root on a fresh project, or into a folder the
+        // user just made, are both legitimate. We deliberately do NOT track this dir
+        // for rollback: an empty gui subfolder is a benign, legitimate state (it's
+        // exactly what create_folder leaves) and carries nothing the runtime resolves,
+        // and create_dir_all is idempotent so a retry is unaffected.
+        std::fs::create_dir_all(&folder_dir)
+            .map_err(|e| format!("failed to create folder {}: {}", folder_dir.display(), e))?;
+
+        // Step 1: write the controller first (the safe-to-land-first half). On its
+        // own failure atomic_write leaves nothing — propagate, zero residue.
+        if let (Some(path), Some((_, contents))) = (&controller_path, &controller) {
+            atomic_write(path, contents.as_bytes())?;
+        }
+
+        // Step 2: write the .xml. On failure, roll back step 1's controller (if any)
+        // before propagating, so a failed create leaves zero residue.
+        if let Err(e) = atomic_write(&xml_path, xml.as_bytes()) {
+            if let Some(path) = &controller_path {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(e);
+        }
+
+        // Step 3: insert the manifest entries — .xml first, then the controller (if
+        // any), kept adjacent at the end. If either insert fails, roll back: remove
+        // any entry inserted in this step, then delete both files, then propagate.
+        let updated = match self.insert_manifest_entry(&xml_name, &xml_filepath) {
+            Ok(updated) => updated,
+            Err(e) => {
+                // The .xml entry never landed; just delete both files.
+                let _ = std::fs::remove_file(&xml_path);
+                if let Some(path) = &controller_path {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(e);
+            }
+        };
+
+        let updated = if let Some((controller_file_name, _)) = &controller {
+            let controller_filepath = gui_manifest_filepath(folder_rel, controller_file_name);
+            match self.insert_manifest_entry(controller_file_name, &controller_filepath) {
+                Ok(updated) => updated,
+                Err(e) => {
+                    // The .xml entry DID land — remove it before deleting files so we
+                    // never leave a manifest entry pointing at a deleted file (which
+                    // would wedge the name against every retry).
+                    let _ = self.remove_manifest_entry(&xml_name);
+                    let _ = std::fs::remove_file(&xml_path);
+                    if let Some(path) = &controller_path {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    return Err(e);
+                }
+            }
+        } else {
+            updated
+        };
+
+        // Step 4: all writes landed — seed the manifest cache with the final map and
+        // drop the gui tree cache so the new component lists immediately.
+        self.manifest.insert((), Arc::new(updated));
+        self.gui_tree.invalidate(&());
+        Ok(())
+    }
+
+    /// Create an empty GUI subfolder at `<gameInstallPath>/gui/<parent_rel>/<name>`
+    /// via a plain `std::fs::create_dir`. Folders are **not** assets — they carry
+    /// nothing the runtime resolves — so there is **no manifest involvement**.
+    /// Refuses if the directory already exists. On success, invalidates the gui tree
+    /// cache so the next read surfaces the (legitimately empty) folder.
+    /// (design `xgui_ta.md` section (2) "Create-folder".)
+    pub fn create_folder(&self, parent_rel: &str, name: &str) -> Result<(), String> {
+        let dir = self.gui_folder_path(parent_rel).join(name);
+        if dir.exists() {
+            return Err(format!(
+                "refusing to create folder '{name}': a directory already exists at {}.",
+                dir.display()
+            ));
+        }
+        // create_dir (not create_dir_all): the parent must already exist; a missing
+        // parent is a real error worth surfacing, not silently materializing a chain.
+        std::fs::create_dir(&dir)
+            .map_err(|e| format!("failed to create folder {}: {}", dir.display(), e))?;
+        self.gui_tree.invalidate(&());
+        Ok(())
+    }
+
+    /// Absolute path to a gui-relative folder. `""` is the `gui/` root; otherwise the
+    /// gui-relative path's `/` segments are joined under `gui/`.
+    fn gui_folder_path(&self, folder_rel: &str) -> PathBuf {
+        let mut dir = self.gui_dir();
+        if !folder_rel.is_empty() {
+            for segment in folder_rel.split('/') {
+                dir = dir.join(segment);
+            }
+        }
+        dir
+    }
+}
+
+/// Build a manifest filepath for a file inside `gui/<folder_rel>/`, using the
+/// install's Windows-style `\` separators regardless of host OS. `""` folder_rel
+/// yields `gui\<file>`; `"profile/cards"` yields `gui\profile\cards\<file>`.
+fn gui_manifest_filepath(folder_rel: &str, file_name: &str) -> String {
+    if folder_rel.is_empty() {
+        format!("gui\\{file_name}")
+    } else {
+        let folder = folder_rel.replace('/', "\\");
+        format!("gui\\{folder}\\{file_name}")
+    }
 }
 
 /// Recursively read one folder at `dir` whose gui-relative path is `rel` (""
@@ -710,5 +921,443 @@ mod tests {
         let after = std::fs::read_to_string(root.join("assets.json")).unwrap();
         assert_eq!(before, after, "save_component must not mutate assets.json");
         assert!(!root.join("assets.json.tmp").exists());
+    }
+
+    // ---- create_component: two files + two manifest entries, ordered, rollback ----
+
+    /// Read the on-disk manifest as an ordered key list (preserve_order keeps file
+    /// order) so tests can assert adjacency and append-at-end.
+    fn manifest_keys(root: &Path) -> Vec<String> {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        v.as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn create_writes_both_files_and_both_adjacent_manifest_entries_last() {
+        let root = temp_install();
+        // A pre-existing manifest entry so we can assert the two new keys append at
+        // the end, adjacent, after the existing one.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+
+        dal.create_component(
+            "widgets",
+            "bag_slot",
+            "<Panel id=\"root\"/>".to_string(),
+            Some((
+                "bag_slot_controller.lua".to_string(),
+                "-- ctrl\n".to_string(),
+            )),
+        )
+        .unwrap();
+
+        // Both files written under gui/widgets/, no temp sidecars.
+        let gui = root.join("gui").join("widgets");
+        assert_eq!(
+            std::fs::read_to_string(gui.join("bag_slot.xml")).unwrap(),
+            "<Panel id=\"root\"/>"
+        );
+        assert_eq!(
+            std::fs::read_to_string(gui.join("bag_slot_controller.lua")).unwrap(),
+            "-- ctrl\n"
+        );
+        assert!(!gui.join("bag_slot.xml.tmp").exists());
+        assert!(!gui.join("bag_slot_controller.lua.tmp").exists());
+
+        // Both manifest entries appended LAST and ADJACENT, .xml before controller,
+        // with backslash filepaths under gui\widgets\.
+        let keys = manifest_keys(&root);
+        assert_eq!(
+            keys,
+            vec![
+                "item_bandage.png".to_string(),
+                "bag_slot.xml".to_string(),
+                "bag_slot_controller.lua".to_string(),
+            ],
+            "the two new keys must be appended last, adjacent, xml then controller"
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["bag_slot.xml"]["filepath"],
+            serde_json::json!("gui\\widgets\\bag_slot.xml")
+        );
+        assert_eq!(
+            v["bag_slot_controller.lua"]["filepath"],
+            serde_json::json!("gui\\widgets\\bag_slot_controller.lua")
+        );
+
+        // Resolution sees both immediately (manifest cache refreshed in-process).
+        assert_eq!(
+            dal.resolve_asset("bag_slot.xml").unwrap(),
+            Some(gui.join("bag_slot.xml"))
+        );
+        assert_eq!(
+            dal.resolve_asset("bag_slot_controller.lua").unwrap(),
+            Some(gui.join("bag_slot_controller.lua"))
+        );
+
+        // The new component surfaces in the gui tree (cache was invalidated).
+        let tree = dal.get_gui_tree().unwrap();
+        let widgets = folder_at(&tree, "widgets").expect("widgets folder");
+        let slot = widgets
+            .components
+            .iter()
+            .find(|c| c.name == "bag_slot")
+            .expect("new component must list");
+        assert_eq!(slot.kind, GuiComponentKind::Widget);
+        assert_eq!(
+            slot.controller_file_name.as_deref(),
+            Some("bag_slot_controller.lua")
+        );
+    }
+
+    #[test]
+    fn create_at_root_with_no_controller_registers_only_the_xml() {
+        let root = temp_install();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        dal.create_component("", "screen", "<View/>".to_string(), None)
+            .unwrap();
+
+        // .xml at the gui/ root, registered as gui\screen.xml.
+        let xml_path = root.join("gui").join("screen.xml");
+        assert_eq!(std::fs::read_to_string(&xml_path).unwrap(), "<View/>");
+        let keys = manifest_keys(&root);
+        assert_eq!(keys, vec!["screen.xml".to_string()]);
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["screen.xml"]["filepath"],
+            serde_json::json!("gui\\screen.xml")
+        );
+    }
+
+    #[test]
+    fn create_refuses_basename_collision_across_a_different_folder() {
+        let root = temp_install();
+        // bag_slot.xml ALREADY exists in widgets/, registered in the manifest.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "bag_slot.xml": { "filepath": "gui\\widgets\\bag_slot.xml" } }"#,
+        );
+
+        // Attempt to create bag_slot in a DIFFERENT folder (screens/). Tree-wide
+        // basename uniqueness must refuse this even though screens/ has no such file.
+        let err = dal
+            .create_component("screens", "bag_slot", "<Panel/>".to_string(), None)
+            .expect_err("a basename collision in a DIFFERENT folder must be refused");
+        assert!(
+            err.contains("bag_slot"),
+            "refusal should name the component, got: {err}"
+        );
+
+        // Nothing written into the (would-be) target folder, manifest unchanged.
+        assert!(!root.join("gui").join("screens").join("bag_slot.xml").exists());
+        let keys = manifest_keys(&root);
+        assert_eq!(keys, vec!["bag_slot.xml".to_string()]);
+    }
+
+    #[test]
+    fn create_refuses_when_controller_name_already_resolves() {
+        let root = temp_install();
+        // The controller name is taken (elsewhere); the .xml basename is free.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "shared_controller.lua": { "filepath": "gui\\shared_controller.lua" } }"#,
+        );
+
+        let err = dal
+            .create_component(
+                "widgets",
+                "fresh",
+                "<Panel/>".to_string(),
+                Some(("shared_controller.lua".to_string(), "-- x\n".to_string())),
+            )
+            .expect_err("a controller name that already resolves must be refused");
+        assert!(err.contains("shared_controller.lua"), "got: {err}");
+
+        // Pre-flight refusal: no .xml written, manifest unchanged.
+        assert!(!root.join("gui").join("widgets").join("fresh.xml").exists());
+        assert_eq!(manifest_keys(&root), vec!["shared_controller.lua".to_string()]);
+    }
+
+    #[test]
+    fn create_refuses_when_xml_file_already_exists_on_disk() {
+        let root = temp_install();
+        // File exists on disk but is NOT in the manifest.
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("ghost.xml"), "<View id=\"old\"/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        let err = dal
+            .create_component("", "ghost", "<View id=\"new\"/>".to_string(), None)
+            .expect_err("creating over an existing on-disk .xml must be refused");
+        assert!(err.contains("ghost"), "got: {err}");
+
+        // Existing file untouched, no manifest entry, no temp sidecar.
+        assert_eq!(
+            std::fs::read_to_string(gui.join("ghost.xml")).unwrap(),
+            "<View id=\"old\"/>"
+        );
+        assert!(manifest_keys(&root).is_empty());
+        assert!(!gui.join("ghost.xml.tmp").exists());
+    }
+
+    #[test]
+    fn create_rolls_back_when_second_controller_insert_fails_via_duplicate_key() {
+        // Exercise the step-3 SECOND-insert rollback branch specifically: the .xml
+        // manifest entry lands, then the controller insert fails — and we must remove
+        // the just-inserted .xml entry AND delete both files, leaving zero residue and
+        // an un-wedged, retryable name.
+        //
+        // Construction: prime the in-process manifest cache from a manifest where the
+        // controller key is ABSENT (so the pre-flight controller no-clobber passes),
+        // then write to disk a manifest where the controller key IS present. Step 3's
+        // first insert (the .xml) re-reads disk, succeeds, and rewrites the file
+        // (still containing the controller key). The second insert (the controller)
+        // re-reads disk and refuses the now-duplicate controller key — the deterministic
+        // second-step failure we want.
+        let root = temp_install();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+        // Prime the cache with the empty manifest so both pre-flight guards pass.
+        let _ = dal.resolve_asset("card.xml").unwrap();
+        let _ = dal.resolve_asset("card_controller.lua").unwrap();
+        // Now plant the controller key on disk so the SECOND insert collides.
+        std::fs::write(
+            root.join("assets.json"),
+            r#"{ "card_controller.lua": { "filepath": "gui\\widgets\\card_controller.lua" } }"#,
+        )
+        .unwrap();
+
+        let err = dal
+            .create_component(
+                "widgets",
+                "card",
+                "<Panel/>".to_string(),
+                Some(("card_controller.lua".to_string(), "-- c\n".to_string())),
+            )
+            .expect_err("a duplicate controller key on the second insert must fail");
+        assert!(
+            err.contains("card_controller.lua"),
+            "error should name the colliding controller, got: {err}"
+        );
+
+        // Zero file residue: both files deleted by the step-3 rollback.
+        let gui = root.join("gui").join("widgets");
+        assert!(!gui.join("card.xml").exists(), "no orphan .xml");
+        assert!(
+            !gui.join("card_controller.lua").exists(),
+            "no orphan controller"
+        );
+
+        // The just-inserted .xml entry was REMOVED — the manifest holds only the
+        // pre-existing controller key, never the card.xml key.
+        let keys = manifest_keys(&root);
+        assert_eq!(
+            keys,
+            vec!["card_controller.lua".to_string()],
+            "the .xml entry inserted before the failed controller insert must be rolled back"
+        );
+
+        // The name is not wedged: clearing the planted collision lets a retry land
+        // the whole component cleanly.
+        std::fs::write(root.join("assets.json"), "{}").unwrap();
+        dal.manifest.invalidate_all();
+        dal.create_component(
+            "widgets",
+            "card",
+            "<Panel/>".to_string(),
+            Some(("card_controller.lua".to_string(), "-- c\n".to_string())),
+        )
+        .expect("retry after second-insert rollback must succeed");
+        assert_eq!(
+            manifest_keys(&root),
+            vec!["card.xml".to_string(), "card_controller.lua".to_string()]
+        );
+    }
+
+    #[test]
+    fn create_rolls_back_both_files_when_first_xml_insert_fails() {
+        // Step-3 FIRST-insert failure: corrupt the on-disk manifest after priming the
+        // cache so the pre-flight guards pass, then the .xml insert (which re-reads
+        // the raw file) fails to parse it. Both files must be deleted, no entry added,
+        // and the name must remain retryable.
+        let root = temp_install();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+        let _ = dal.resolve_asset("item_bandage.png").unwrap();
+        std::fs::write(root.join("assets.json"), "{ this is not valid json").unwrap();
+
+        let err = dal
+            .create_component(
+                "widgets",
+                "card",
+                "<Panel/>".to_string(),
+                Some(("card_controller.lua".to_string(), "-- c\n".to_string())),
+            )
+            .expect_err("manifest insert over a corrupt file must fail");
+        assert!(
+            err.contains("assets.json") || err.to_lowercase().contains("parse"),
+            "error should describe the manifest failure, got: {err}"
+        );
+
+        // Zero residue: neither file remains (step 3 rollback deleted both).
+        let gui = root.join("gui").join("widgets");
+        assert!(!gui.join("card.xml").exists(), "no orphan .xml");
+        assert!(
+            !gui.join("card_controller.lua").exists(),
+            "no orphan controller"
+        );
+        assert!(!gui.join("card.xml.tmp").exists());
+        assert!(!gui.join("card_controller.lua.tmp").exists());
+
+        // The name is not wedged: restore a valid manifest, invalidate the primed
+        // cache, and a retry of the SAME name succeeds end-to-end.
+        std::fs::write(
+            root.join("assets.json"),
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        )
+        .unwrap();
+        dal.manifest.invalidate_all();
+
+        dal.create_component(
+            "widgets",
+            "card",
+            "<Panel/>".to_string(),
+            Some(("card_controller.lua".to_string(), "-- c\n".to_string())),
+        )
+        .expect("retry after rollback must succeed — the name must not be wedged");
+
+        assert_eq!(
+            std::fs::read_to_string(gui.join("card.xml")).unwrap(),
+            "<Panel/>"
+        );
+        let keys = manifest_keys(&root);
+        assert_eq!(
+            keys,
+            vec![
+                "item_bandage.png".to_string(),
+                "card.xml".to_string(),
+                "card_controller.lua".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn create_rolls_back_when_xml_write_fails_leaving_no_controller() {
+        // Step-2 failure: the .xml write fails (its parent path is occupied by a
+        // FILE where create_component needs a directory), so the controller written
+        // in step 1 must be rolled back. We make gui/<folder> a file so creating
+        // gui/<folder>/<name>.xml fails, while the controller (same folder) also
+        // can't be written — so to isolate step 2 we instead occupy only the .xml's
+        // immediate parent for the xml and let the controller live in a writable
+        // sibling. Simplest reliable construction: make the controller succeed by
+        // putting the component at the root, and force the .xml write to fail by
+        // pre-creating a DIRECTORY at the .xml's path (a dir can't be atomically
+        // replaced by a file rename on the same path).
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        // Occupy the .xml target path with a directory: atomic_write's final rename
+        // onto this path fails. The controller path is a normal free file.
+        std::fs::create_dir_all(gui.join("blocked.xml")).unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        let err = dal
+            .create_component(
+                "",
+                "blocked",
+                "<View/>".to_string(),
+                Some((
+                    "blocked_controller.lua".to_string(),
+                    "-- ctrl\n".to_string(),
+                )),
+            )
+            .expect_err("a failed .xml write must surface an error");
+        assert!(!err.is_empty());
+
+        // The controller written in step 1 was rolled back (deleted) — zero residue
+        // apart from the directory we planted as the fault.
+        assert!(
+            !gui.join("blocked_controller.lua").exists(),
+            "step-2 failure must roll back the step-1 controller"
+        );
+        assert!(!gui.join("blocked_controller.lua.tmp").exists());
+        // No manifest entry was added (we never reached step 3).
+        assert!(manifest_keys(&root).is_empty());
+    }
+
+    // ---- create_folder: empty dir, no manifest, refuse-if-exists ----
+
+    #[test]
+    fn create_folder_makes_empty_dir_surfaced_by_next_tree_read() {
+        let root = temp_install();
+        // gui/ root must exist for create_dir (not create_dir_all) to place a child.
+        std::fs::create_dir_all(root.join("gui")).unwrap();
+        let dal = dal_for(&root);
+
+        // Prime the tree cache (so we also prove invalidation refreshes it).
+        let _ = dal.get_gui_tree().unwrap();
+
+        dal.create_folder("", "newfolder").unwrap();
+
+        // The dir exists on disk and is empty.
+        let dir = root.join("gui").join("newfolder");
+        assert!(dir.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+
+        // The next tree read surfaces it (cache was invalidated).
+        let tree = dal.get_gui_tree().unwrap();
+        let f = folder_at(&tree, "newfolder").expect("new empty folder must list");
+        assert!(f.components.is_empty());
+        assert!(f.folders.is_empty());
+
+        // No manifest involvement: assets.json is untouched.
+        assert_eq!(
+            std::fs::read_to_string(root.join("assets.json")).unwrap(),
+            "{}"
+        );
+    }
+
+    #[test]
+    fn create_folder_nested_under_existing_parent() {
+        let root = temp_install();
+        std::fs::create_dir_all(root.join("gui").join("profile")).unwrap();
+        let dal = dal_for(&root);
+
+        dal.create_folder("profile", "cards").unwrap();
+
+        let tree = dal.get_gui_tree().unwrap();
+        let cards = folder_at(&tree, "profile/cards").expect("nested folder must list");
+        assert_eq!(cards.name, "cards");
+        assert_eq!(cards.path, "profile/cards");
+    }
+
+    #[test]
+    fn create_folder_refuses_if_already_exists() {
+        let root = temp_install();
+        let existing = root.join("gui").join("widgets");
+        std::fs::create_dir_all(&existing).unwrap();
+        // Drop a marker file so we can prove the existing dir is left untouched.
+        std::fs::write(existing.join("keep.xml"), "<Panel/>").unwrap();
+        let dal = dal_for(&root);
+
+        let err = dal
+            .create_folder("", "widgets")
+            .expect_err("creating an existing folder must be refused");
+        assert!(err.contains("widgets"), "got: {err}");
+
+        // The existing folder and its contents are untouched.
+        assert!(existing.join("keep.xml").exists());
     }
 }

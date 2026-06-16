@@ -31,3 +31,30 @@ pub fn save_component(
 ) -> Result<(), String> {
     dal.save_component(&name, xml, controller)
 }
+
+/// Create a brand-new GUI component: write its `.xml` (and optional controller
+/// `.lua`) under `gui/<folderRel>/` and register BOTH in the asset manifest. This
+/// is the first-time-creation door `save_component` refuses. `name` is the bare
+/// basename; `folderRel` is the gui-relative destination (`""` = `gui/` root);
+/// `controller`, when present, is `[filename, contents]`. Refuses (writing nothing)
+/// if the basename already resolves ANYWHERE in the manifest (tree-wide uniqueness),
+/// if the controller name already resolves, or if either file already exists on
+/// disk. Files land first, both manifest inserts last; any failure rolls back to
+/// zero residue.
+#[tauri::command]
+pub fn create_component(
+    folder_rel: String,
+    name: String,
+    xml: String,
+    controller: Option<(String, String)>,
+    dal: State<Dal>,
+) -> Result<(), String> {
+    dal.create_component(&folder_rel, &name, xml, controller)
+}
+
+/// Create an empty GUI subfolder at `gui/<parentRel>/<name>`. Folders are not
+/// assets, so this touches no manifest. Refuses if the directory already exists.
+#[tauri::command]
+pub fn create_folder(parent_rel: String, name: String, dal: State<Dal>) -> Result<(), String> {
+    dal.create_folder(&parent_rel, &name)
+}

@@ -8,6 +8,7 @@ pub mod creatures;
 pub mod dlc;
 pub mod effects;
 pub mod game_objects;
+pub mod gui;
 pub mod item_drops;
 pub mod items;
 pub mod packs;

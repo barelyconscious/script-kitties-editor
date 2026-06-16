@@ -8,6 +8,7 @@ use crate::commands::creatures::{get_creatures, save_creature};
 use crate::commands::dlc::{get_dlcs, save_dlc};
 use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
+use crate::commands::gui::get_gui_tree;
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
@@ -223,7 +224,8 @@ pub fn run() {
             get_script,
             save_script,
             create_script,
-            get_game_objects
+            get_game_objects,
+            get_gui_tree
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

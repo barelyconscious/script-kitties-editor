@@ -12,7 +12,8 @@ use serde::Serialize;
 use crate::{
     config::EditorConfig,
     model::{
-        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, Item, ItemDrop, Pack,
+        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, GuiFolder, Item,
+        ItemDrop, Pack,
     },
 };
 
@@ -24,6 +25,7 @@ pub mod charms;
 pub mod creatures;
 pub mod dlc;
 pub mod effects;
+pub mod gui;
 pub mod item_drops;
 pub mod items;
 pub mod packs;
@@ -51,6 +53,11 @@ pub struct Dal {
     // Script file contents, keyed by logical script name. `None` = script-less
     // (name absent from the manifest); `Some` = file contents.
     pub(crate) scripts: Cache<String, Arc<Option<String>>>,
+    // The whole `gui/` folder as one recursive tree (the component list source).
+    // A single coarse cache unit under key `()` (manifest-style), invalidated
+    // wholesale by the recursive `gui/` watch — the read model is a tree, so the
+    // cache unit is the tree.
+    pub(crate) gui_tree: Cache<(), Arc<GuiFolder>>,
     // Swapped out by `update_config` so a new install path starts watching the
     // new Data dir and the old watcher (dropped here) stops firing.
     watcher: Mutex<RecommendedWatcher>,
@@ -74,11 +81,12 @@ impl Dal {
             Cache::builder().max_capacity(1024).build();
         let scripts: Cache<String, Arc<Option<String>>> =
             Cache::builder().max_capacity(1024).build();
+        let gui_tree: Cache<(), Arc<GuiFolder>> = Cache::builder().max_capacity(1).build();
 
         let game_root = PathBuf::from(&config.game_install_path);
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &bundles, &packs, &manifest, &sprites, &scripts,
+            &item_drops, &bundles, &packs, &manifest, &sprites, &scripts, &gui_tree,
         )?;
 
         Ok(Self {
@@ -96,6 +104,7 @@ impl Dal {
             manifest,
             sprites,
             scripts,
+            gui_tree,
             watcher: Mutex::new(watcher),
         })
     }
@@ -122,6 +131,7 @@ impl Dal {
             &self.manifest,
             &self.sprites,
             &self.scripts,
+            &self.gui_tree,
         )?;
 
         *self.config.write().unwrap() = new_config;
@@ -141,6 +151,7 @@ impl Dal {
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
         self.scripts.invalidate_all();
+        self.gui_tree.invalidate_all();
 
         Ok(())
     }
@@ -170,9 +181,11 @@ fn build_watcher(
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
     scripts: &Cache<String, Arc<Option<String>>>,
+    gui_tree: &Cache<(), Arc<GuiFolder>>,
 ) -> Result<RecommendedWatcher, String> {
     let data_dir = game_root.join("Data");
     let scripts_dir = game_root.join("Scripts");
+    let gui_dir = game_root.join("gui");
 
     // (path the watcher reacts to, closure that invalidates the matching cache).
     // To register a new domain: clone its cache handle and push a row here.
@@ -236,6 +249,12 @@ fn build_watcher(
     // the exact-path invalidators above.
     let scripts_cache = scripts.clone();
     let scripts_dir_match = scripts_dir.clone();
+    // The whole gui/ tree is a single coarse cache unit: any create/delete/edit
+    // anywhere under gui/ (including nested folders) invalidates it wholesale, and
+    // the next read re-walks. Captured separately from the exact-path invalidators,
+    // like the Scripts/ wholesale rule.
+    let gui_cache = gui_tree.clone();
+    let gui_dir_match = gui_dir.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
         // Ignore access-only events; only react when the file's bytes change.
@@ -254,6 +273,11 @@ fn build_watcher(
             {
                 scripts_cache.invalidate_all();
             }
+            // Any change anywhere under gui/ (the recursive watch covers nested
+            // folders) invalidates the single tree cache key.
+            if path.starts_with(&gui_dir_match) {
+                gui_cache.invalidate(&());
+            }
         }
     })
     .map_err(|e| format!("failed to create filesystem watcher: {}", e))?;
@@ -271,6 +295,14 @@ fn build_watcher(
     // still start (Data Tables / Creature Editor don't need scripts). If the watch
     // can't be set up, the scripts cache simply won't auto-freshen on external edits.
     let _ = watcher.watch(&scripts_dir, RecursiveMode::NonRecursive);
+
+    // The gui/ folder is the app's one RECURSIVE watch: the component tree is
+    // deeply nested (gui/profile/, gui/battle/, …), so a non-recursive watch would
+    // miss edits inside subfolders — which is most of the tree. Best-effort: a
+    // fresh project may not have gui/ yet (the read returns an empty root), and the
+    // tree cache simply won't auto-freshen until the folder exists and is rewatched
+    // on the next config update.
+    let _ = watcher.watch(&gui_dir, RecursiveMode::Recursive);
 
     Ok(watcher)
 }

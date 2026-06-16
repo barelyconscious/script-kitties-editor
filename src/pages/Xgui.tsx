@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
+import { EventsPanel } from "./xgui/EventsPanel";
 import { EditorStateProvider, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
@@ -54,8 +55,8 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
           <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
         )}
 
-        {/* Structure column. F9a fills the TREE slice (top); F9b properties and
-            F9c events stack below it in the same column (still seams for now). */}
+        {/* Structure column: the tree (F9a), properties (F9b), and events (F9c)
+            slices stacked top-to-bottom — now all live. */}
         <StructureColumn />
 
         {/* MAIN content — the preview (+ Data Model) for the open component. */}
@@ -66,15 +67,13 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
 }
 
 /**
- * The structure column (tree + properties + events). F9a fills the TREE slice
- * (top) with the live {@link StructureTree}; F9b fills the PROPERTIES slice
- * (middle) with the live {@link PropertiesPanel} reflecting the current
- * selection; the Events (F9c) slice remains a seam below it, so the three-slice
- * column reads correctly now and the last slice slots in without reshaping it.
+ * The structure column (tree + properties + events), all three slices live: the
+ * TREE slice (top, {@link StructureTree}), the PROPERTIES slice (middle,
+ * {@link PropertiesPanel}) reflecting the current selection, and the EVENTS slice
+ * (bottom, {@link EventsPanel}) listing the View's `<Event>` registrations.
  *
- * The tree gets the upper half (its own scroll), the properties panel the lower
- * half (its own scroll), so a deep tree and a long property list each scroll
- * independently rather than fighting for the column's height.
+ * Each slice scrolls independently within its own region so a deep tree, a long
+ * property list, and a long event list don't fight for the column's height.
  */
 function StructureColumn() {
   return (
@@ -86,13 +85,13 @@ function StructureColumn() {
       <div className="flex min-h-0 flex-[1.2] flex-col">
         <StructureTree />
       </div>
-      {/* PROPERTIES slice (F9b) — lower region, scrolls independently. */}
+      {/* PROPERTIES slice (F9b) — middle region, scrolls independently. */}
       <div className="flex min-h-0 flex-1 flex-col">
         <PropertiesPanel />
       </div>
-      {/* SEAM: Events (F9c) stacks below the properties panel. */}
-      <div className="border-t px-3 py-1.5 text-center text-[10px] text-muted-foreground/50">
-        Events land here (F9c).
+      {/* EVENTS slice (F9c) — lower region, scrolls independently. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <EventsPanel />
       </div>
     </aside>
   );

@@ -10,6 +10,7 @@ import {
   findNode,
   makeChildNode,
   nodePath,
+  removeNode,
   setNodeAttrs,
 } from "./guiTreeEdit";
 
@@ -191,6 +192,50 @@ describe("setNodeAttrs — immutable attr replace", () => {
     const root = attrNode("root", "View", {}, [attrNode("a", "Panel", { id: "a" })]);
     setNodeAttrs(root, "a", { id: "b" });
     expect(root.children[0].attrs).toEqual({ id: "a" });
+  });
+});
+
+describe("removeNode — immutable detach (F9c Event delete)", () => {
+  it("removes a matching child, preserving sibling order", () => {
+    const root = node("root", "View", [
+      node("e1", "Event"),
+      node("e2", "Event"),
+      node("e3", "Event"),
+    ]);
+    const next = removeNode(root, "e2");
+    expect(next.children.map((c) => c.nodeId)).toEqual(["e1", "e3"]);
+  });
+
+  it("removes a deeply nested node", () => {
+    const root = node("root", "View", [node("a", "Panel", [node("b", "Text")])]);
+    const next = removeNode(root, "b");
+    expect(next.children[0].children).toEqual([]);
+  });
+
+  it("never removes the root itself (returns the SAME reference)", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    expect(removeNode(root, "root")).toBe(root);
+  });
+
+  it("returns the SAME root reference (no-op) when the node is not found", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    expect(removeNode(root, "missing")).toBe(root);
+  });
+
+  it("reuses untouched sibling subtrees by reference", () => {
+    const sib = node("sib", "Panel", [node("deep", "Text")]);
+    const root = node("root", "View", [node("a", "Panel", [node("target", "Text")]), sib]);
+    const next = removeNode(root, "target");
+    // The sibling branch was not on the removal path — reused as-is.
+    expect(next.children[1]).toBe(sib);
+    // The mutated branch is a fresh object.
+    expect(next.children[0]).not.toBe(root.children[0]);
+  });
+
+  it("does not mutate the original tree", () => {
+    const root = node("root", "View", [node("a", "Panel"), node("b", "Text")]);
+    removeNode(root, "b");
+    expect(root.children.map((c) => c.nodeId)).toEqual(["a", "b"]);
   });
 });
 

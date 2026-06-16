@@ -40,7 +40,10 @@
  *    off-store). A nodeId that is not found is a no-op (no dirty). F7 (drag)
  *    writes a moved node's `position` through this SAME action.
  *  • F9c (events) — `<Event>` children of `<View>` are ordinary nodes in `root`,
- *    so add/remove flow through the same tree-mutation action as F9a.
+ *    so ADD flows through the same `addChildNode` action as F9a, and REMOVE uses
+ *    the `removeNode` action (the immutable detach lives in the pure
+ *    `guiTreeEdit.removeNode`). The events panel is the only caller of `removeNode`
+ *    today — general tree delete stays deferred.
  *  • F10 (controller tab) — `activeTab` already toggles View/Controller; the
  *    controller TEXT + its dirty contribution land via a `setControllerText`
  *    action (and `controllerFileName` is already carried for the Add-script flow).
@@ -58,7 +61,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
-import { addChild, setNodeAttrs } from "./guiTreeEdit";
+import { addChild, removeNode, setNodeAttrs } from "./guiTreeEdit";
 
 /** Which main-content tab is showing (design section 4). */
 export type EditorTab = "view" | "controller";
@@ -127,6 +130,14 @@ export type EditorAction =
    * {@link setNodeAttrs} so the mutation is tested off-store.
    */
   | { type: "setNodeAttrs"; nodeId: string; attrs: Record<string, string> }
+  /**
+   * Remove the node identified by `nodeId` from the tree (F9c events delete) —
+   * marks dirty. A no-op (no dirty) if nothing is open, the node is not found, or
+   * the node is the root. The immutable detach is delegated to the pure
+   * {@link removeNode} so the mutation is tested off-store. Scoped to `<Event>`
+   * removal today; general tree delete remains deferred.
+   */
+  | { type: "removeNode"; nodeId: string }
   /** Clear the dirty flag after a successful save (F11). */
   | { type: "markSaved" };
 
@@ -188,6 +199,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // dirty on a phantom write).
       if (nextRoot === state.open.root) return state;
       return { ...state, open: { ...state.open, root: nextRoot }, dirty: true };
+    }
+    case "removeNode": {
+      if (!state.open) return state;
+      const nextRoot = removeNode(state.open.root, action.nodeId);
+      // Node not found / is the root → removeNode returns the SAME reference →
+      // no-op (don't dirty on a phantom remove).
+      if (nextRoot === state.open.root) return state;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        // If the removed node was selected, drop the dangling selection.
+        selectedNodeId: state.selectedNodeId === action.nodeId ? null : state.selectedNodeId,
+        dirty: true,
+      };
     }
     case "markSaved":
       return { ...state, dirty: false };

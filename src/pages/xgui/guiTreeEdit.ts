@@ -159,6 +159,39 @@ export function setNodeAttrs(
 }
 
 /**
+ * Remove the node identified by `nodeId` from the tree, returning a NEW root
+ * (immutable — untouched subtrees are reused by reference, so React diffs cheaply
+ * and the store's `removeNode` reducer swaps one object). Only DESCENDANTS are
+ * removable: the root itself is never removed (removing the `<View>` root is
+ * meaningless), so a `nodeId` equal to the root's is a no-op.
+ *
+ * If `nodeId` is not found (or is the root), the original root is returned
+ * UNCHANGED (same reference) — callers (and the store) treat an unchanged
+ * reference as a no-op (don't dirty on a phantom remove).
+ *
+ * SCOPE (F9c): the only remove affordance in the editor today is the Events panel
+ * deleting an `<Event>` child of `<View>`. General element delete from the tree is
+ * still deferred (design subsection 2 / task 452) — this function is the shared
+ * immutable primitive, but no tree delete UI calls it yet.
+ */
+export function removeNode(root: GuiNode, nodeId: string): GuiNode {
+  // The root is never removable — only descendants.
+  if (root.nodeId === nodeId) return root;
+  let changed = false;
+  const children: GuiNode[] = [];
+  for (const child of root.children) {
+    if (child.nodeId === nodeId) {
+      changed = true;
+      continue; // drop this child
+    }
+    const next = removeNode(child, nodeId);
+    if (next !== child) changed = true;
+    children.push(next);
+  }
+  return changed ? { ...root, children } : root;
+}
+
+/**
  * The chain of nodes from the root DOWN TO (and including) the node identified by
  * `nodeId`, or `null` if the node is not in the tree. Used to derive the computed
  * hierarchical id (the parent chain of authored `id` attrs) for the Properties

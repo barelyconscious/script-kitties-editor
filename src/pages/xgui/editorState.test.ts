@@ -143,4 +143,64 @@ describe("editorReducer", () => {
   it("setNodeAttrs is a no-op when nothing is open", () => {
     expect(editorReducer(CLEAN, { type: "setNodeAttrs", nodeId: "x", attrs: {} })).toBe(CLEAN);
   });
+
+  it("removeNode detaches the node and marks dirty", () => {
+    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
+    expect(next.open?.root.children.map((c) => c.nodeId)).toEqual(["e2"]);
+    expect(next.dirty).toBe(true);
+  });
+
+  it("removeNode clears the selection when the removed node was selected", () => {
+    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e1" };
+    const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
+    expect(next.selectedNodeId).toBeNull();
+  });
+
+  it("removeNode preserves an unrelated selection", () => {
+    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e2" };
+    const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
+    expect(next.selectedNodeId).toBe("e2");
+  });
+
+  it("removeNode is a no-op (no dirty) when the node is missing", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    expect(editorReducer(state, { type: "removeNode", nodeId: "ghost" })).toBe(state);
+  });
+
+  it("removeNode is a no-op when nothing is open", () => {
+    expect(editorReducer(CLEAN, { type: "removeNode", nodeId: "x" })).toBe(CLEAN);
+  });
+
+  it("stores an Event's name/handler verbatim (no validation/normalization)", () => {
+    // The events panel is intentionally thin: whatever the user types is stored as
+    // an <Event> node's attrs, untouched — even a namespaced/colon-bearing name and
+    // a handler that may not exist anywhere.
+    const event: GuiNode = {
+      nodeId: "e1",
+      tag: "Event",
+      attrs: { name: "", handler: "" },
+      children: [],
+    };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [event] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(state, {
+      type: "setNodeAttrs",
+      nodeId: "e1",
+      attrs: { name: "Battle:OnCreatureDied", handler: "doesNotExistYet" },
+    });
+    expect(next.open?.root.children[0].attrs).toEqual({
+      name: "Battle:OnCreatureDied",
+      handler: "doesNotExistYet",
+    });
+  });
 });

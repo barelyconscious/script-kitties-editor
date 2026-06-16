@@ -16,10 +16,12 @@ import { useCallback, useSyncExternalStore } from "react";
  *  a default) here so every consumer shares one source of truth. */
 export type Preferences = {
   "workbench.objectListCollapsed": boolean;
+  "xgui.componentListCollapsed": boolean;
 };
 
 const DEFAULTS: Preferences = {
   "workbench.objectListCollapsed": false,
+  "xgui.componentListCollapsed": false,
 };
 
 // --- Backing store (the swappable seam) ------------------------------------

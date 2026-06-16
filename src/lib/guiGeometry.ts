@@ -33,6 +33,33 @@ export const STAGE_WIDTH = 1280;
 export const STAGE_HEIGHT = 768;
 
 /**
+ * The fit-to-container scale for the fixed 1280×768 stage: the largest uniform
+ * scale that fits the stage entirely inside `containerW × containerH` while
+ * preserving the 1280:768 aspect ratio (letterbox / fit-and-center). The caller
+ * applies the result as a single `transform: scale()` on the ROOT stage and
+ * centers the scaled box; children keep their 1280×768 LOGICAL coordinates.
+ *
+ *   scale = min(containerW / STAGE_WIDTH, containerH / STAGE_HEIGHT)
+ *
+ * Returns `1` when the container has not been measured yet (a zero/negative/
+ * non-finite dimension) so the stage renders at its native size until the first
+ * {@link ResizeObserver} tick, rather than collapsing to scale 0. The result is
+ * never ≤ 0 — a degenerate container falls back to `1`, not an invisible stage.
+ */
+export function computeFitScale(containerW: number, containerH: number): number {
+  if (
+    !Number.isFinite(containerW) ||
+    !Number.isFinite(containerH) ||
+    containerW <= 0 ||
+    containerH <= 0
+  ) {
+    return 1;
+  }
+  const scale = Math.min(containerW / STAGE_WIDTH, containerH / STAGE_HEIGHT);
+  return scale > 0 ? scale : 1;
+}
+
+/**
  * The four parsed fields of a `position`/`size` value. `rel` fields are scale
  * fractions (1 = 100% of the parent); `abs` fields are pixel offsets. Each is a
  * finite number — a non-numeric (token / malformed) field parses to `0`.
@@ -182,4 +209,59 @@ export function applyDragDelta(positionAttr: string | undefined, dx: number, dy:
   const absX = parseField(parts[2]) + dx;
   const absY = parseField(parts[3]) + dy;
   return `${relX},${relY},${absX},${absY}`;
+}
+
+/**
+ * Convert an on-screen pixel delta into a LOGICAL (1280×768-space) pixel delta by
+ * dividing out the stage's render scale. When the stage is drawn with
+ * `transform: scale(s)`, a cursor move of `dxScreen` screen px corresponds to
+ * `dxScreen / s` px in logical space — which is the space `applyDragDelta` writes
+ * the offset in. This is the one piece the F7 drag needs to stay accurate when the
+ * preview is scaled (fit-to-fit); the preview owns it because the preview owns the
+ * scale.
+ *
+ * `scale` is clamped > 0 by {@link computeFitScale}, but as defense-in-depth a
+ * non-positive/non-finite scale falls back to a 1:1 mapping (return the screen
+ * delta unchanged) rather than dividing by zero / NaN.
+ */
+export function screenDeltaToLogical(
+  dxScreen: number,
+  dyScreen: number,
+  scale: number,
+): { dx: number; dy: number } {
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  return { dx: dxScreen / s, dy: dyScreen / s };
+}
+
+// ---------------------------------------------------------------------------
+// Texture rendering (F: sprite-as-background): which sprite name to load
+// ---------------------------------------------------------------------------
+
+/**
+ * Decide the sprite NAME a box should load for its `texture` background, or
+ * `null` for "load nothing" (render no background image, no broken-image icon).
+ *
+ * The input is the box's RESOLVED `texture` value (tokens already interpolated by
+ * F3's {@link resolveAttrs}) plus whether that attribute fully resolved. A texture
+ * is loaded ONLY when:
+ *   - it is present and non-empty (after trimming), AND
+ *   - it fully resolved — an unresolved value still carries a literal `{token}`,
+ *     which is not a real filename, so we paint nothing and let the box's
+ *     waiting-for-binding affordance signal the dangling binding instead.
+ *
+ * The returned name is fed verbatim to the existing `get_sprite` pipeline, which
+ * resolves it through the asset manifest (abilities/items/charms store the full
+ * filename WITH extension, e.g. `ability_bite.png`, and `resolve_asset` also falls
+ * back to `<name>.png`, so a bare stem resolves too).
+ *
+ * @param texture the resolved `attrs.texture` value, or `undefined` when absent.
+ * @param resolved whether the `texture` attribute fully resolved (no dangling
+ *   `{token}`). Pass `false` when the renderer's `unresolved` set contains
+ *   `texture`.
+ */
+export function textureToLoad(texture: string | undefined, resolved: boolean): string | null {
+  if (texture === undefined) return null;
+  if (!resolved) return null;
+  const trimmed = texture.trim();
+  return trimmed === "" ? null : trimmed;
 }

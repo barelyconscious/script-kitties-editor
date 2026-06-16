@@ -20,8 +20,8 @@
  * mount.
  */
 
-import { useRef, useState } from "react";
-import { applyDragDelta } from "../../lib/guiGeometry";
+import { useEffect, useRef, useState } from "react";
+import { applyDragDelta, computeFitScale, STAGE_HEIGHT, STAGE_WIDTH } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { DataModelPanel } from "./DataModelPanel";
@@ -62,6 +62,23 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
 
   const palette = usePalette();
 
+  // Scale-to-fit: measure the available main-content area and derive the largest
+  // uniform scale that fits the 1280×768 stage inside it (letterbox, aspect
+  // preserved). A ResizeObserver keeps it live as the window/pane resizes. The
+  // scale threads into GuiPreview (applied as the stage transform AND the drag's
+  // screen→logical divisor).
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const measure = () => setScale(computeFitScale(el.clientWidth, el.clientHeight));
+    measure();
+    const obs = new ResizeObserver(measure);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   // F7 drag-to-move: capture the dragged node's `position` at drag START so each
   // move applies the CUMULATIVE delta to that fixed base — `applyDragDelta` is
   // idempotent per-move, so writing the absolute (start-relative) delta every move
@@ -88,16 +105,34 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        <GuiPreview
-          root={root}
-          selectedNodeId={selectedNodeId}
-          onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
-          model={model}
-          palette={palette}
-          onDragStart={handleDragStart}
-          onDragMove={handleDragMove}
-        />
+      {/* Viewport: the measured main-content area. Flex-centers the scaled stage
+          (fit-and-center / letterbox). overflow-hidden clips any letterbox bleed. */}
+      <div
+        ref={viewportRef}
+        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
+      >
+        {/* Footprint box sized to the SCALED stage. A CSS transform doesn't change
+            layout size, so without this the flex centering would center the stage's
+            unscaled 1280×768 footprint. Sizing the wrapper to the scaled dimensions
+            (with the stage pinned top-left inside it) centers what's actually drawn. */}
+        <div
+          style={{
+            width: `${STAGE_WIDTH * scale}px`,
+            height: `${STAGE_HEIGHT * scale}px`,
+            flex: "none",
+          }}
+        >
+          <GuiPreview
+            root={root}
+            selectedNodeId={selectedNodeId}
+            onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
+            model={model}
+            palette={palette}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            scale={scale}
+          />
+        </div>
       </div>
       <div className="w-80 shrink-0 border-border border-l">
         <DataModelPanel

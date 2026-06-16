@@ -8,13 +8,50 @@ import { cn } from "@/lib/utils";
 // wired here — a future config-change event could call spriteCache.clear().
 const spriteCache = new Map<string, Promise<string | null>>();
 
-function loadSprite(name: string): Promise<string | null> {
+/**
+ * Fetch a sprite's data URL through the `get_sprite` Tauri command, memoized in
+ * the module-level {@link spriteCache} so a name is fetched at most once across
+ * the whole app (the `<Sprite>` component, the XGUI preview's textured boxes, and
+ * any other consumer all share this one cache). Resolves to `null` for art that
+ * is missing or fails to load.
+ */
+export function loadSprite(name: string): Promise<string | null> {
   let pending = spriteCache.get(name);
   if (!pending) {
     pending = invoke<string | null>("get_sprite", { name }).catch(() => null);
     spriteCache.set(name, pending);
   }
   return pending;
+}
+
+/**
+ * Resolve a sprite name to its data URL (or `null`), sharing the module-level
+ * {@link spriteCache} with {@link Sprite}. A `null`/empty name short-circuits to
+ * `null` without a fetch. The result arrives asynchronously: the hook returns
+ * `null` until the cached promise settles, then the data URL. Stale results from a
+ * superseded name are dropped (the effect's cancel guard), so rapid name changes
+ * never paint an out-of-date sprite.
+ *
+ * This is the reuse point for the XGUI preview's textured boxes — it shares the
+ * one cache rather than adding a second.
+ */
+export function useSprite(name: string | null | undefined): string | null {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!name) {
+      setSrc(null);
+      return;
+    }
+    let cancelled = false;
+    setSrc(null);
+    loadSprite(name).then((url) => {
+      if (!cancelled) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [name]);
+  return src;
 }
 
 export function Sprite({

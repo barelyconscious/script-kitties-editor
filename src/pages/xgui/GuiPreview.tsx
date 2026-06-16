@@ -38,6 +38,7 @@
  */
 
 import { type CSSProperties, useRef } from "react";
+import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
   type Palette,
@@ -51,7 +52,13 @@ import {
   resolveOverrides,
 } from "../../lib/guiComponentMount";
 import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
-import { computeBoxGeometry, STAGE_HEIGHT, STAGE_WIDTH } from "../../lib/guiGeometry";
+import {
+  computeBoxGeometry,
+  STAGE_HEIGHT,
+  STAGE_WIDTH,
+  screenDeltaToLogical,
+  textureToLoad,
+} from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
 import { ScopeStack } from "../../lib/guiScope";
 import { isNodeSelected, NODE_ID_ATTR, nearestNodeId } from "../../lib/guiSelection";
@@ -235,6 +242,16 @@ function GuiBox({
   const resolved = resolveAttrs(node.attrs, scope.asScope(), palette);
   const { attrs, unresolved } = resolved;
 
+  // F: texture-as-background. Load the box's RESOLVED `texture` through the shared
+  // sprite cache (only a present, fully-resolved name fetches; an empty/unresolved
+  // texture loads nothing — no broken-image icon). The data URL arrives async and
+  // is painted as the box's background image BEHIND its text/child boxes (those are
+  // the div's text node + separately-positioned child elements, both above the
+  // background layer). `pixelated` matches how <Sprite> renders the art. The hook
+  // runs BEFORE any early return so it is called unconditionally (rules of hooks).
+  const textureName = textureToLoad(attrs.texture, !unresolved.has("texture"));
+  const textureUrl = useSprite(textureName);
+
   // `visible="false"` (literal or bound) hides the box; any other value shows it.
   if (attrs.visible?.trim().toLowerCase() === "false") return null;
 
@@ -264,6 +281,13 @@ function GuiBox({
   const style: CSSProperties = {
     ...geometry,
     backgroundColor,
+    // Texture sprite as the box's background image — only set once the data URL
+    // has loaded (undefined otherwise, so no background layer / no broken icon).
+    // `100% 100%` fills the box like the runtime; pixelated keeps the pixel art crisp.
+    backgroundImage: textureUrl ? `url("${textureUrl}")` : undefined,
+    backgroundSize: textureUrl ? "100% 100%" : undefined,
+    backgroundRepeat: textureUrl ? "no-repeat" : undefined,
+    imageRendering: textureUrl ? "pixelated" : undefined,
     // Authored border wins over the editor hairline; otherwise the hairline shows.
     border: hasBorder
       ? `${borderSize && Number.isFinite(Number(borderSize)) ? Number(borderSize) : 1}px solid ${borderColor}`
@@ -451,13 +475,24 @@ export type GuiPreviewProps = {
   onDragStart?: (nodeId: string) => void;
   /**
    * F7 drag-to-move: called on each pointer move during a drag with the box's
-   * `nodeId` and the CUMULATIVE stage-pixel delta from the drag's start
+   * `nodeId` and the CUMULATIVE LOGICAL-pixel delta from the drag's start
    * (`totalDx`/`totalDy`). The host applies it to the position captured at
    * {@link onDragStart} via `applyDragDelta` and writes it back, so the offset
-   * tracks the cursor live. Stage-pixel = screen-pixel ÷ zoom; the preview is
-   * fixed 100%, so the divisor is 1 (the host owns that division).
+   * tracks the cursor live. Logical-pixel = screen-pixel ÷ scale; this component
+   * owns that division (it knows the stage's render scale), so the host receives a
+   * delta already in 1280×768 logical space.
    */
   onDragMove?: (nodeId: string, totalDx: number, totalDy: number) => void;
+  /**
+   * The render scale applied to the root stage (fit-to-container letterbox,
+   * computed by the host via `computeFitScale`). Defaults to `1` (native size). It
+   * does TWO things:
+   * it's applied as a single `transform: scale()` on the root stage (the one
+   * intentional stacking context — never on intermediate wrappers, per F5a), and
+   * it converts the drag's screen-pixel delta into logical-pixel delta (÷ scale)
+   * so dragging stays accurate when the stage is scaled.
+   */
+  scale?: number;
 };
 
 /**
@@ -481,6 +516,7 @@ export function GuiPreview({
   palette = {},
   onDragStart,
   onDragMove,
+  scale = 1,
 }: GuiPreviewProps) {
   // A root-only scope stack for the whole tree (F4). Descending into a `forEach`
   // subtree pushes the current item (see `renderChildren`/`stampForEach`); with
@@ -533,11 +569,17 @@ export function GuiPreview({
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const active = drag.current;
     if (!active || !onDragMove) return;
-    // Screen-pixel delta ÷ zoom = stage-pixel delta. The preview is fixed 100%, so
-    // the divisor is 1 and the mapping is 1:1 (no trig, no layout solver).
-    const totalDx = event.clientX - active.startX;
-    const totalDy = event.clientY - active.startY;
-    onDragMove(active.nodeId, totalDx, totalDy);
+    // Screen-pixel delta ÷ scale = logical-pixel delta. The stage is rendered with
+    // `transform: scale(scale)`, so a cursor move of N screen px corresponds to
+    // N / scale px in the 1280×768 logical space the offset is written in. The pure
+    // `screenDeltaToLogical` does the division (and guards a degenerate scale), so
+    // the drag tracks the cursor exactly at any zoom — no trig, no layout solver.
+    const { dx, dy } = screenDeltaToLogical(
+      event.clientX - active.startX,
+      event.clientY - active.startY,
+      scale,
+    );
+    onDragMove(active.nodeId, dx, dy);
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -566,6 +608,14 @@ export function GuiPreview({
         position: "relative",
         width: `${STAGE_WIDTH}px`,
         height: `${STAGE_HEIGHT}px`,
+        // Scale-to-fit: a single `transform: scale()` on the ROOT stage renders the
+        // 1280×768 logical canvas at the fit-to-container size. The stage is the one
+        // intentional stacking context, so a transform on IT is fine and intended;
+        // NEVER add transform/opacity/filter/isolation to an intermediate wrapper
+        // box (the F5a trap). `top left` origin keeps the scaled box pinned to the
+        // host's centering wrapper, which is sized to the scaled footprint.
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
         // F5b: the stage is the ONE intentional stacking context — it is the root
         // for this subtree, so every leaf's numeric z-index is interpreted relative
         // to it. `position: relative` + a numeric `z-index` forms that context; the

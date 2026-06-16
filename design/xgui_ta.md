@@ -555,6 +555,65 @@ Resolution: **flatten layering into a single stacking context.**
 
 **Why this shape (coupling summary).** The `GuiNode` tree is the single source of truth; tree/properties/preview are three projections of it joined only by `nodeId`; the DOM carries `nodeId` so the mapping is never a separate structure to maintain; rel/abs maps to `calc()` so there's no layout engine; and `layer` is applied as one global z-order to dodge stacking-context coupling. The one explicit, named coupling that remains is **structural-nesting (for percentage math) vs. global paint-order (for layer)** pulling in opposite directions — resolved by keeping intermediate wrappers out of the stacking-context game. That tension is the thing most likely to be reintroduced accidentally later; it is called out so it stays guarded.
 
+##### F5a — confirmed render contract for the layer / global z-order model (architect)
+
+The model above is correct in principle; this is the **implementation contract the F5b build task must satisfy**, pinned against how CSS stacking contexts actually form so the trap can't be silently reintroduced in React 19's DOM output. Nothing above is revised — this makes it precise and testable.
+
+**Why the model holds (the one fact that makes global z-order work).** A `z-index` competes inside the **nearest ancestor stacking context**, not inside the nearest positioned ancestor. A structural wrapper that is `position: relative` but has `z-index: auto` is positioned **but does not form a stacking context**, so it does not become that "nearest ancestor." Therefore a leaf's numeric `z-index` participates directly in the **root stage's** stacking context, no matter how deeply the leaf is nested — which is exactly what lets a deep box out-paint a shallow box in a different branch. This is the load-bearing CSS guarantee; the entire contract below exists to keep it true. (`position: relative`/`absolute` + `z-index: auto` does NOT create a stacking context; `position` + a *numeric* `z-index` DOES — that is the single trap, and it is why structural wrappers must never carry a numeric `z-index`.)
+
+**(1) The exact CSS constraints — what an intermediate / structural wrapper box must NOT have.** A "structural wrapper" is any rendered box that has descendants which participate in layering (i.e. every non-leaf preview box: the stage's children, panels containing panels, etc.). Each such wrapper MUST be `position: relative` (for the `calc()` percentage math) and MUST keep `z-index: auto`. It MUST NOT carry **any** property that forms a stacking context, because each such property re-traps that wrapper's descendants into a local context and breaks cross-branch layering. The complete prohibited-on-wrappers list (each entry independently forms a stacking context per the CSS spec):
+
+- `z-index` set to any value other than `auto` while positioned (the headline trap — keep wrappers at `z-index: auto`)
+- `position: fixed` or `position: sticky` (these form a stacking context **unconditionally**, even with `z-index: auto` — so wrappers must use `relative`/`absolute`, never fixed/sticky)
+- `opacity` less than `1`
+- `transform` other than `none` (includes `translate`/`scale`/`rotate` longhands)
+- `filter` other than `none`, and `backdrop-filter` other than `none`
+- `perspective` other than `none`
+- `clip-path` other than `none`
+- `mask` / `mask-image` / `mask-border` other than `none`
+- `mix-blend-mode` other than `normal`
+- `isolation: isolate`
+- `will-change` naming any property in this list (or any property that would itself form a stacking context) — `will-change: transform`, `will-change: opacity`, etc.
+- `contain: layout`, `contain: paint`, `contain: strict`, or `contain: content`
+
+Notes that matter for a React/Tailwind implementation:
+- **Tailwind is a silent re-introducer.** Utilities like `transform`, `transition-transform`, `scale-*`, `opacity-*` (< 100), `filter`/`blur-*`/`drop-shadow-*`, `mix-blend-*`, `isolate`, `will-change-*`, and `backdrop-*` each emit one of the prohibited properties. Do not put any of these on a structural wrapper. The MVP's selection highlight and hover affordances must be drawn **without** them on wrappers — use an inset `box-shadow`/`outline` overlay (neither forms a stacking context) rather than `transform`/`opacity`/`isolation`, or draw the highlight as a separate sibling leaf box rather than styling the wrapper.
+- **`box-shadow`, `outline`, `border`, `background`, `overflow: visible` are all safe** on wrappers — none forms a stacking context. (Per the design, no wrapper sets `overflow: hidden` anyway.)
+- **Leaf boxes are exempt from the "no numeric z-index" rule** — assigning a numeric `z-index` to a leaf is the whole mechanism. A leaf forming its own stacking context is harmless precisely because it has no layering descendants to trap.
+- **The stage is the single shared stacking context.** The 1280×768 root stage box itself SHOULD form the one intentional stacking context (it is the root for this subtree); every box's `z-index` is interpreted relative to it.
+
+**(2) The two-pass flatten-then-global-z-order approach (confirmed against React's render output).** React renders the nested DOM; the z-order is computed as derived state over the same `GuiNode` tree, not baked into the tree:
+
+1. **Flatten pass.** Walk the `GuiNode` tree in **document order** (depth-first, pre-order — the order nodes appear in the serialized XML) and produce a flat list of the boxes that participate in layering. For each, capture `{ nodeId (+ instance key for forEach stamps), resolvedLayer, docOrderIndex }`. `resolvedLayer` is the `layer` attribute **after** token/literal resolution (layer is bindable), defaulting to `0`. `docOrderIndex` is the node's position in this pre-order walk — it is the stable tiebreaker and must match serialized document order so the runtime and preview agree.
+2. **Sort + assign pass.** Stable-sort the flat list by `(resolvedLayer asc, docOrderIndex asc)`. Assign each box a `z-index` equal to its **rank in the sorted list** (a dense 0..N-1 sequence — the actual integers are irrelevant, only their relative order is). Hand that map (`nodeId[/instanceKey] → zIndex`) back to the render so each leaf `<div>` gets `style={{ zIndex }}`; structural wrappers get **no** `z-index` (stay `auto`).
+
+Why this composes with the rel/abs nested-absolute layout: the nesting exists **only** so `calc(rel * 100% + abs px)` resolves percentages against the correct parent content box. Because the wrappers carry `z-index: auto`, that nesting contributes nothing to paint order; paint order comes entirely from the flat global ranks landing in the stage's single stacking context. The two concerns (geometry via nesting, paint order via flat rank) are fully decoupled — which is the whole point. Assigning rank instead of raw `layer` as the `z-index` also sidesteps duplicate-`z-index` document-order ambiguity: equal-`layer` boxes get distinct, document-ordered ranks, so paint order is fully determined and never relies on the browser's tie-break.
+
+Forward-compat seam (restating the existing escape hatch as a build note, not a new decision): this contract is sound **only** while no panel needs `opacity`/`transform`/`filter`/etc. The moment a real feature requires one of those on a box that has layering descendants, the nested-wrapper model can no longer host global z-order, and the renderer must switch to the **flat-emit** model — emit every box as a direct child of the stage with fully-computed absolute geometry (resolve the `calc()` cascade in JS), so there are no intermediate wrappers to trap anything. F5b builds the nested model; it should keep the flatten pass (step 1) as a clean seam so a later switch to flat-emit reuses it.
+
+**(3) Concrete cross-branch regression scenario (the F5b acceptance test).** This is the exact shape that breaks the instant a wrapper silently forms a stacking context, so it must be the regression test. Two sibling branches under the stage; the deeply-nested box in the **low-document-order** branch carries a **high** `layer`, the shallow box in the **high-document-order** branch carries a **low** `layer`. Correct global ordering must let the deep-high-layer box paint **on top of** the shallow-low-layer box even though it is both deeper and earlier in document order:
+
+```xml
+<View>
+  <Panel id="branchA" position="0,0,0,0" size="0,0,400,400" backgroundColor="0,0,255,255">
+    <Panel id="a1" position="0,0,20,20" size="0,0,360,360">
+      <Panel id="a2" position="0,0,20,20" size="0,0,320,320">
+        <!-- deep + earliest in document order, but HIGH layer: must end up ON TOP -->
+        <Panel id="deepHigh" layer="10"
+               position="0,0,40,40" size="0,0,240,240" backgroundColor="255,0,0,255"/>
+      </Panel>
+    </Panel>
+  </Panel>
+  <!-- shallow + later in document order, but LOW layer: must end up UNDERNEATH where they overlap -->
+  <Panel id="shallowLow" layer="0"
+         position="0,0,120,120" size="0,0,240,240" backgroundColor="0,255,0,255"/>
+</View>
+```
+
+Expected paint order, bottom → top: `branchA` < `a1` < `a2` < `shallowLow` (layer 0, but later doc order than the branchA chain) < `deepHigh` (layer 10). The **load-bearing assertion**: in the overlap region of `deepHigh` (red) and `shallowLow` (green), **red is visible** (`deepHigh` paints above `shallowLow`). If any structural wrapper (`branchA`/`a1`/`a2`) has accidentally formed a stacking context, `deepHigh`'s `z-index` would be confined to that wrapper and `shallowLow` (a stage-level sibling) would paint over it — green visible — and the test fails. The test should assert against computed paint order / actual rendered pixel at an overlap coordinate (or against the assigned `z-index` ranks: `rank(deepHigh) > rank(shallowLow)` AND a runtime check that no `branchA`/`a1`/`a2` element is a stacking context, e.g. via `getComputedStyle` confirming `z-index: auto` and none of the prohibited properties set). A second sub-case to lock the tiebreaker: give `deepHigh` and `shallowLow` the **same** `layer` — then document order decides, and `shallowLow` (later in document order) must paint on top.
+
+**Conflict check (hard-stop gate): none found.** The global-z-order-in-one-stacking-context approach is fully compatible with the rel/abs nested-absolute layout, because the nesting uses `z-index: auto` wrappers (positioned-but-not-stacking) and the leaf z-index lands in the shared stage context. The model is workable as designed; F5b is cleared to build against this contract.
+
 #### 7. Saving
 
 Nothing auto-saves. A single **manual Save** action persists the current component — both its XML layout and its controller script. Unsaved changes are indicated (e.g. a dot on the component in the list / on the Save action).

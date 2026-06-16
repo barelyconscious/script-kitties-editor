@@ -40,6 +40,7 @@ import {
   formatCompound,
   freeformAttrs,
   isBoundField,
+  nodeHasId,
   type PropertyField,
   parseCompound,
   renameAttr,
@@ -92,6 +93,10 @@ export function PropertiesPanel() {
   };
 
   const computed = computedId(path);
+  // 475: Event nodes have NO id (task 471) — they are addressed by `name`/`handler`,
+  // not by a hierarchical id. So hide BOTH the computed read-only id and the editable
+  // local id for an Event; every other tag still shows them.
+  const hasId = nodeHasId(node.tag);
 
   return (
     <div className="flex min-h-0 flex-col border-t">
@@ -109,25 +114,29 @@ export function PropertiesPanel() {
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
-        {/* Computed read-only hierarchical id. */}
-        <FieldRow label="computed id">
-          <div
-            className="truncate rounded border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
-            title={computed || "no id set"}
-          >
-            {computed || "—"}
-          </div>
-        </FieldRow>
+        {/* Computed read-only hierarchical id + editable local id — hidden for Event
+            nodes, which have no id (475). */}
+        {hasId && (
+          <>
+            <FieldRow label="computed id">
+              <div
+                className="truncate rounded border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
+                title={computed || "no id set"}
+              >
+                {computed || "—"}
+              </div>
+            </FieldRow>
 
-        {/* Editable local id. */}
-        <FieldRow label="id">
-          <Input
-            value={node.attrs.id ?? ""}
-            onChange={(e) => setAttr("id", e.currentTarget.value)}
-            placeholder="local id"
-            className="h-7 font-mono text-xs"
-          />
-        </FieldRow>
+            <FieldRow label="id">
+              <Input
+                value={node.attrs.id ?? ""}
+                onChange={(e) => setAttr("id", e.currentTarget.value)}
+                placeholder="local id"
+                className="h-7 font-mono text-xs"
+              />
+            </FieldRow>
+          </>
+        )}
 
         {/* <Component> src — read-only basename, set via the tree picker. */}
         {node.tag === "Component" && (

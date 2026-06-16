@@ -119,6 +119,16 @@ export function isBoundField(value: string): boolean {
   return isWholeToken(value);
 }
 
+/**
+ * Whether a node of `tag` HAS an id — i.e. whether the Properties panel should show
+ * the computed read-only id + the editable local id (475). Every visual/structural
+ * tag does; `<Event>` does NOT (task 471 — events are addressed by `name`/`handler`,
+ * not by a hierarchical id), so the panel hides both id rows for it.
+ */
+export function nodeHasId(tag: GuiTag): boolean {
+  return tag !== "Event";
+}
+
 // ---------------------------------------------------------------------------
 // Per-tag field schema
 // ---------------------------------------------------------------------------
@@ -210,7 +220,9 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
  * a freeform override.
  */
 function specialAttrs(tag: GuiTag): Set<string> {
-  const special = new Set<string>(["id"]);
+  // `id` is special only for tags that HAVE one (475): an `<Event>` shows no id rows,
+  // so a stray `id` attr on one should surface as a freeform row rather than vanish.
+  const special = new Set<string>(nodeHasId(tag) ? ["id"] : []);
   if (tag === "Component") special.add("src");
   return special;
 }

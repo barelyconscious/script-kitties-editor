@@ -8,6 +8,7 @@ import {
   DEFAULT_POSITION,
   DEFAULT_SIZE,
   DRAG_CLICK_THRESHOLD_PX,
+  dragStartDecision,
   fitView,
   isDragGesture,
   MAX_SCALE,
@@ -388,6 +389,32 @@ describe("isDragGesture — drag vs. click (469)", () => {
     // Pin the contract: the gesture threshold is 3 screen px (the value the preview's
     // click-suppression reads). A change here is a behavior change, not an accident.
     expect(DRAG_CLICK_THRESHOLD_PX).toBe(3);
+  });
+});
+
+describe("dragStartDecision — drag without pre-select (475)", () => {
+  it("pressing on an UNSELECTED box arms a drag AND selects it in one gesture", () => {
+    // The core of 475: no prior click-to-select. Pressing a box that isn't selected
+    // selects it up front (so it reads as selected for the whole gesture) and arms a
+    // drag — a later move repositions it, a non-move falls through to a plain click.
+    expect(dragStartDecision("panelA", "panelB")).toEqual({ arm: true, select: true });
+  });
+
+  it("pressing on a box with NOTHING selected selects-and-arms", () => {
+    expect(dragStartDecision("panelA", null)).toEqual({ arm: true, select: true });
+  });
+
+  it("pressing on the ALREADY-selected box arms a drag but does NOT re-select", () => {
+    // It's already selected — skip the redundant select (a no-op that would re-render),
+    // but still arm so the selected box can be dragged.
+    expect(dragStartDecision("panelA", "panelA")).toEqual({ arm: true, select: false });
+  });
+
+  it("pressing on empty stage background (no box) does NOT arm or select", () => {
+    // No box under the pointer → not a drag. The trailing click clears selection
+    // (handled elsewhere); pointerdown must not arm a drag nor change selection here.
+    expect(dragStartDecision(null, "panelA")).toEqual({ arm: false, select: false });
+    expect(dragStartDecision(null, null)).toEqual({ arm: false, select: false });
   });
 });
 

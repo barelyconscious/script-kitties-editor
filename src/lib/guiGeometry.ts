@@ -254,6 +254,38 @@ export function isDragGesture(startX: number, startY: number, endX: number, endY
   );
 }
 
+/** What a pointerdown on the preview stage should do, once the pan and
+ * primary-button guards have already been cleared by the caller. */
+export type DragStartDecision = {
+  /** Arm a drag on this node, and let the host capture its base position. */
+  arm: boolean;
+  /** Call `onSelect(nodeId)` first so the box is selected for the whole gesture. */
+  select: boolean;
+};
+
+/**
+ * Decide what a (non-pan, primary-button) pointerdown on a box should do (475).
+ *
+ * Pressing on ANY box selects it AND arms a drag in the SAME gesture — there is no
+ * separate click-to-select step. The 469 click-vs-drag threshold (checked later at
+ * pointerup via {@link isDragGesture}) is what ultimately distinguishes a plain
+ * click (no move → just the up-front select) from a drag (moved → the box was
+ * repositioned). So at pointerdown we always arm the drag once a box is resolved.
+ *
+ * Inputs:
+ *  - `hitNodeId`: the nearest box id under the pointer, or `null` for empty stage
+ *    background (a press there is NOT a drag — the trailing click clears selection).
+ *  - `selectedNodeId`: the current selection; the up-front select is skipped when the
+ *    pressed box is already selected (a no-op re-select would otherwise re-render).
+ */
+export function dragStartDecision(
+  hitNodeId: string | null,
+  selectedNodeId: string | null,
+): DragStartDecision {
+  if (hitNodeId === null) return { arm: false, select: false };
+  return { arm: true, select: hitNodeId !== selectedNodeId };
+}
+
 /**
  * Convert an on-screen pixel delta into a LOGICAL (1280×768-space) pixel delta by
  * dividing out the stage's render scale. When the stage is drawn with

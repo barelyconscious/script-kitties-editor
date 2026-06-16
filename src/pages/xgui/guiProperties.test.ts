@@ -6,6 +6,7 @@ import {
   formatCompound,
   freeformAttrs,
   isBoundField,
+  nodeHasId,
   parseCompound,
   removeAttr,
   renameAttr,
@@ -178,7 +179,28 @@ describe("fieldsForTag", () => {
   });
 });
 
+describe("nodeHasId — id rows hidden for Event (475)", () => {
+  it("every visual/structural tag has an id", () => {
+    for (const tag of ["View", "Panel", "Text", "Component"] as const) {
+      expect(nodeHasId(tag)).toBe(true);
+    }
+  });
+
+  it("Event has NO id (only name + handler in Properties)", () => {
+    // Task 471 — events are addressed by name/handler, not a hierarchical id; the
+    // panel hides both the computed id and the editable id row for an Event.
+    expect(nodeHasId("Event")).toBe(false);
+  });
+});
+
 describe("freeformAttrs", () => {
+  it("a stray id on an Event surfaces as freeform, not special (475)", () => {
+    // Event has no id, so `id` is not special for it — a stray authored `id` should
+    // appear as an editable freeform row rather than vanish silently.
+    const n = node("Event", { name: "onClick", handler: "doThing", id: "oops" });
+    expect(freeformAttrs(n)).toEqual(["id"]);
+  });
+
   it("returns Component attrs that are neither schema nor special", () => {
     const n = node("Component", {
       id: "slot",

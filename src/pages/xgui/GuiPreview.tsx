@@ -54,6 +54,7 @@ import {
 import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import {
   computeBoxGeometry,
+  dragStartDecision,
   isDragGesture,
   STAGE_HEIGHT,
   STAGE_WIDTH,
@@ -468,11 +469,11 @@ export type GuiPreviewProps = {
    */
   palette?: Palette;
   /**
-   * F7 drag-to-move: called at the START of a drag on the SELECTED box, with the
-   * box's `nodeId`. The host captures the node's current `position` here so each
-   * subsequent {@link onDragMove} can be applied to that fixed base (avoiding
-   * per-move accumulation drift). Omit to disable dragging (then the preview is
-   * select-only).
+   * F7 drag-to-move: called at the START of a drag on a box (475: any box, which is
+   * selected in the same gesture — no pre-select needed), with the box's `nodeId`.
+   * The host captures the node's current `position` here so each subsequent
+   * {@link onDragMove} can be applied to that fixed base (avoiding per-move
+   * accumulation drift). Omit to disable dragging (then the preview is select-only).
    */
   onDragStart?: (nodeId: string) => void;
   /**
@@ -568,12 +569,14 @@ export function GuiPreview({
     onSelect(nearestNodeId([id]));
   };
 
-  // F7 drag-to-move: a drag begins on POINTERDOWN over the box that is already the
-  // current selection — dragging the selected box repositions it; pressing on any
-  // other box just selects it (via the click that follows) and does NOT drag. The
-  // active drag's identity + screen origin live in a ref (not state) so a move
-  // doesn't re-render the preview from the pointer handler — the only render is the
-  // store writeback the host performs from `onDragMove`.
+  // F7 drag-to-move (475): a drag begins on POINTERDOWN over ANY box — pressing on a
+  // box selects it AND arms a drag in the SAME gesture, so there is no separate
+  // click-to-select step. The 469 click-vs-drag threshold (`isDragGesture`, checked at
+  // pointerup) still distinguishes a plain click (no move past threshold → just the
+  // select that already happened on pointerdown) from a drag (moved → the box was
+  // repositioned live as the cursor moved). The active drag's identity + screen origin
+  // live in a ref (not state) so a move doesn't re-render the preview from the pointer
+  // handler — the only render is the store writeback the host performs from `onDragMove`.
   const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -592,10 +595,17 @@ export function GuiPreview({
     const target = event.target as Element;
     const box = target.closest(`[${NODE_ID_ATTR}]`);
     const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
-    // Only the ALREADY-selected box drags. A forEach instance shares the template
-    // nodeId, so this resolves to the template — dragging an instance moves the
-    // template, the documented behavior (instances are data-driven).
-    if (id === null || id !== selectedNodeId) return;
+    // 475: pressing on ANY box selects it AND arms a drag in the same gesture — no
+    // prior click-to-select. The pure decision settles both: a press on empty stage
+    // background (id === null) does NOT arm (the trailing `click` clears selection);
+    // a press on a box arms the drag, selecting it first unless it is already selected
+    // (an up-front select so the box reads as selected for the whole gesture; a plain
+    // click then re-selects as a no-op, a drag moves the now-selected box). A forEach
+    // instance shares the template nodeId, so this resolves to the template — dragging
+    // an instance moves the template, the documented behavior (instances are data-driven).
+    const decision = dragStartDecision(id, selectedNodeId);
+    if (!decision.arm || id === null) return;
+    if (decision.select) onSelect(id);
     drag.current = { nodeId: id, startX: event.clientX, startY: event.clientY };
     // Capture so moves/up are delivered here even if the cursor leaves the box.
     event.currentTarget.setPointerCapture(event.pointerId);

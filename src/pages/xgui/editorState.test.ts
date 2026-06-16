@@ -92,4 +92,27 @@ describe("editorReducer", () => {
     const state: EditorState = { ...CLEAN, open: openDoc(), dirty: true };
     expect(editorReducer(state, { type: "markSaved" }).dirty).toBe(false);
   });
+
+  it("addChildNode appends under the parent, selects the new node, and marks dirty", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const child: GuiNode = { nodeId: "new", tag: "Panel", attrs: {}, children: [] };
+    const next = editorReducer(state, { type: "addChildNode", parentNodeId: "root", child });
+    expect(next.open?.root.children[0]).toBe(child);
+    expect(next.selectedNodeId).toBe("new");
+    expect(next.dirty).toBe(true);
+  });
+
+  it("addChildNode is a no-op (no dirty, no selection move) when the parent is missing", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "root" };
+    const child: GuiNode = { nodeId: "new", tag: "Panel", attrs: {}, children: [] };
+    const next = editorReducer(state, { type: "addChildNode", parentNodeId: "ghost", child });
+    expect(next).toBe(state);
+  });
+
+  it("addChildNode is a no-op when nothing is open", () => {
+    const child: GuiNode = { nodeId: "new", tag: "Panel", attrs: {}, children: [] };
+    expect(editorReducer(CLEAN, { type: "addChildNode", parentNodeId: "x", child })).toBe(CLEAN);
+  });
 });

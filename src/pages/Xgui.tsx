@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { EditorStateProvider, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
+import { StructureTree } from "./xgui/StructureTree";
 
 export interface XguiProps {
   /**
@@ -52,10 +53,9 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
           <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
         )}
 
-        {/* SEAM: structure column (F9a tree / F9b properties / F9c events). This
-            single column sits between the component list and the main content; it
-            is intentionally empty until F9 fills it. */}
-        <StructureColumnSeam />
+        {/* Structure column. F9a fills the TREE slice (top); F9b properties and
+            F9c events stack below it in the same column (still seams for now). */}
+        <StructureColumn />
 
         {/* MAIN content — the preview (+ Data Model) for the open component. */}
         <MainContent />
@@ -65,18 +65,22 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
 }
 
 /**
- * Placeholder for the structure column (tree + properties + events). F9a/b/c
- * replace this body; the column's width and border are established here so the
- * three-column layout reads correctly in this slice.
+ * The structure column (tree + properties + events). F9a fills the TREE slice
+ * (top) with the live {@link StructureTree}; the Properties (F9b) and Events (F9c)
+ * slices remain seams below it, so the three-slice column reads correctly now and
+ * each later slice slots in without reshaping the column.
  */
-function StructureColumnSeam() {
+function StructureColumn() {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-background/40">
       <div className="border-b px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Structure
       </div>
-      <div className="flex flex-1 items-center justify-center p-4 text-center text-muted-foreground text-xs">
-        Tree, properties & events land here (F9).
+      {/* TREE slice (F9a). */}
+      <StructureTree />
+      {/* SEAM: Properties (F9b) and Events (F9c) stack below the tree. */}
+      <div className="border-t px-3 py-2 text-center text-muted-foreground/60 text-xs">
+        Properties & events land here (F9b/F9c).
       </div>
     </aside>
   );

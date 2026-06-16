@@ -9,8 +9,9 @@
  * Holds the Data Model panel's text and the LAST GOOD parsed model (so an invalid
  * keystroke surfaces an error without blanking the preview), subscribes to the
  * module-cached palette so a recolor updates the preview, and threads both into
- * {@link GuiPreview}. Selection is lifted here so it stays the single shared state
- * the tree/properties panels will also read (F8/F9).
+ * {@link GuiPreview}. Selection is read from the SHARED editor store (F9a) — the
+ * preview's click and the structure tree's click both drive the one
+ * `selectedNodeId`, so highlighting syncs both ways with no local copy.
  *
  * This is the smallest composition that satisfies the F3 acceptance criteria
  * "editing the Data Model JSON updates the preview" and "recoloring a palette entry
@@ -23,6 +24,7 @@ import { useState } from "react";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { DataModelPanel } from "./DataModelPanel";
+import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
 
 export type GuiPreviewHostProps = {
@@ -49,7 +51,11 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
       return {};
     }
   });
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // Selection is the SHARED store's single `selectedNodeId` (F9a): a preview click
+  // dispatches `select`, the structure tree dispatches the same, and both surfaces
+  // highlight off this one value — sync is free because there is one source.
+  const { state, dispatch } = useEditorStore();
+  const selectedNodeId = state.selectedNodeId;
 
   const palette = usePalette();
 
@@ -59,7 +65,7 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
         <GuiPreview
           root={root}
           selectedNodeId={selectedNodeId}
-          onSelect={setSelectedNodeId}
+          onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           model={model}
           palette={palette}
         />

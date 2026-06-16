@@ -28,8 +28,12 @@
  *    `closeComponent` clears it. SELECTION is here too (`select`) so the preview
  *    highlights immediately; the tree (F9a) writes the same `selectedNodeId`.
  *  • F9a (tree + selection) — reads/writes `selectedNodeId` via `select`, and
- *    MUTATES the node tree (add/remove/reparent child) via `replaceRoot` (or a
- *    finer `mutateTree` action added there). Any tree mutation marks dirty.
+ *    ADDS a child to the node tree via `addChildNode` (a finer, intent-named
+ *    tree-mutation action layered on the same dirty discipline as `replaceRoot`;
+ *    the immutable append itself lives in the pure `guiTreeEdit` module so it is
+ *    unit-tested without the store). Any tree mutation marks dirty. Delete /
+ *    reparent are deferred (task 452 is ADD only), so no remove/move action yet.
+ *    `replaceRoot` remains the wholesale escape hatch for F9b/F7 writebacks.
  *  • F9b (properties) — edits a node's `attrs`; add a `setNodeAttrs` action that
  *    replaces one node's attrs by nodeId and marks dirty. (Left as a thin future
  *    action rather than pre-built, to avoid an unused abstraction.)
@@ -52,6 +56,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
+import { addChild } from "./guiTreeEdit";
 
 /** Which main-content tab is showing (design section 4). */
 export type EditorTab = "view" | "controller";
@@ -106,6 +111,13 @@ export type EditorAction =
   | { type: "setModelText"; text: string }
   /** Replace the node tree wholesale after a structural edit — marks dirty. */
   | { type: "replaceRoot"; root: GuiNode }
+  /**
+   * Add `child` as the last child of `parentNodeId` (F9a add-child) and select
+   * the new node — marks dirty. A no-op (and no selection change) if nothing is
+   * open or the parent is not found. The immutable append is delegated to the
+   * pure {@link addChild} so the mutation is tested off-store.
+   */
+  | { type: "addChildNode"; parentNodeId: string; child: GuiNode }
   /** Clear the dirty flag after a successful save (F11). */
   | { type: "markSaved" };
 
@@ -145,6 +157,21 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "replaceRoot":
       if (!state.open) return state;
       return { ...state, open: { ...state.open, root: action.root }, dirty: true };
+    case "addChildNode": {
+      if (!state.open) return state;
+      const nextRoot = addChild(state.open.root, action.parentNodeId, action.child);
+      // Parent not found → addChild returns the SAME reference → no-op (don't
+      // dirty or move selection on a phantom add).
+      if (nextRoot === state.open.root) return state;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        // Select the freshly-added node so it highlights in the tree and preview
+        // immediately — the user sees what they just added.
+        selectedNodeId: action.child.nodeId,
+        dirty: true,
+      };
+    }
     case "markSaved":
       return { ...state, dirty: false };
     default: {

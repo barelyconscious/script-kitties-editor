@@ -35,6 +35,10 @@ export function buildOpenComponent(ref: GuiComponentRef, xml: string): OpenCompo
     controllerFileName: resolveControllerName(root, ref),
     root,
     modelText: "{}",
+    // Controller text is lazy: the Controller tab (F10) reads it from disk via
+    // `get_script` on first view (seeding it through `loadControllerText`), so a
+    // freshly-opened component starts with no buffer.
+    controllerText: null,
   };
 }
 

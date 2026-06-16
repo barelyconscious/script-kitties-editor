@@ -11,6 +11,7 @@ function open(): OpenComponent {
     controllerFileName: null,
     root,
     modelText: "{}",
+    controllerText: null,
   };
 }
 

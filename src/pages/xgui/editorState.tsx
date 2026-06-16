@@ -44,9 +44,14 @@
  *    the `removeNode` action (the immutable detach lives in the pure
  *    `guiTreeEdit.removeNode`). The events panel is the only caller of `removeNode`
  *    today — general tree delete stays deferred.
- *  • F10 (controller tab) — `activeTab` already toggles View/Controller; the
- *    controller TEXT + its dirty contribution land via a `setControllerText`
- *    action (and `controllerFileName` is already carried for the Add-script flow).
+ *  • F10 (controller tab) — `activeTab` toggles View/Controller. The controller
+ *    TEXT lives in `open.controllerText` (`null` = not-yet-loaded). Three actions
+ *    feed it: `loadControllerText` seats disk contents WITHOUT dirtying (the tab
+ *    lazily reads an existing controller via `get_script`); `setControllerText`
+ *    holds a user edit and DIRTIES (F11 persists it); `addController` is the
+ *    Add-script flow — it sets `<View controller="…">`, seeds an EMPTY buffer,
+ *    flips to the controller tab, and dirties, all WITHOUT touching disk (the
+ *    `.lua` file is created later by F11's Save, consistent with manual-save).
  *  • F11 (dirty + save) — reads `dirty`; on a successful `save_component` calls
  *    `markSaved` to clear it. The reducer already centralizes dirty so save is a
  *    single clear.
@@ -85,6 +90,16 @@ export type OpenComponent = {
   root: GuiNode;
   /** Raw Data Model JSON text driving the preview's `{token}` resolution. */
   modelText: string;
+  /**
+   * The controller `.lua` working draft for the Controller tab (F10), held here
+   * so F11's Save can persist it alongside the XML. `null` means "not yet
+   * loaded" — a component with a `controllerFileName` reads its text from disk
+   * (via `get_script`) on first view of the Controller tab and seeds it through
+   * `loadControllerText` (which does NOT dirty). A controller-less component
+   * stays `null` until Add-script seeds an empty buffer through `addController`.
+   * Once non-null, user edits flow through `setControllerText` (which dirties).
+   */
+  controllerText: string | null;
 };
 
 /** The whole editor store state. */
@@ -138,6 +153,28 @@ export type EditorAction =
    * removal today; general tree delete remains deferred.
    */
   | { type: "removeNode"; nodeId: string }
+  /**
+   * Seat the controller's on-disk contents into the working draft WITHOUT marking
+   * dirty (F10 lazy-load: the Controller tab read an existing controller via
+   * `get_script`). A no-op if nothing is open. Distinct from `setControllerText`
+   * precisely because loading what is already saved must not look like an edit.
+   */
+  | { type: "loadControllerText"; text: string }
+  /**
+   * Update the controller working draft from a user edit (F10) — marks dirty. A
+   * no-op if nothing is open. F11's Save reads `open.controllerText` and persists
+   * it to `open.controllerFileName`.
+   */
+  | { type: "setControllerText"; text: string }
+  /**
+   * Add-script flow (F10): attach a brand-new controller to a controller-less
+   * component WITHOUT touching disk. Sets the root `<View controller="{name}">`
+   * attribute, records `controllerFileName`, seeds an EMPTY controller buffer,
+   * flips to the controller tab, and marks dirty. The `.lua` file itself is
+   * created later by F11's Save (manual-save model). A no-op if nothing is open
+   * or the open component already has a controller.
+   */
+  | { type: "addController"; fileName: string }
   /** Clear the dirty flag after a successful save (F11). */
   | { type: "markSaved" };
 
@@ -211,6 +248,40 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         open: { ...state.open, root: nextRoot },
         // If the removed node was selected, drop the dangling selection.
         selectedNodeId: state.selectedNodeId === action.nodeId ? null : state.selectedNodeId,
+        dirty: true,
+      };
+    }
+    case "loadControllerText":
+      // Lazy-load of the saved controller: it IS the on-disk state, so seating it
+      // must NOT make the component look unsaved (mirrors `setModelText`).
+      if (!state.open) return state;
+      return { ...state, open: { ...state.open, controllerText: action.text } };
+    case "setControllerText":
+      if (!state.open) return state;
+      return { ...state, open: { ...state.open, controllerText: action.text }, dirty: true };
+    case "addController": {
+      if (!state.open) return state;
+      // Already has a controller → Add-script is meaningless; leave it be.
+      if (state.open.controllerFileName) return state;
+      const root = state.open.root;
+      // Set the <View controller="…"> attribute on the root (the authoritative
+      // reference F11 / the runtime read). Only a <View> root carries it.
+      const nextRoot =
+        root.tag === "View"
+          ? setNodeAttrs(root, root.nodeId, { ...root.attrs, controller: action.fileName })
+          : root;
+      return {
+        ...state,
+        open: {
+          ...state.open,
+          root: nextRoot,
+          controllerFileName: action.fileName,
+          // Seed an EMPTY buffer — the new controller has no contents until typed;
+          // F11's Save writes whatever this holds to the new `.lua`.
+          controllerText: "",
+        },
+        // Show the user the editor they just created.
+        activeTab: "controller",
         dirty: true,
       };
     }

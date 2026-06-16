@@ -13,6 +13,7 @@ function openDoc(overrides: Partial<OpenComponent> = {}): OpenComponent {
     controllerFileName: null,
     root: node(),
     modelText: "{}",
+    controllerText: null,
     ...overrides,
   };
 }
@@ -201,6 +202,98 @@ describe("editorReducer", () => {
     expect(next.open?.root.children[0].attrs).toEqual({
       name: "Battle:OnCreatureDied",
       handler: "doesNotExistYet",
+    });
+  });
+
+  describe("controller (F10)", () => {
+    it("loadControllerText seats the on-disk text WITHOUT marking dirty", () => {
+      const state: EditorState = {
+        ...CLEAN,
+        open: openDoc({ controllerFileName: "bag_controller.lua", controllerText: null }),
+      };
+      const next = editorReducer(state, {
+        type: "loadControllerText",
+        text: "function onLoad() end",
+      });
+      expect(next.open?.controllerText).toBe("function onLoad() end");
+      expect(next.dirty).toBe(false);
+    });
+
+    it("loadControllerText is a no-op when nothing is open", () => {
+      expect(editorReducer(CLEAN, { type: "loadControllerText", text: "x" })).toBe(CLEAN);
+    });
+
+    it("setControllerText updates the draft and marks dirty", () => {
+      const state: EditorState = {
+        ...CLEAN,
+        open: openDoc({ controllerFileName: "bag_controller.lua", controllerText: "" }),
+      };
+      const next = editorReducer(state, { type: "setControllerText", text: "print('hi')" });
+      expect(next.open?.controllerText).toBe("print('hi')");
+      expect(next.dirty).toBe(true);
+    });
+
+    it("setControllerText is a no-op when nothing is open", () => {
+      expect(editorReducer(CLEAN, { type: "setControllerText", text: "x" })).toBe(CLEAN);
+    });
+
+    it("addController sets the <View controller> attr, seeds an empty buffer, flips tab, dirties", () => {
+      const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+      const state: EditorState = {
+        ...CLEAN,
+        open: openDoc({ root, controllerFileName: null, controllerText: null }),
+        activeTab: "view",
+      };
+      const next = editorReducer(state, {
+        type: "addController",
+        fileName: "bag_controller.lua",
+      });
+      expect(next.open?.root.attrs.controller).toBe("bag_controller.lua");
+      expect(next.open?.controllerFileName).toBe("bag_controller.lua");
+      expect(next.open?.controllerText).toBe("");
+      expect(next.activeTab).toBe("controller");
+      expect(next.dirty).toBe(true);
+    });
+
+    it("addController preserves the View's existing attributes", () => {
+      const root: GuiNode = {
+        nodeId: "root",
+        tag: "View",
+        attrs: { id: "bag", layer: "2" },
+        children: [],
+      };
+      const state: EditorState = {
+        ...CLEAN,
+        open: openDoc({ root, controllerFileName: null }),
+      };
+      const next = editorReducer(state, { type: "addController", fileName: "c.lua" });
+      expect(next.open?.root.attrs).toEqual({ id: "bag", layer: "2", controller: "c.lua" });
+    });
+
+    it("addController is a no-op when the component already has a controller", () => {
+      const state: EditorState = {
+        ...CLEAN,
+        open: openDoc({ controllerFileName: "existing.lua" }),
+      };
+      const next = editorReducer(state, { type: "addController", fileName: "new.lua" });
+      expect(next).toBe(state);
+    });
+
+    it("addController is a no-op when nothing is open", () => {
+      expect(editorReducer(CLEAN, { type: "addController", fileName: "x.lua" })).toBe(CLEAN);
+    });
+
+    it("open seats the component's own controller fields and clears dirty", () => {
+      const next = editorReducer(CLEAN, {
+        type: "open",
+        component: openDoc({
+          controllerFileName: "bag_controller.lua",
+          controllerText: "loaded",
+        }),
+      });
+      expect(next.open?.controllerFileName).toBe("bag_controller.lua");
+      expect(next.open?.controllerText).toBe("loaded");
+      expect(next.dirty).toBe(false);
     });
   });
 });

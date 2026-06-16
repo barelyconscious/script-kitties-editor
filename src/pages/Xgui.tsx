@@ -18,12 +18,14 @@
  */
 
 import { PanelLeftOpen } from "lucide-react";
+import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
+import { ControllerTab } from "./xgui/ControllerTab";
 import { EventsPanel } from "./xgui/EventsPanel";
-import { EditorStateProvider, useEditorStore } from "./xgui/editorState";
+import { EditorStateProvider, type EditorTab, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
@@ -104,20 +106,30 @@ function StructureColumn() {
  * mounts at the marked seam.
  */
 function MainContent() {
-  const { state } = useEditorStore();
+  const { state, dispatch } = useEditorStore();
   const open = state.open;
+  const activeTab = state.activeTab;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* SEAM: View / Controller tab bar (F10). A static "View" label stands in
-          until F10 makes it a real toggle bound to `state.activeTab`. */}
+      {/* View / Controller tab bar (F10) — a real toggle bound to `activeTab`.
+          The structure column (a sibling, see StructureColumn) stays visible in
+          both tabs by construction; only this main pane swaps. */}
       <div className="flex shrink-0 items-center gap-1 border-b px-3 py-1.5">
-        <span className={cn("rounded px-2 py-1 text-xs", "bg-muted font-medium text-foreground")}>
+        <TabButton
+          tab="view"
+          active={activeTab === "view"}
+          onSelect={() => dispatch({ type: "setTab", tab: "view" })}
+        >
           View
-        </span>
-        <span className="rounded px-2 py-1 text-muted-foreground/50 text-xs" title="Coming in F10">
+        </TabButton>
+        <TabButton
+          tab="controller"
+          active={activeTab === "controller"}
+          onSelect={() => dispatch({ type: "setTab", tab: "controller" })}
+        >
           Controller
-        </span>
+        </TabButton>
         {open && (
           <span
             className="ml-auto truncate font-mono text-muted-foreground text-xs"
@@ -130,11 +142,18 @@ function MainContent() {
 
       <div className="relative min-h-0 flex-1">
         {mainContentMode(open) === "preview" && open ? (
-          // Remount the host per open component (keyed by path) so its internal
-          // Data Model + selection state resets cleanly when a different component
-          // is opened. F3's host owns that local state today; F9/F10 will lift
-          // selection into the shared store and this key can be reconsidered.
-          <GuiPreviewHost key={open.path} root={open.root} initialModelText={open.modelText} />
+          // Both tab panes stay MOUNTED and toggle visibility (like the Workbench's
+          // tabs) so Monaco's editor state and the preview's local Data Model /
+          // selection survive flipping tabs. Each is keyed by path so opening a
+          // different component resets cleanly.
+          <>
+            <div className={cn("absolute inset-0", activeTab !== "view" && "hidden")}>
+              <GuiPreviewHost key={open.path} root={open.root} initialModelText={open.modelText} />
+            </div>
+            <div className={cn("absolute inset-0", activeTab !== "controller" && "hidden")}>
+              <ControllerTab key={open.path} />
+            </div>
+          </>
         ) : (
           // Empty / first-run (F12): no component open — and an empty `gui/` folder
           // reaches here the same way (nothing to pick → nothing open). Show the
@@ -143,6 +162,37 @@ function MainContent() {
         )}
       </div>
     </div>
+  );
+}
+
+/** A single main-content tab toggle. */
+function TabButton({
+  tab,
+  active,
+  onSelect,
+  children,
+}: {
+  tab: EditorTab;
+  active: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      data-tab={tab}
+      onClick={onSelect}
+      className={cn(
+        "rounded px-2 py-1 text-xs transition-colors",
+        active
+          ? "bg-muted font-medium text-foreground"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

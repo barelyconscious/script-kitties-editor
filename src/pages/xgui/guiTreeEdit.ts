@@ -131,6 +131,49 @@ export function addChild(root: GuiNode, parentNodeId: string, child: GuiNode): G
 }
 
 /**
+ * Replace the `attrs` of the node identified by `nodeId`, returning a NEW root
+ * (immutable — untouched subtrees are reused by reference, so React diffs cheaply
+ * and the store's `setNodeAttrs` reducer swaps one object). The node's `tag`,
+ * `nodeId`, and `children` are preserved; only `attrs` is swapped.
+ *
+ * If `nodeId` is not found, the original root is returned UNCHANGED (same
+ * reference) — callers (and the store) treat an unchanged reference as a no-op
+ * (don't dirty on a phantom write). This is the Properties-panel (F9b) and
+ * drag-writeback (F7) write path: both edit one node's attrs by id.
+ */
+export function setNodeAttrs(
+  root: GuiNode,
+  nodeId: string,
+  attrs: Record<string, string>,
+): GuiNode {
+  if (root.nodeId === nodeId) {
+    return { ...root, attrs };
+  }
+  let changed = false;
+  const children = root.children.map((c) => {
+    const next = setNodeAttrs(c, nodeId, attrs);
+    if (next !== c) changed = true;
+    return next;
+  });
+  return changed ? { ...root, children } : root;
+}
+
+/**
+ * The chain of nodes from the root DOWN TO (and including) the node identified by
+ * `nodeId`, or `null` if the node is not in the tree. Used to derive the computed
+ * hierarchical id (the parent chain of authored `id` attrs) for the Properties
+ * panel — index 0 is the root `<View>`, the last entry is the target node.
+ */
+export function nodePath(root: GuiNode, nodeId: string): GuiNode[] | null {
+  if (root.nodeId === nodeId) return [root];
+  for (const child of root.children) {
+    const sub = nodePath(child, nodeId);
+    if (sub) return [root, ...sub];
+  }
+  return null;
+}
+
+/**
  * Find a node by `nodeId` anywhere in the tree, or `null`. The structure panel
  * uses it to resolve the right-clicked node's tag for the add-child menu.
  */

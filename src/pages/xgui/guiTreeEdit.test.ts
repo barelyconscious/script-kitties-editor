@@ -9,6 +9,8 @@ import {
   filterPickItems,
   findNode,
   makeChildNode,
+  nodePath,
+  setNodeAttrs,
 } from "./guiTreeEdit";
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
@@ -139,6 +141,74 @@ describe("addChild — immutable tree mutation", () => {
     const root = node("root", "View", [node("a", "Panel")]);
     addChild(root, "a", makeChildNode("Text"));
     expect(root.children[0].children).toEqual([]);
+  });
+});
+
+describe("setNodeAttrs — immutable attr replace", () => {
+  function attrNode(
+    nodeId: string,
+    tag: GuiTag,
+    attrs: Record<string, string>,
+    children: GuiNode[] = [],
+  ): GuiNode {
+    return { nodeId, tag, attrs, children };
+  }
+
+  it("replaces the matching node's attrs, preserving tag/nodeId/children", () => {
+    const child = attrNode("c", "Text", {});
+    const root = attrNode("root", "View", { id: "view" }, [
+      attrNode("a", "Panel", { id: "old" }, [child]),
+    ]);
+    const next = setNodeAttrs(root, "a", { id: "new", position: "0,0,0,0" });
+    const a = next.children[0];
+    expect(a.attrs).toEqual({ id: "new", position: "0,0,0,0" });
+    expect(a.tag).toBe("Panel");
+    expect(a.nodeId).toBe("a");
+    expect(a.children[0]).toBe(child); // untouched subtree reused
+  });
+
+  it("replaces the root's attrs when the root matches", () => {
+    const root = attrNode("root", "View", { id: "view" });
+    const next = setNodeAttrs(root, "root", { id: "view", controller: "x.lua" });
+    expect(next.attrs).toEqual({ id: "view", controller: "x.lua" });
+    expect(next).not.toBe(root);
+  });
+
+  it("returns the SAME root reference (no-op) when the node is not found", () => {
+    const root = attrNode("root", "View", {}, [attrNode("a", "Panel", {})]);
+    expect(setNodeAttrs(root, "missing", { id: "x" })).toBe(root);
+  });
+
+  it("reuses untouched sibling subtrees by reference", () => {
+    const sib = attrNode("sib", "Panel", { id: "sib" });
+    const root = attrNode("root", "View", {}, [attrNode("a", "Panel", { id: "a" }), sib]);
+    const next = setNodeAttrs(root, "a", { id: "changed" });
+    expect(next.children[1]).toBe(sib);
+    expect(next.children[0]).not.toBe(root.children[0]);
+  });
+
+  it("does not mutate the original node's attrs", () => {
+    const root = attrNode("root", "View", {}, [attrNode("a", "Panel", { id: "a" })]);
+    setNodeAttrs(root, "a", { id: "b" });
+    expect(root.children[0].attrs).toEqual({ id: "a" });
+  });
+});
+
+describe("nodePath", () => {
+  it("returns the root→target chain", () => {
+    const target = node("deep", "Text");
+    const root = node("root", "View", [node("a", "Panel", [target])]);
+    const path = nodePath(root, "deep");
+    expect(path?.map((n) => n.nodeId)).toEqual(["root", "a", "deep"]);
+  });
+
+  it("returns just the root when the root is the target", () => {
+    const root = node("root", "View");
+    expect(nodePath(root, "root")).toEqual([root]);
+  });
+
+  it("returns null when the node is absent", () => {
+    expect(nodePath(node("root", "View"), "nope")).toBeNull();
   });
 });
 

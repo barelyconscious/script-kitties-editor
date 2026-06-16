@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { EditorStateProvider, useEditorStore } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
+import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
 
 export interface XguiProps {
@@ -66,9 +67,14 @@ export default function Xgui({ componentListCollapsed }: XguiProps) {
 
 /**
  * The structure column (tree + properties + events). F9a fills the TREE slice
- * (top) with the live {@link StructureTree}; the Properties (F9b) and Events (F9c)
- * slices remain seams below it, so the three-slice column reads correctly now and
- * each later slice slots in without reshaping the column.
+ * (top) with the live {@link StructureTree}; F9b fills the PROPERTIES slice
+ * (middle) with the live {@link PropertiesPanel} reflecting the current
+ * selection; the Events (F9c) slice remains a seam below it, so the three-slice
+ * column reads correctly now and the last slice slots in without reshaping it.
+ *
+ * The tree gets the upper half (its own scroll), the properties panel the lower
+ * half (its own scroll), so a deep tree and a long property list each scroll
+ * independently rather than fighting for the column's height.
  */
 function StructureColumn() {
   return (
@@ -76,11 +82,17 @@ function StructureColumn() {
       <div className="border-b px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Structure
       </div>
-      {/* TREE slice (F9a). */}
-      <StructureTree />
-      {/* SEAM: Properties (F9b) and Events (F9c) stack below the tree. */}
-      <div className="border-t px-3 py-2 text-center text-muted-foreground/60 text-xs">
-        Properties & events land here (F9b/F9c).
+      {/* TREE slice (F9a) — upper region, scrolls independently. */}
+      <div className="flex min-h-0 flex-[1.2] flex-col">
+        <StructureTree />
+      </div>
+      {/* PROPERTIES slice (F9b) — lower region, scrolls independently. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <PropertiesPanel />
+      </div>
+      {/* SEAM: Events (F9c) stacks below the properties panel. */}
+      <div className="border-t px-3 py-1.5 text-center text-[10px] text-muted-foreground/50">
+        Events land here (F9c).
       </div>
     </aside>
   );

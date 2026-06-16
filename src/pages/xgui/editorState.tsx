@@ -34,9 +34,11 @@
  *    unit-tested without the store). Any tree mutation marks dirty. Delete /
  *    reparent are deferred (task 452 is ADD only), so no remove/move action yet.
  *    `replaceRoot` remains the wholesale escape hatch for F9b/F7 writebacks.
- *  • F9b (properties) — edits a node's `attrs`; add a `setNodeAttrs` action that
- *    replaces one node's attrs by nodeId and marks dirty. (Left as a thin future
- *    action rather than pre-built, to avoid an unused abstraction.)
+ *  • F9b (properties) — edits a node's `attrs` via the `setNodeAttrs` action,
+ *    which replaces one node's attrs by nodeId and marks dirty (the immutable
+ *    replace lives in the pure `guiTreeEdit.setNodeAttrs` so it is unit-tested
+ *    off-store). A nodeId that is not found is a no-op (no dirty). F7 (drag)
+ *    writes a moved node's `position` through this SAME action.
  *  • F9c (events) — `<Event>` children of `<View>` are ordinary nodes in `root`,
  *    so add/remove flow through the same tree-mutation action as F9a.
  *  • F10 (controller tab) — `activeTab` already toggles View/Controller; the
@@ -45,8 +47,8 @@
  *  • F11 (dirty + save) — reads `dirty`; on a successful `save_component` calls
  *    `markSaved` to clear it. The reducer already centralizes dirty so save is a
  *    single clear.
- *  • F7 (drag) — writes a moved node's `position` via the same node-attr / tree
- *    mutation path as F9b/F9a; marks dirty. No new state, just another writer.
+ *  • F7 (drag) — writes a moved node's `position` via the same `setNodeAttrs`
+ *    node-attr path as F9b; marks dirty. No new state, just another writer.
  *
  * Render note: only ONE component is open at a time (the design's single
  * structure column / single preview), so this store holds a single document, not
@@ -56,7 +58,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
-import { addChild } from "./guiTreeEdit";
+import { addChild, setNodeAttrs } from "./guiTreeEdit";
 
 /** Which main-content tab is showing (design section 4). */
 export type EditorTab = "view" | "controller";
@@ -118,6 +120,13 @@ export type EditorAction =
    * pure {@link addChild} so the mutation is tested off-store.
    */
   | { type: "addChildNode"; parentNodeId: string; child: GuiNode }
+  /**
+   * Replace the `attrs` of the node identified by `nodeId` (F9b properties edit /
+   * F7 drag writeback) — marks dirty. A no-op (no dirty) if nothing is open or the
+   * node is not found. The immutable replace is delegated to the pure
+   * {@link setNodeAttrs} so the mutation is tested off-store.
+   */
+  | { type: "setNodeAttrs"; nodeId: string; attrs: Record<string, string> }
   /** Clear the dirty flag after a successful save (F11). */
   | { type: "markSaved" };
 
@@ -171,6 +180,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         selectedNodeId: action.child.nodeId,
         dirty: true,
       };
+    }
+    case "setNodeAttrs": {
+      if (!state.open) return state;
+      const nextRoot = setNodeAttrs(state.open.root, action.nodeId, action.attrs);
+      // Node not found → setNodeAttrs returns the SAME reference → no-op (don't
+      // dirty on a phantom write).
+      if (nextRoot === state.open.root) return state;
+      return { ...state, open: { ...state.open, root: nextRoot }, dirty: true };
     }
     case "markSaved":
       return { ...state, dirty: false };

@@ -115,4 +115,32 @@ describe("editorReducer", () => {
     const child: GuiNode = { nodeId: "new", tag: "Panel", attrs: {}, children: [] };
     expect(editorReducer(CLEAN, { type: "addChildNode", parentNodeId: "x", child })).toBe(CLEAN);
   });
+
+  it("setNodeAttrs replaces the node's attrs and marks dirty", () => {
+    const child: GuiNode = { nodeId: "c", tag: "Panel", attrs: { id: "old" }, children: [] };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [child] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(state, {
+      type: "setNodeAttrs",
+      nodeId: "c",
+      attrs: { id: "new", position: "0,0,0,0" },
+    });
+    expect(next.open?.root.children[0].attrs).toEqual({ id: "new", position: "0,0,0,0" });
+    expect(next.dirty).toBe(true);
+  });
+
+  it("setNodeAttrs is a no-op (no dirty) when the node is missing", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(state, {
+      type: "setNodeAttrs",
+      nodeId: "ghost",
+      attrs: { id: "x" },
+    });
+    expect(next).toBe(state);
+  });
+
+  it("setNodeAttrs is a no-op when nothing is open", () => {
+    expect(editorReducer(CLEAN, { type: "setNodeAttrs", nodeId: "x", attrs: {} })).toBe(CLEAN);
+  });
 });

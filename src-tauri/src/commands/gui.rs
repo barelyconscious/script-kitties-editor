@@ -25,13 +25,17 @@ pub fn get_component(name: String, dal: State<Dal>) -> Result<Option<String>, St
     dal.get_component(&name)
 }
 
-/// Save an already-registered component's `.xml` layout and (if present) its
-/// controller `.lua` together — the GUI editor's manual Save. `name` is the bare
-/// component basename (resolved to `{name}.xml` via the manifest); `controller`,
-/// when present, is `[filename, contents]`. Writes the controller first, then the
-/// XML; surfaces a single error if either write fails (so the caller keeps its
-/// dirty state). Refuses any unregistered component or controller — creation is
-/// `create_component`, not this — and never touches the manifest.
+/// Save an existing component's `.xml` layout and (if present) its controller
+/// `.lua` together — the GUI editor's manual Save, with register-on-save (option
+/// A). `name` is the bare component basename; the component is located by its
+/// on-disk path via the gui tree (not the manifest), and `controller`, when
+/// present, is `[filename, contents]` written alongside it (created if it doesn't
+/// exist yet — the Add-script case). The `.xml` and controller are each REGISTERED
+/// in `assets.json` if absent (register-if-absent, never duplicated). Writes files
+/// first, manifest inserts last/adjacent, rolling back to zero residue on failure;
+/// surfaces a single error so the caller keeps its dirty state. Refuses only a
+/// component that exists nowhere in the gui tree — first-time creation from scratch
+/// is `create_component`.
 #[tauri::command]
 pub fn save_component(
     name: String,

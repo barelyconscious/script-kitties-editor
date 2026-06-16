@@ -129,81 +129,158 @@ impl Dal {
         p
     }
 
-    /// Overwrite an **already-registered** component's `.xml` layout and, if
-    /// present, its controller `.lua` together. This is the per-component "Save"
-    /// of the GUI editor (design section 7) — the manual save that persists the
-    /// open component's XML and its controller script in one action.
+    /// Save an **existing** component's `.xml` layout and, if present, its
+    /// controller `.lua` — **registering either in `assets.json` on first save**
+    /// (option A, "register-on-save"; design `xgui_ta.md`). This is the
+    /// per-component "Save" of the GUI editor (design section 7).
     ///
-    /// `name` is the component's bare basename (`"bag"`), resolved to `"bag.xml"`
-    /// through the asset manifest exactly as the runtime resolves `<Component
-    /// src>`. `controller`, when `Some`, is `(filename, contents)` — e.g.
-    /// `("bag_controller.lua", "…")` — and the filename is likewise resolved
-    /// through the manifest.
+    /// `name` is the component's bare basename (`"bag"`). The component is located
+    /// through the **gui tree** (the on-disk walk) — the same source of truth the
+    /// read path (`get_component`) and the component list use — NOT through the
+    /// asset manifest. The `.xml` is written at its real on-disk path; the
+    /// controller `.lua` (when `controller` is `Some((filename, contents))`) is
+    /// written **alongside it** in the same folder, **creating the file if it does
+    /// not exist yet** (the F10 Add-script case, where the `<View controller>` attr
+    /// is set but no `.lua` was authored).
     ///
-    /// **Save is a separate door from create.** Like [`Dal::save_script`] versus
-    /// [`Dal::create_script`], `save_component` REFUSES any `name` (or controller
-    /// filename) that does not already resolve through `assets.json` — it never
-    /// creates a not-yet-registered component, never inserts a manifest entry, and
-    /// never touches the manifest at all. First-time creation is `create_component`
-    /// (design section (1)), which keeps the two doors distinct.
+    /// **Why register-on-save (not manifest-gated).** Existing gui component `.xml`
+    /// files are not in `assets.json` (the manifest walk only catalogues
+    /// `.lua`/`.png`/`.json`, never `.xml`), so the old manifest-gated save refused
+    /// every real component. Product intent is that gui files *must* be in
+    /// `assets.json`, so saving now **registers** the `.xml` (and the controller)
+    /// when absent rather than refusing. Registration is **register-if-absent**: an
+    /// already-registered entry is never duplicated.
     ///
-    /// **Write order: controller first, then XML** (design risk #5), mirroring the
-    /// "land the rollback-able-ordered thing first" discipline of `create_script`.
-    /// Both writes are individually atomic ([`atomic_write`] — temp + rename), so
-    /// no single file is ever left half-written. The pre-flight resolution of BOTH
-    /// targets happens *before* either write, so a missing registration is refused
-    /// up front (nothing written). If a write nonetheless fails, the **single**
-    /// error is surfaced and propagated — the operation reports failure rather than
-    /// masquerading as success, so the caller keeps its dirty indicator set and the
-    /// user knows the save did not fully land. (There is no manifest step to roll
-    /// back; the only persistence here is the two file overwrites.)
+    /// **Save is still a separate door from create.** Like [`Dal::save_script`]
+    /// versus [`Dal::create_script`], `save_component` does NOT create from scratch:
+    /// a `name` that exists nowhere in the gui tree (no `.xml` on disk) is refused —
+    /// first-time creation is [`Dal::create_component`]. What save *does* generalize
+    /// is no longer requiring prior manifest registration.
+    ///
+    /// **Ordering + rollback (the `create_component` discipline).** File-bearing
+    /// writes first; the rollback-able manifest inserts last and adjacent; zero
+    /// residue on any failure. The only newly-materialized artifacts a failed save
+    /// can leave are a brand-new controller file and freshly-inserted manifest
+    /// entries — those are exactly what rollback removes. The `.xml` overwrite of an
+    /// already-existing component is the intended persistence and is not "residue".
+    /// 1. Write the controller `.lua` (if any) — atomic, self-cleaning on its own
+    ///    failure. We record whether the controller file pre-existed so a later
+    ///    rollback only deletes a file *this* save created.
+    /// 2. Write the `.xml`. On failure, delete a newly-created controller, then
+    ///    propagate.
+    /// 3. Insert the `.xml` manifest entry if absent, then the controller entry if
+    ///    absent — adjacent at the end. If either insert fails, remove any entry
+    ///    inserted in this step and delete a newly-created controller, then propagate.
+    /// 4. On success, seed the manifest cache and invalidate the gui tree.
     pub fn save_component(
         &self,
         name: &str,
         xml: String,
         controller: Option<(String, String)>,
     ) -> Result<(), String> {
-        // Pre-flight: resolve BOTH targets through the manifest before writing
-        // anything. A name (or controller filename) absent from the manifest is a
-        // refusal — save never creates, and we want zero residue on a refusal.
-        let xml_name = format!("{name}.xml");
-        let Some(xml_path) = self.resolve_asset(&xml_name)? else {
+        // Locate the component by basename in the on-disk gui tree (the read gate,
+        // NOT the manifest). A name that exists nowhere in the tree is genuinely
+        // nonexistent — save does not create from scratch (use create_component).
+        let tree = self.get_gui_tree()?;
+        let Some(rel_path) = find_component_path(&tree, name) else {
             return Err(format!(
-                "refusing to save component '{name}': '{xml_name}' is not registered in the asset \
-                 manifest. Creating new components is not supported by save (use create_component)."
+                "refusing to save component '{name}': no '{name}.xml' exists in the gui tree. \
+                 Save persists an existing component (use create_component to make a new one)."
             ));
         };
 
-        // Resolve the controller path too (if a controller was supplied), so an
-        // unregistered controller is refused before the .xml is touched.
-        let controller_target = match &controller {
-            Some((file_name, contents)) => {
-                let Some(path) = self.resolve_asset(file_name)? else {
-                    return Err(format!(
-                        "refusing to save component '{name}': controller '{file_name}' is not \
-                         registered in the asset manifest. Creating new controllers is not \
-                         supported by save (use create_component / the Add-script flow)."
-                    ));
-                };
-                Some((path, contents.clone()))
-            }
-            None => None,
+        let xml_name = format!("{name}.xml");
+        let xml_path = self.gui_path(&rel_path);
+        // The component's gui-relative folder (e.g. "profile/cards" for
+        // "profile/cards/bag.xml", "" for a root-level "bag.xml"). The controller
+        // lives here, alongside the .xml, and the manifest filepaths are built from it.
+        let folder_rel = parent_rel(&rel_path);
+
+        // Controller target (path + contents) and whether its file already exists —
+        // a brand-new controller (Add-script) is created here; a pre-existing one is
+        // overwritten. The pre-existence flag scopes rollback to only delete a file
+        // this save created.
+        let controller_target = controller.as_ref().map(|(file_name, contents)| {
+            let path = self.gui_folder_path(&folder_rel).join(file_name);
+            let pre_existed = path.exists();
+            (file_name.clone(), path, contents.clone(), pre_existed)
+        });
+
+        // Which manifest entries are absent and must be inserted (register-if-absent).
+        // Resolved BEFORE any write so step 3 only ever inserts a genuinely-missing key.
+        let xml_needs_register = self.resolve_asset(&xml_name)?.is_none();
+        let controller_needs_register = match &controller_target {
+            Some((file_name, _, _, _)) => self.resolve_asset(file_name)?.is_none(),
+            None => false,
         };
 
         // Step 1: write the controller first (the safe-to-land-first half), if any.
-        // atomic_write self-cleans on its own failure; a failure here means the
-        // .xml was never touched — propagate the single error.
-        if let Some((controller_path, contents)) = controller_target {
-            atomic_write(&controller_path, contents.as_bytes())?;
+        // atomic_write self-cleans on its own failure, leaving zero residue.
+        if let Some((_, path, contents, _)) = &controller_target {
+            atomic_write(path, contents.as_bytes())?;
         }
 
-        // Step 2: write the .xml layout. A failure here is surfaced as the single
-        // error; per design risk #5 we do NOT pretend success, so the caller keeps
-        // its dirty indicator set. (The controller already written stays as-is —
-        // the design accepts a controller-newer-than-xml inconsistency over a lost
-        // save, and the surfaced error tells the user the save didn't fully land.)
-        atomic_write(&xml_path, xml.as_bytes())?;
+        // Step 2: write the .xml. On failure, roll back a controller THIS save
+        // created (never one that pre-existed), then propagate — zero residue.
+        if let Err(e) = atomic_write(&xml_path, xml.as_bytes()) {
+            if let Some((_, path, _, pre_existed)) = &controller_target {
+                if !pre_existed {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+            return Err(e);
+        }
 
+        // Step 3: register absent entries — .xml first, then the controller, kept
+        // adjacent at the end. Already-registered entries are skipped (no duplicate).
+        // On failure, remove any entry inserted in this step and delete a
+        // newly-created controller, then propagate — zero residue.
+        let mut last_update = None;
+        if xml_needs_register {
+            let xml_filepath = gui_manifest_filepath(&folder_rel, &xml_name);
+            match self.insert_manifest_entry(&xml_name, &xml_filepath) {
+                Ok(updated) => last_update = Some(updated),
+                Err(e) => {
+                    if let Some((_, path, _, false)) = &controller_target {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if controller_needs_register {
+            if let Some((file_name, path, _, pre_existed)) = &controller_target {
+                let controller_filepath = gui_manifest_filepath(&folder_rel, file_name);
+                match self.insert_manifest_entry(file_name, &controller_filepath) {
+                    Ok(updated) => last_update = Some(updated),
+                    Err(e) => {
+                        // The .xml entry may have landed in this step — remove it so
+                        // we never leave a manifest entry the rollback didn't undo.
+                        if xml_needs_register {
+                            let _ = self.remove_manifest_entry(&xml_name);
+                        }
+                        if !pre_existed {
+                            let _ = std::fs::remove_file(path);
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        // Step 4: if anything was registered, seed the manifest cache with the final
+        // map and drop the gui tree cache (a newly-created controller changes the
+        // tree's controller hint). When nothing was registered (already-registered
+        // overwrite, no new controller file), there is nothing to refresh.
+        if let Some(updated) = last_update {
+            self.manifest.insert((), Arc::new(updated));
+        }
+        if controller_target
+            .as_ref()
+            .is_some_and(|(_, _, _, pre_existed)| !pre_existed)
+        {
+            self.gui_tree.invalidate(&());
+        }
         Ok(())
     }
 
@@ -434,6 +511,18 @@ fn find_component_path(folder: &GuiFolder, name: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The gui-relative parent folder of a gui-relative file path. `"bag.xml"` (a
+/// root-level file) yields `""`; `"profile/cards/bag.xml"` yields
+/// `"profile/cards"`. The inverse direction of [`join_rel`], used by
+/// `save_component` to place a controller alongside its component and to build the
+/// component's manifest filepath.
+fn parent_rel(rel_path: &str) -> String {
+    match rel_path.rsplit_once('/') {
+        Some((parent, _)) => parent.to_string(),
+        None => String::new(),
+    }
 }
 
 /// Recursively read one folder at `dir` whose gui-relative path is `rel` (""
@@ -949,64 +1038,119 @@ mod tests {
     }
 
     #[test]
-    fn save_refuses_unregistered_component_and_writes_nothing() {
+    fn save_refuses_a_component_that_exists_nowhere_in_the_gui_tree() {
         let root = temp_install();
-        // gui/ exists but the component is NOT in the manifest.
+        // gui/ exists but the component is NOT on disk and NOT in the manifest.
         std::fs::create_dir_all(root.join("gui")).unwrap();
         let dal = dal_with_manifest(&root, r#"{}"#);
 
         let err = dal
             .save_component("ghost", "<View/>".to_string(), None)
-            .expect_err("saving an unregistered component must be refused");
+            .expect_err("saving a component that exists nowhere must be refused");
         assert!(
             err.contains("ghost") && err.contains("ghost.xml"),
             "refusal should name the component, got: {err}"
         );
 
-        // No file (or temp sidecar) may be created for a refused save.
+        // No file (or temp sidecar) may be created for a refused save — save never
+        // creates from scratch (that is create_component's door).
         assert!(!root.join("gui").join("ghost.xml").exists());
         assert!(!root.join("gui").join("ghost.xml.tmp").exists());
+        // Manifest untouched.
+        assert!(manifest_keys(&root).is_empty());
     }
 
     #[test]
-    fn save_refuses_unregistered_controller_and_leaves_xml_untouched() {
+    fn save_registers_an_existing_on_disk_component_absent_from_the_manifest() {
+        // The core register-on-save case: an existing component .xml on disk that is
+        // NOT in assets.json (the real-game state — only .lua controllers are
+        // catalogued). Saving must write it by its disk path AND register it.
         let root = temp_install();
-        let (xml_path, _) = seed_bag_files(&root);
-        // Manifest registers the .xml but NOT the controller name we will pass.
-        let dal = dal_with_manifest(
-            &root,
-            r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#,
-        );
+        let nested = root.join("gui").join("abilityeditor");
+        std::fs::create_dir_all(&nested).unwrap();
+        let xml_path = nested.join("ability_editor.xml");
+        std::fs::write(&xml_path, "<View id=\"old\"/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
 
-        let err = dal
-            .save_component(
-                "bag",
-                "<View id=\"new\"/>".to_string(),
-                Some(("unregistered_controller.lua".to_string(), "-- x\n".to_string())),
-            )
-            .expect_err("an unregistered controller must refuse the whole save");
-        assert!(
-            err.contains("unregistered_controller.lua"),
-            "refusal should name the controller, got: {err}"
-        );
+        // Precondition: genuinely absent from the manifest.
+        assert_eq!(dal.resolve_asset("ability_editor.xml").unwrap(), None);
 
-        // The refusal is pre-flight: the .xml must NOT have been overwritten, and
-        // no orphan controller file may appear.
+        dal.save_component("ability_editor", "<View id=\"new\"/>".to_string(), None)
+            .unwrap();
+
+        // File written by its real on-disk (nested) path.
         assert_eq!(
             std::fs::read_to_string(&xml_path).unwrap(),
-            "<View><Panel id=\"old\"/></View>",
-            "a controller refusal must not write the .xml"
+            "<View id=\"new\"/>"
         );
-        assert!(!root.join("gui").join("unregistered_controller.lua").exists());
+        // Now registered, pointing at the nested backslash path.
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["ability_editor.xml"]["filepath"],
+            serde_json::json!("gui\\abilityeditor\\ability_editor.xml")
+        );
+        // In-process resolution sees it immediately (manifest cache refreshed).
+        assert_eq!(
+            dal.resolve_asset("ability_editor.xml").unwrap(),
+            Some(xml_path)
+        );
     }
 
     #[test]
-    fn save_never_mutates_the_asset_manifest() {
+    fn save_creates_and_registers_a_brand_new_controller_alongside_the_component() {
+        // The F10 Add-script case: the component exists on disk, but its controller
+        // .lua does NOT exist yet. Saving must CREATE the .lua alongside the .xml and
+        // register it.
         let root = temp_install();
-        seed_bag_files(&root);
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        let xml_path = gui.join("bag.xml");
+        std::fs::write(&xml_path, "<View controller=\"bag_controller.lua\"/>").unwrap();
+        // Manifest already knows the .xml but not the (not-yet-existing) controller.
+        let dal = dal_with_manifest(&root, r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#);
+
+        let ctrl_path = gui.join("bag_controller.lua");
+        assert!(!ctrl_path.exists(), "precondition: controller does not exist yet");
+
+        dal.save_component(
+            "bag",
+            "<View controller=\"bag_controller.lua\"/>".to_string(),
+            Some(("bag_controller.lua".to_string(), "-- fresh controller\n".to_string())),
+        )
+        .unwrap();
+
+        // The controller file was created alongside the component with its contents.
+        assert_eq!(
+            std::fs::read_to_string(&ctrl_path).unwrap(),
+            "-- fresh controller\n"
+        );
+        // And it was registered (the .xml entry was already present, not duplicated).
+        let keys = manifest_keys(&root);
+        assert_eq!(
+            keys,
+            vec!["bag.xml".to_string(), "bag_controller.lua".to_string()],
+            "the new controller is appended; the pre-existing .xml entry stays unique"
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["bag_controller.lua"]["filepath"],
+            serde_json::json!("gui\\bag_controller.lua")
+        );
+    }
+
+    #[test]
+    fn save_an_already_registered_component_overwrites_with_no_duplicate_entries() {
+        // Both .xml and controller are already registered; saving overwrites both
+        // files in place and adds NO new manifest entries (no duplicates).
+        let root = temp_install();
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
         let dal = dal_with_manifest(&root, BAG_MANIFEST);
 
-        let before = std::fs::read_to_string(root.join("assets.json")).unwrap();
+        let keys_before = manifest_keys(&root);
 
         dal.save_component(
             "bag",
@@ -1015,11 +1159,108 @@ mod tests {
         )
         .unwrap();
 
-        // The manifest on disk is byte-identical — save touches files, never the
-        // manifest (create_component owns registration).
-        let after = std::fs::read_to_string(root.join("assets.json")).unwrap();
-        assert_eq!(before, after, "save_component must not mutate assets.json");
-        assert!(!root.join("assets.json.tmp").exists());
+        // Files overwritten.
+        assert_eq!(std::fs::read_to_string(&xml_path).unwrap(), "<View id=\"after\"/>");
+        assert_eq!(std::fs::read_to_string(&ctrl_path).unwrap(), "-- after\n");
+
+        // Manifest keys are byte-for-byte unchanged — no duplicate entries.
+        let keys_after = manifest_keys(&root);
+        assert_eq!(
+            keys_before, keys_after,
+            "an already-registered save must not add or duplicate manifest entries"
+        );
+        assert_eq!(
+            keys_after,
+            vec!["bag.xml".to_string(), "bag_controller.lua".to_string()]
+        );
+    }
+
+    #[test]
+    fn save_rolls_back_to_zero_residue_when_the_manifest_insert_fails() {
+        // Forced failure on the register step (option-A's only rollback-able write):
+        // an existing-but-unregistered component with a brand-new controller, where
+        // the manifest is corrupt on disk so insert_manifest_entry fails. The
+        // newly-created controller must be deleted and no manifest entry must land —
+        // zero residue. (The .xml overwrite of the already-existing component is the
+        // intended save, not residue.)
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("bag.xml"), "<View id=\"old\"/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+        // Prime the manifest cache from the empty manifest so the register-if-absent
+        // checks pass, then corrupt the on-disk file so the insert (which re-reads
+        // raw) fails to parse.
+        let _ = dal.resolve_asset("bag.xml").unwrap();
+        std::fs::write(root.join("assets.json"), "{ not valid json").unwrap();
+
+        let ctrl_path = gui.join("bag_controller.lua");
+        let err = dal
+            .save_component(
+                "bag",
+                "<View id=\"new\"/>".to_string(),
+                Some(("bag_controller.lua".to_string(), "-- ctrl\n".to_string())),
+            )
+            .expect_err("a manifest insert over a corrupt file must fail");
+        assert!(
+            err.contains("assets.json") || err.to_lowercase().contains("parse"),
+            "error should describe the manifest failure, got: {err}"
+        );
+
+        // Zero residue: the brand-new controller created in step 1 was rolled back.
+        assert!(
+            !ctrl_path.exists(),
+            "a failed register must delete the controller this save created"
+        );
+        assert!(!gui.join("bag_controller.lua.tmp").exists());
+        // No manifest entry landed (the file is still the corrupt placeholder).
+        assert_eq!(
+            std::fs::read_to_string(root.join("assets.json")).unwrap(),
+            "{ not valid json"
+        );
+    }
+
+    #[test]
+    fn save_rolls_back_the_xml_entry_when_the_controller_insert_fails() {
+        // Both .xml and controller need registering; the .xml insert lands, then the
+        // controller insert collides on a duplicate key planted on disk. The
+        // just-inserted .xml entry must be removed and the brand-new controller file
+        // deleted — zero residue, no half-registered pair.
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("bag.xml"), "<View id=\"old\"/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+        // Prime the cache from the empty manifest so both register-if-absent checks
+        // see "absent", then plant the controller key on disk so the SECOND insert
+        // (the controller) collides on a duplicate.
+        let _ = dal.resolve_asset("bag.xml").unwrap();
+        let _ = dal.resolve_asset("bag_controller.lua").unwrap();
+        std::fs::write(
+            root.join("assets.json"),
+            r#"{ "bag_controller.lua": { "filepath": "gui\\bag_controller.lua" } }"#,
+        )
+        .unwrap();
+
+        let ctrl_path = gui.join("bag_controller.lua");
+        let err = dal
+            .save_component(
+                "bag",
+                "<View id=\"new\"/>".to_string(),
+                Some(("bag_controller.lua".to_string(), "-- ctrl\n".to_string())),
+            )
+            .expect_err("a duplicate controller key on the second insert must fail");
+        assert!(err.contains("bag_controller.lua"), "got: {err}");
+
+        // The .xml entry inserted before the failed controller insert was rolled back:
+        // the manifest holds only the pre-existing controller key, never bag.xml.
+        assert_eq!(
+            manifest_keys(&root),
+            vec!["bag_controller.lua".to_string()],
+            "the .xml entry must be removed when the controller insert fails"
+        );
+        // The brand-new controller file was deleted — zero residue.
+        assert!(!ctrl_path.exists(), "a failed register must delete the new controller");
     }
 
     // ---- create_component: two files + two manifest entries, ordered, rollback ----

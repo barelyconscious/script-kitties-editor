@@ -6,6 +6,8 @@ import {
   computeFitScale,
   DEFAULT_POSITION,
   DEFAULT_SIZE,
+  DRAG_CLICK_THRESHOLD_PX,
+  isDragGesture,
   parseUDim2,
   STAGE_HEIGHT,
   STAGE_WIDTH,
@@ -293,5 +295,88 @@ describe("applyDragDelta (F7 drag-to-move)", () => {
     expect(applyDragDelta(base, 10, 10)).toBe("0,0,110,60");
     expect(applyDragDelta(base, 25, 25)).toBe("0,0,125,75");
     expect(applyDragDelta(base, 25, 25)).toBe("0,0,125,75");
+  });
+});
+
+describe("applyDragDelta — whole-pixel snapping (469)", () => {
+  it("rounds a fractional offset to a whole pixel", () => {
+    // A fractional logical delta (the 468 scale divisor yields these) snaps to the
+    // nearest integer so the offset stays a pixel coordinate.
+    expect(applyDragDelta("0,0,0,0", 12.4, 7.6)).toBe("0,0,12,8");
+  });
+
+  it("rounds at the .5 boundary (Math.round: half rounds up)", () => {
+    expect(applyDragDelta("0,0,0,0", 10.5, 20.5)).toBe("0,0,11,21");
+  });
+
+  it("rounds the ACCUMULATED offset (base + fractional delta) to an integer", () => {
+    // Base offset 10/20 plus a fractional delta rounds the SUM, not the delta alone.
+    expect(applyDragDelta("0,0,10,20", 5.3, 5.8)).toBe("0,0,15,26");
+  });
+
+  it("rounds negative fractional offsets toward the nearest integer", () => {
+    // Math.round(-12.4) === -12, Math.round(-12.6) === -13 — signed rounding holds.
+    expect(applyDragDelta("0,0,0,0", -12.4, -12.6)).toBe("0,0,-12,-13");
+  });
+
+  it("snaps the offset to integers but leaves the float scale half untouched", () => {
+    // The whole point: scale stays a float (0.5/0.25), the offset becomes an integer.
+    expect(applyDragDelta("0.5,0.25,0,0", 8.7, 3.2)).toBe("0.5,0.25,9,3");
+  });
+
+  it("produces integer offsets end-to-end from a fractional scaled drag", () => {
+    // 25 screen px at 0.7 scale → ~35.71 logical px → snaps to 36 (a real drag path:
+    // screenDeltaToLogical then applyDragDelta, the live per-move pipeline).
+    const { dx, dy } = screenDeltaToLogical(25, 25, 0.7);
+    const result = applyDragDelta("0,0,0,0", dx, dy);
+    expect(result).toBe("0,0,36,36");
+    // And the offset fields are integers (no decimal point) in the serialized value.
+    const [, , absX, absY] = result.split(",");
+    expect(Number.isInteger(Number(absX))).toBe(true);
+    expect(Number.isInteger(Number(absY))).toBe(true);
+  });
+
+  it("snaps a bound offset field to a whole pixel too (you dragged it, you set it)", () => {
+    // A bound offset is replaced by the literal pixel result; that literal is rounded
+    // like any other offset.
+    expect(applyDragDelta("0,0,{xOff},0", 30.6, 0)).toBe("0,0,31,0");
+  });
+});
+
+describe("isDragGesture — drag vs. click (469)", () => {
+  it("a zero-move release is a click, not a drag", () => {
+    // Press and release in place → genuine click → selection logic runs as normal.
+    expect(isDragGesture(100, 100, 100, 100)).toBe(false);
+  });
+
+  it("a tiny jitter within the threshold is still a click", () => {
+    // A 2px wobble (< 3px threshold) on both axes — a hand-shake, not a reposition.
+    expect(isDragGesture(100, 100, 102, 98)).toBe(false);
+  });
+
+  it("a move of exactly the threshold is still a click (strict >)", () => {
+    // The drag must clearly exceed the threshold; equality stays a click.
+    expect(isDragGesture(100, 100, 100 + DRAG_CLICK_THRESHOLD_PX, 100)).toBe(false);
+    expect(isDragGesture(100, 100, 100, 100 + DRAG_CLICK_THRESHOLD_PX)).toBe(false);
+  });
+
+  it("a move past the threshold on the X axis is a drag", () => {
+    expect(isDragGesture(100, 100, 140, 100)).toBe(true);
+  });
+
+  it("a move past the threshold on the Y axis is a drag", () => {
+    expect(isDragGesture(100, 100, 100, 60)).toBe(true);
+  });
+
+  it("a move past the threshold on EITHER axis is a drag (negative direction too)", () => {
+    expect(isDragGesture(100, 100, 90, 100)).toBe(true);
+    expect(isDragGesture(100, 100, 100, 90)).toBe(true);
+    expect(isDragGesture(200, 200, 150, 150)).toBe(true);
+  });
+
+  it("the threshold default is a small whole-pixel value", () => {
+    // Pin the contract: the gesture threshold is 3 screen px (the value the preview's
+    // click-suppression reads). A change here is a behavior change, not an accident.
+    expect(DRAG_CLICK_THRESHOLD_PX).toBe(3);
   });
 });

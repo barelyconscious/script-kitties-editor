@@ -54,6 +54,7 @@ import {
 import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import {
   computeBoxGeometry,
+  isDragGesture,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   screenDeltaToLogical,
@@ -535,7 +536,17 @@ export function GuiPreview({
   // first, then ancestors — exactly the "nearest enclosing box" rule. Reading
   // the chain through `nearestNodeId` keeps the (pure, tested) semantics in one
   // place; here it receives at most one candidate.
+  // Set on pointerup when the gesture was a drag (see `isDragGesture`); consumed (and
+  // reset) by the very next `click`, so exactly one click is suppressed per drag and
+  // ordinary clicks are untouched. A ref, not state — it must not trigger a re-render.
+  const suppressNextClick = useRef(false);
+
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    // Swallow the click synthesized at the end of a drag: the box stays selected.
+    if (suppressNextClick.current) {
+      suppressNextClick.current = false;
+      return;
+    }
     const target = event.target as Element;
     const box = target.closest(`[${NODE_ID_ATTR}]`);
     const id = box?.getAttribute(NODE_ID_ATTR);
@@ -583,10 +594,20 @@ export function GuiPreview({
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!drag.current) return;
+    const active = drag.current;
+    if (!active) return;
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    // If the pointer actually moved (past the threshold) this was a drag, not a
+    // click — suppress the trailing synthesized `click` so it doesn't re-run
+    // selection. The box stays selected (the only selection change for a drag
+    // happened on the original pointerdown that grabbed it). A near-zero move falls
+    // through and `handleClick` runs normally (a click on the box is a no-op select;
+    // a click on background clears — both correct).
+    if (isDragGesture(active.startX, active.startY, event.clientX, event.clientY)) {
+      suppressNextClick.current = true;
     }
   };
 

@@ -173,9 +173,15 @@ export function computeBoxGeometry(
  *  - The SCALE fields (`relX`, `relY`) are passed through VERBATIM — a literal
  *    `0.5` or a `{healthRatio}` token survives a drag untouched. A drag never
  *    converts, clamps, or otherwise mutates the scale half.
- *  - The OFFSET fields accumulate the delta: `absX' = absX + dx`, `absY' = absY +
- *    dy`. Existing literal offsets are added onto, so repeated/continuous drags
- *    accumulate correctly.
+ *  - The OFFSET fields accumulate the delta: `absX' = round(absX + dx)`, `absY' =
+ *    round(absY + dy)`. Existing literal offsets are added onto, so repeated/
+ *    continuous drags accumulate correctly. The result is ROUNDED to a whole pixel:
+ *    the offset half is a pixel coordinate, and after F7's scale-to-fit divides the
+ *    screen delta by the render scale the logical delta is fractional, so without
+ *    rounding a drag would write sub-pixel offsets. Rounding HERE (in the pure math,
+ *    invoked on every pointermove) snaps the box to whole pixels LIVE as the user
+ *    drags and keeps the Properties offset fields integral throughout. Only the
+ *    offset half is rounded; the scale half stays verbatim (it may be a float).
  *  - A BOUND offset field (`absX`/`absY` is a whole `{token}`) has no numeric value
  *    to accumulate against, so its base is treated as `0` and the field is REPLACED
  *    by the resulting literal pixel value. Rationale: a drag is a direct,
@@ -205,10 +211,47 @@ export function applyDragDelta(positionAttr: string | undefined, dx: number, dy:
   const relY = (parts[1] ?? "").trim() || "0";
   // Offset fields: parse the current literal (a token/garbage base parses to 0),
   // add the delta, and emit the literal pixel result. parseField is reused so the
-  // drag and the renderer agree on what "the current offset" is.
-  const absX = parseField(parts[2]) + dx;
-  const absY = parseField(parts[3]) + dy;
+  // drag and the renderer agree on what "the current offset" is. Math.round snaps
+  // the result to a whole pixel — the 468 scale divisor makes the logical delta
+  // fractional, and a pixel offset must stay integral (and read as an integer in the
+  // Properties panel as the box moves).
+  const absX = Math.round(parseField(parts[2]) + dx);
+  const absY = Math.round(parseField(parts[3]) + dy);
   return `${relX},${relY},${absX},${absY}`;
+}
+
+/**
+ * The screen-pixel move (per axis) past which a grab-release is a DRAG, not a click.
+ * Below it the gesture is treated as a click (select/deselect runs normally); at or
+ * above it the trailing synthesized `click` is suppressed so a drag-release keeps the
+ * dragged box selected instead of clearing the selection on the background.
+ */
+export const DRAG_CLICK_THRESHOLD_PX = 3;
+
+/**
+ * Whether a grab-and-release gesture moved far enough to count as a DRAG rather than
+ * a click (469). Compares the absolute per-axis SCREEN-pixel travel from pointerdown
+ * to pointerup against {@link DRAG_CLICK_THRESHOLD_PX}: a move exceeding the threshold
+ * on EITHER axis is a drag.
+ *
+ * Why this matters: the browser synthesizes a `click` after the pointerup that ends a
+ * drag. If that click ran selection it would re-resolve the target — and because the
+ * cursor commonly drifts off the box onto the stage background during a drag, the
+ * click would land on the background and CLEAR the selection, so the box you just
+ * moved would stop showing in the Properties panel. Treating a past-threshold gesture
+ * as a drag lets the caller suppress that one click and keep the box selected. A
+ * genuine (near-zero) click on the background still falls through and clears as before.
+ *
+ * Uses SCREEN pixels (not logical) on purpose: the threshold is about the user's
+ * physical intent (did they mean to move it?), which is independent of the stage's
+ * render scale. The comparison is strict `>` so a move of exactly the threshold is
+ * still a click — the drag must clearly exceed it.
+ */
+export function isDragGesture(startX: number, startY: number, endX: number, endY: number): boolean {
+  return (
+    Math.abs(endX - startX) > DRAG_CLICK_THRESHOLD_PX ||
+    Math.abs(endY - startY) > DRAG_CLICK_THRESHOLD_PX
+  );
 }
 
 /**

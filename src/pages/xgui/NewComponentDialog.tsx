@@ -35,8 +35,10 @@ import {
 import {
   collectFolderOptions,
   collisionMessage,
+  folderRelFromSelectValue,
   type GuiFolder,
   isValidBasename,
+  selectValueFromFolderRel,
   toComponentBasename,
 } from "./guiTree";
 
@@ -201,13 +203,20 @@ export function NewComponentDialog({
           <div className="grid gap-1.5">
             <Label htmlFor="new-component-folder">Destination folder</Label>
             <div className="flex items-center gap-2">
-              <Select value={folderRel} disabled={busy} onValueChange={setFolderRel}>
+              {/* Radix forbids an empty Select.Item value, so the gui-root option
+                  is carried as a non-empty sentinel and mapped back to "" (the real
+                  folderRel) at this boundary; `folderRel` state stays canonical. */}
+              <Select
+                value={selectValueFromFolderRel(folderRel)}
+                disabled={busy}
+                onValueChange={(v) => setFolderRel(folderRelFromSelectValue(v))}
+              >
                 <SelectTrigger id="new-component-folder" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {options.map((opt) => (
-                    <SelectItem key={opt.path} value={opt.path}>
+                    <SelectItem key={opt.path} value={selectValueFromFolderRel(opt.path)}>
                       {opt.label}
                     </SelectItem>
                   ))}

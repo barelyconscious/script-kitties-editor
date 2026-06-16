@@ -3,9 +3,12 @@ import {
   collectFolderOptions,
   collisionMessage,
   flattenTree,
+  folderRelFromSelectValue,
   type GuiFolder,
   indexComponentsByName,
   isValidBasename,
+  ROOT_FOLDER_VALUE,
+  selectValueFromFolderRel,
   toComponentBasename,
 } from "./guiTree";
 
@@ -147,6 +150,31 @@ describe("collectFolderOptions", () => {
       "widgets/cards",
       "empty",
     ]);
+  });
+});
+
+describe("root-folder Select sentinel", () => {
+  it("round-trips the gui-root folderRel through the non-empty sentinel", () => {
+    // The bug-2 invariant: "" (gui root) maps to a NON-EMPTY Select value, and
+    // that sentinel maps back to "" so the create commands still see the real root.
+    expect(selectValueFromFolderRel("")).toBe(ROOT_FOLDER_VALUE);
+    expect(ROOT_FOLDER_VALUE).not.toBe("");
+    expect(folderRelFromSelectValue(ROOT_FOLDER_VALUE)).toBe("");
+  });
+
+  it("passes non-root folder paths through unchanged in both directions", () => {
+    expect(selectValueFromFolderRel("widgets")).toBe("widgets");
+    expect(selectValueFromFolderRel("widgets/cards")).toBe("widgets/cards");
+    expect(folderRelFromSelectValue("widgets")).toBe("widgets");
+    expect(folderRelFromSelectValue("widgets/cards")).toBe("widgets/cards");
+  });
+
+  it("never emits an empty Select.Item value for any folder option", () => {
+    // Radix forbids value="" on a Select.Item. Every option — including the gui/
+    // root — must map to a non-empty value.
+    for (const opt of collectFolderOptions(fixture())) {
+      expect(selectValueFromFolderRel(opt.path)).not.toBe("");
+    }
   });
 });
 

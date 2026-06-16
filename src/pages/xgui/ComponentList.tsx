@@ -122,7 +122,9 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       try {
         const xml = await invoke<string | null>("get_component", { name: ref.name });
         if (xml == null) {
-          setError(`Component "${ref.name}" is no longer registered.`);
+          setError(
+            `Component "${ref.name}" could not be found on disk — it may have been deleted.`,
+          );
           return;
         }
         const component = buildOpenComponent(ref, xml);

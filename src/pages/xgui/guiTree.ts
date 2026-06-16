@@ -107,6 +107,33 @@ export function flattenTree(root: GuiFolder, collapsed: ReadonlySet<string>): Gu
   return rows;
 }
 
+/**
+ * The non-empty sentinel a Radix `<Select.Item>` uses to represent the `gui/`
+ * root, because Radix forbids an empty-string item value. It is purely a UI-layer
+ * token: it is mapped back to `""` (the real gui-root folderRel) the instant it
+ * leaves the picker, so no command ever sees the sentinel. Chosen to never collide
+ * with a real gui-relative folder path (paths never contain a leading slash).
+ */
+export const ROOT_FOLDER_VALUE = "/";
+
+/**
+ * Map a picker value (which may be {@link ROOT_FOLDER_VALUE}) to the canonical
+ * gui-relative folderRel a command expects: the sentinel becomes `""` (gui root);
+ * any other value passes through unchanged.
+ */
+export function folderRelFromSelectValue(value: string): string {
+  return value === ROOT_FOLDER_VALUE ? "" : value;
+}
+
+/**
+ * Map a canonical gui-relative folderRel to the picker value: `""` (gui root)
+ * becomes {@link ROOT_FOLDER_VALUE} so the `<Select.Item>` never carries an empty
+ * string; any other path passes through unchanged.
+ */
+export function selectValueFromFolderRel(folderRel: string): string {
+  return folderRel === "" ? ROOT_FOLDER_VALUE : folderRel;
+}
+
 /** A destination-folder option for the New-component dialog's picker. */
 export type FolderOption = {
   /** gui-relative path; "" is the `gui/` root. */

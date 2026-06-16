@@ -6,10 +6,13 @@
  *                                                  │     + palette names + colors
  *   recolor → invalidatePalette() → re-fetch ─────┘
  *
- * Holds the Data Model panel's text and the LAST GOOD parsed model (so an invalid
- * keystroke surfaces an error without blanking the preview), subscribes to the
- * module-cached palette so a recolor updates the preview, and threads both into
- * {@link GuiPreview}. Selection is read from the SHARED editor store (F9a) — the
+ * The parsed Data Model is now LIFTED to the main-content level (task 476) so a
+ * single source feeds BOTH this preview's `{token}` resolution AND the always-on
+ * Data Model panel, which lives alongside the tab pane rather than inside this
+ * host. The host therefore receives the resolved `model` as a prop instead of
+ * owning the JSON text. It still subscribes to the module-cached palette so a
+ * recolor updates the preview, and threads both into {@link GuiPreview}.
+ * Selection is read from the SHARED editor store (F9a) — the
  * preview's click and the structure tree's click both drive the one
  * `selectedNodeId`, so highlighting syncs both ways with no local copy.
  *
@@ -40,7 +43,6 @@ import {
 } from "../../lib/guiGeometry";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
-import { DataModelPanel } from "./DataModelPanel";
 import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
 import { GuiPreviewToolbar } from "./GuiPreviewToolbar";
@@ -50,27 +52,22 @@ import { findNode } from "./guiTreeEdit";
 export type GuiPreviewHostProps = {
   /** The parsed component to preview. */
   root: GuiNode;
-  /** Initial Data Model JSON text (defaults to an empty object). */
-  initialModelText?: string;
+  /**
+   * The resolved Data Model the preview's `{token}` bindings resolve against
+   * (task 476). Lifted to the main-content level so ONE source feeds both this
+   * preview and the always-on Data Model panel. The parent keeps the LAST GOOD
+   * parsed model live, so an invalid keystroke in the panel never blanks the
+   * preview — it just stops advancing this value.
+   */
+  model: unknown;
 };
 
 /**
- * The preview + Data Model panel pair. The model text is controlled here; the last
- * successfully-parsed model is kept live so the preview only re-resolves against
- * valid JSON. The palette comes from the module-cached hook, so a recolor (which
- * calls `invalidatePalette`) re-fetches and re-renders without a remount.
+ * The preview itself (the Data Model panel is now hoisted to MainContent, task
+ * 476). The palette comes from the module-cached hook, so a recolor (which calls
+ * `invalidatePalette`) re-fetches and re-renders without a remount.
  */
-export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHostProps) {
-  const [modelText, setModelText] = useState(initialModelText);
-  // Last GOOD model: only advanced when the JSON parses, so an invalid keystroke
-  // shows the error (in the panel) but the preview keeps the last valid state.
-  const [model, setModel] = useState<unknown>(() => {
-    try {
-      return JSON.parse(initialModelText);
-    } catch {
-      return {};
-    }
-  });
+export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
   // Selection is the SHARED store's single `selectedNodeId` (F9a): a preview click
   // dispatches `select`, the structure tree dispatches the same, and both surfaces
   // highlight off this one value — sync is free because there is one source.
@@ -282,48 +279,39 @@ export function GuiPreviewHost({ root, initialModelText = "{}" }: GuiPreviewHost
   };
 
   return (
-    <div className="flex h-full min-h-0">
-      {/* Viewport: the measured main-content area. It CLIPS (overflow-hidden) the
-          view-transformed stage; the stage centers itself via the pan baked into
-          `fitView`. The view gestures (zoom wheel, space/middle-drag pan) live here
-          on the viewport; element drag + selection live on the stage inside. */}
-      <div
-        ref={viewportRef}
-        onPointerDown={handleViewportPointerDown}
-        onPointerMove={handleViewportPointerMove}
-        onPointerUp={endPan}
-        onPointerCancel={endPan}
-        className="relative min-h-0 flex-1 overflow-hidden"
-        style={{ cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined }}
-      >
-        <GuiPreview
-          root={root}
-          selectedNodeId={selectedNodeId}
-          onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
-          model={model}
-          palette={palette}
-          onDragStart={handleDragStart}
-          onDragMove={handleDragMove}
-          view={view}
-          isPanGesture={(e) => e.button === 1 || (e.button === 0 && spaceHeld.current)}
-        />
-        <GuiPreviewToolbar
-          scale={view.scale}
-          onZoomOut={() => stepZoom(1 / ZOOM_STEP)}
-          onZoomIn={() => stepZoom(ZOOM_STEP)}
-          onFit={handleFit}
-          onActualSize={handleActualSize}
-        />
-      </div>
-      <div className="w-80 shrink-0 border-border border-l">
-        <DataModelPanel
-          value={modelText}
-          onChange={(text, parse) => {
-            setModelText(text);
-            if (parse.ok) setModel(parse.model);
-          }}
-        />
-      </div>
+    // Viewport: the measured main-content area. It CLIPS (overflow-hidden) the
+    // view-transformed stage; the stage centers itself via the pan baked into
+    // `fitView`. The view gestures (zoom wheel, space/middle-drag pan) live here
+    // on the viewport; element drag + selection live on the stage inside. The Data
+    // Model panel is no longer a sibling here — it is hoisted to MainContent so it
+    // stays visible across the View/Controller/XML tabs (task 476).
+    <div
+      ref={viewportRef}
+      onPointerDown={handleViewportPointerDown}
+      onPointerMove={handleViewportPointerMove}
+      onPointerUp={endPan}
+      onPointerCancel={endPan}
+      className="relative h-full min-h-0 overflow-hidden"
+      style={{ cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined }}
+    >
+      <GuiPreview
+        root={root}
+        selectedNodeId={selectedNodeId}
+        onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
+        model={model}
+        palette={palette}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        view={view}
+        isPanGesture={(e) => e.button === 1 || (e.button === 0 && spaceHeld.current)}
+      />
+      <GuiPreviewToolbar
+        scale={view.scale}
+        onZoomOut={() => stepZoom(1 / ZOOM_STEP)}
+        onZoomIn={() => stepZoom(ZOOM_STEP)}
+        onFit={handleFit}
+        onActualSize={handleActualSize}
+      />
     </div>
   );
 }

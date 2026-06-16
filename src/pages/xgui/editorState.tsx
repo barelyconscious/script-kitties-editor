@@ -70,8 +70,12 @@ import type { GuiNode } from "../../lib/guiNode";
 import { addChild, removeNode, setNodeAttrs } from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
 
-/** Which main-content tab is showing (design section 4). */
-export type EditorTab = "view" | "controller";
+/**
+ * Which main-content tab is showing (design section 4). `xml` is a read-only
+ * live view of the serialized component (task 476) — it never mutates the
+ * document, so it needs no new action, only this union member.
+ */
+export type EditorTab = "view" | "controller" | "xml";
 
 /**
  * The currently-open component and everything the editor surfaces edit. `null`

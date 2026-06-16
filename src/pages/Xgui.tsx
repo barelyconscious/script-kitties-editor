@@ -17,16 +17,33 @@
  * @see design/xgui_ta.md — "High Level Visual Layout" (the three columns).
  */
 
-import { Loader2, PanelLeftOpen, Save } from "lucide-react";
-import { type ReactNode, useEffect } from "react";
+import {
+  Code2,
+  FileCode2,
+  LayoutTemplate,
+  Loader2,
+  type LucideIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Save,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { serializeGui } from "@/lib/guiNode";
 import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { ControllerTab } from "./xgui/ControllerTab";
+import { DataModelPanel } from "./xgui/DataModelPanel";
 import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
-import { EditorStateProvider, type EditorTab, useEditorStore } from "./xgui/editorState";
+import { applyModelEdit, initDataModelState } from "./xgui/dataModelState";
+import {
+  EditorStateProvider,
+  type EditorTab,
+  type OpenComponent,
+  useEditorStore,
+} from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
 import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
@@ -34,6 +51,7 @@ import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
 import { useComponentSave } from "./xgui/useComponentSave";
 import { useEditorKeyboard } from "./xgui/useEditorKeyboard";
+import { XmlView } from "./xgui/XmlView";
 
 export interface XguiProps {
   /**
@@ -112,9 +130,11 @@ function StructureColumn() {
 }
 
 /**
- * The main content region. Shows the open component's preview (via the F3
- * {@link GuiPreviewHost}) or an empty state. The View/Controller tab bar (F10)
- * mounts at the marked seam.
+ * The main content region. Hosts the segmented View/Controller/XML tab toggle
+ * (task 476) and, when a component is open, the {@link OpenComponentPanes} — the
+ * swapping main pane plus the always-visible Data Model panel. Empty state shows
+ * the {@link MainContentSkeleton}. The structure column is a sibling (see
+ * {@link StructureColumn}) and stays visible across all three tabs by construction.
  */
 function MainContent({ active }: { active: boolean }) {
   const { state, dispatch } = useEditorStore();
@@ -148,24 +168,36 @@ function MainContent({ active }: { active: boolean }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* View / Controller tab bar (F10) — a real toggle bound to `activeTab`.
-          The structure column (a sibling, see StructureColumn) stays visible in
-          both tabs by construction; only this main pane swaps. */}
+      {/* View / Controller / XML tab bar (F10 + task 476) — a SEGMENTED PILL toggle
+          bound to `activeTab`, matching the creature editor's Script/Stats control
+          (rounded container + icon+label segments, active segment filled). The
+          structure column (a sibling, see StructureColumn) and the Data Model panel
+          (inside OpenComponentPanes) stay visible across all three tabs; only the
+          main pane swaps. */}
       <div className="flex shrink-0 items-center gap-1 border-b px-3 py-1.5">
-        <TabButton
-          tab="view"
-          active={activeTab === "view"}
-          onSelect={() => dispatch({ type: "setTab", tab: "view" })}
-        >
-          View
-        </TabButton>
-        <TabButton
-          tab="controller"
-          active={activeTab === "controller"}
-          onSelect={() => dispatch({ type: "setTab", tab: "controller" })}
-        >
-          Controller
-        </TabButton>
+        <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+          <TabButton
+            tab="view"
+            active={activeTab === "view"}
+            onSelect={() => dispatch({ type: "setTab", tab: "view" })}
+            Icon={LayoutTemplate}
+            label="View"
+          />
+          <TabButton
+            tab="controller"
+            active={activeTab === "controller"}
+            onSelect={() => dispatch({ type: "setTab", tab: "controller" })}
+            Icon={FileCode2}
+            label="Controller"
+          />
+          <TabButton
+            tab="xml"
+            active={activeTab === "xml"}
+            onSelect={() => dispatch({ type: "setTab", tab: "xml" })}
+            Icon={Code2}
+            label="XML"
+          />
+        </div>
         {open && (
           <span
             className="ml-auto truncate font-mono text-muted-foreground text-xs"
@@ -226,20 +258,12 @@ function MainContent({ active }: { active: boolean }) {
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      <div className="min-h-0 flex-1">
         {mainContentMode(open) === "preview" && open ? (
-          // Both tab panes stay MOUNTED and toggle visibility (like the Workbench's
-          // tabs) so Monaco's editor state and the preview's local Data Model /
-          // selection survive flipping tabs. Each is keyed by path so opening a
-          // different component resets cleanly.
-          <>
-            <div className={cn("absolute inset-0", activeTab !== "view" && "hidden")}>
-              <GuiPreviewHost key={open.path} root={open.root} initialModelText={open.modelText} />
-            </div>
-            <div className={cn("absolute inset-0", activeTab !== "controller" && "hidden")}>
-              <ControllerTab key={open.path} />
-            </div>
-          </>
+          // Keyed by path so opening a DIFFERENT component remounts the panes (and
+          // resets the lifted Data Model state) cleanly. Within one component, the
+          // panes stay mounted across tab flips.
+          <OpenComponentPanes key={open.path} open={open} activeTab={activeTab} />
         ) : (
           // Empty / first-run (F12): no component open — and an empty `gui/` folder
           // reaches here the same way (nothing to pick → nothing open). Show the
@@ -251,17 +275,113 @@ function MainContent({ active }: { active: boolean }) {
   );
 }
 
-/** A single main-content tab toggle. */
+/**
+ * The panes shown for an OPEN component (task 476): the swapping main pane on the
+ * left (View preview / Controller Lua / XML view) and the ALWAYS-VISIBLE,
+ * collapsible Data Model panel on the right. Keyed by component path at the call
+ * site, so this owns the lifted Data Model state for one component's lifetime.
+ *
+ * WHY the model lives here: the Data Model JSON drives BOTH the preview's
+ * `{token}` resolution AND its own panel. Hoisting it out of GuiPreviewHost (where
+ * it used to live) lets the panel stay mounted alongside the Controller and XML
+ * tabs — where the model is still worth reading/editing — instead of vanishing
+ * whenever the View tab isn't active. The LAST-GOOD parsed model is kept live so
+ * an invalid keystroke surfaces an error without blanking the preview.
+ *
+ * All three tab panes stay MOUNTED and toggle visibility (like the Workbench's
+ * tabs) so Monaco's editor state and the preview's selection/view survive flipping
+ * tabs; only their visibility changes.
+ */
+function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTab: EditorTab }) {
+  // The Data Model state — raw text (panel) + LAST GOOD parsed model (preview) —
+  // lifted here so ONE source feeds both. Seeded from the open component's stored
+  // model text; an edit advances the model only when the JSON parses (see
+  // `applyModelEdit`), so an invalid keystroke keeps the preview on the last valid
+  // state. The advance rule lives in the pure `dataModelState` module so it is
+  // unit-tested off the React tree.
+  const [dataModel, setDataModel] = useState(() => initDataModelState(open.modelText));
+  // Whether the Data Model panel is collapsed (task 476 keeps it collapsible).
+  const [modelPanelOpen, setModelPanelOpen] = useState(true);
+
+  // The LIVE serialized XML of the current tree. Re-derived whenever the visual
+  // editor mutates `open.root` (every immutable edit replaces the reference), so
+  // the read-only XML tab always mirrors the document. Memoized so a tab flip or a
+  // Data-Model keystroke doesn't re-serialize needlessly.
+  const xml = useMemo(() => serializeGui(open.root), [open.root]);
+
+  return (
+    <div className="flex h-full min-h-0">
+      {/* MAIN pane — only this swaps per tab. Each pane stays mounted; visibility
+          toggles so Monaco/preview state survives tab flips. */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div className={cn("absolute inset-0", activeTab !== "view" && "hidden")}>
+          <GuiPreviewHost root={open.root} model={dataModel.model} />
+        </div>
+        <div className={cn("absolute inset-0", activeTab !== "controller" && "hidden")}>
+          <ControllerTab />
+        </div>
+        <div className={cn("absolute inset-0", activeTab !== "xml" && "hidden")}>
+          <XmlView value={xml} />
+        </div>
+      </div>
+
+      {/* ALWAYS-VISIBLE Data Model panel (task 476) — persistent across View,
+          Controller, and XML; collapsible to a slim toggle rail. */}
+      {modelPanelOpen ? (
+        <div className="flex w-80 shrink-0 flex-col border-border border-l">
+          <div className="flex shrink-0 items-center justify-end border-b px-1.5 py-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Collapse Data Model panel"
+              aria-pressed
+              onClick={() => setModelPanelOpen(false)}
+            >
+              <PanelLeftClose className="rotate-180" />
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <DataModelPanel
+              value={dataModel.text}
+              onChange={(text) => setDataModel((prev) => applyModelEdit(prev, text))}
+            />
+          </div>
+        </div>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Show Data Model panel"
+              onClick={() => setModelPanelOpen(true)}
+              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <PanelLeftOpen className="size-4 shrink-0 rotate-180" />
+              <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
+                Data Model
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Show Data Model panel</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+/** One segment of the View/Controller/XML segmented toggle (icon + label). */
 function TabButton({
   tab,
   active,
   onSelect,
-  children,
+  Icon,
+  label,
 }: {
   tab: EditorTab;
   active: boolean;
   onSelect: () => void;
-  children: ReactNode;
+  Icon: LucideIcon;
+  label: string;
 }) {
   return (
     <button
@@ -271,13 +391,12 @@ function TabButton({
       data-tab={tab}
       onClick={onSelect}
       className={cn(
-        "rounded px-2 py-1 text-xs transition-colors",
-        active
-          ? "bg-muted font-medium text-foreground"
-          : "text-muted-foreground hover:text-foreground",
+        "flex items-center gap-1.5 rounded-sm px-2 py-1 font-medium text-xs transition-colors",
+        active ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >
-      {children}
+      <Icon className="size-3.5" />
+      {label}
     </button>
   );
 }

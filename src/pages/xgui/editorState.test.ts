@@ -71,6 +71,16 @@ describe("editorReducer", () => {
     );
   });
 
+  it("setTab switches to the read-only XML tab (task 476)", () => {
+    const state: EditorState = { ...CLEAN, open: openDoc() };
+    const next = editorReducer(state, { type: "setTab", tab: "xml" });
+    expect(next.activeTab).toBe("xml");
+    // The XML view is purely read-only — flipping to it is a view change, never a
+    // document edit, so it must not dirty the component or touch undo history.
+    expect(next.dirty).toBe(false);
+    expect(next.past).toHaveLength(0);
+  });
+
   it("setModelText updates the model text but does NOT mark dirty", () => {
     const state: EditorState = { ...CLEAN, open: openDoc() };
     const next = editorReducer(state, { type: "setModelText", text: '{"health":5}' });

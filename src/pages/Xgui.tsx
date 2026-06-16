@@ -17,8 +17,9 @@
  * @see design/xgui_ta.md — "High Level Visual Layout" (the three columns).
  */
 
-import { PanelLeftOpen } from "lucide-react";
-import type { ReactNode } from "react";
+import { Loader2, PanelLeftOpen, Save } from "lucide-react";
+import { type ReactNode, useEffect } from "react";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
+import { useComponentSave } from "./xgui/useComponentSave";
 
 export interface XguiProps {
   /**
@@ -109,6 +111,22 @@ function MainContent() {
   const { state, dispatch } = useEditorStore();
   const open = state.open;
   const activeTab = state.activeTab;
+  const dirty = state.dirty;
+  const { save, saving, error, clearError } = useComponentSave();
+
+  // Warn on app close / reload while the open component is dirty — nothing
+  // auto-saves, so an intentional reload must confirm before discarding edits.
+  // Registered only while dirty so a clean editor never blocks a reload. Mirrors
+  // the Workbench's app-close guard.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -138,7 +156,46 @@ function MainContent() {
             {open.path}
           </span>
         )}
+        {open && (
+          <Button
+            size="sm"
+            variant={dirty ? "default" : "outline"}
+            disabled={!dirty || saving}
+            onClick={() => void save()}
+            className="h-7 gap-1.5 px-2.5 text-xs"
+            title={dirty ? "Save this component (XML + controller)" : "No unsaved changes"}
+          >
+            {saving ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            ) : (
+              <Save className="size-3.5" aria-hidden />
+            )}
+            Save
+            {dirty && !saving && (
+              <span
+                role="img"
+                aria-label="Unsaved changes"
+                className="size-1.5 rounded-full bg-primary-foreground"
+              />
+            )}
+          </Button>
+        )}
       </div>
+
+      {/* A failed save surfaces here and KEEPS the component dirty (design risk
+          #5) so the user knows the save didn't land and can retry. */}
+      {error && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-destructive/10 px-3 py-1.5 text-destructive text-xs">
+          <span className="min-w-0 truncate">Save failed: {error}</span>
+          <button
+            type="button"
+            onClick={clearError}
+            className="shrink-0 rounded px-1.5 py-0.5 font-medium hover:bg-destructive/20"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="relative min-h-0 flex-1">
         {mainContentMode(open) === "preview" && open ? (

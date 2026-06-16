@@ -39,6 +39,9 @@ import {
 } from "./guiTree";
 import { NewComponentDialog } from "./NewComponentDialog";
 import { buildOpenComponent } from "./openComponent";
+import { decideSwitch, type SwitchChoice } from "./switchGuard";
+import { UnsavedSwitchDialog } from "./UnsavedSwitchDialog";
+import { useComponentSave } from "./useComponentSave";
 
 const EMPTY_TREE: GuiFolder = { name: "", path: "", folders: [], components: [] };
 
@@ -68,6 +71,7 @@ export type ComponentListProps = {
 
 export function ComponentList({ collapsed, className }: ComponentListProps) {
   const { state, dispatch } = useEditorStore();
+  const { save, saving: savingSwitch } = useComponentSave();
   const [tree, setTree] = useState<GuiFolder>(EMPTY_TREE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,9 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   // Collapsed folder paths. Empty = everything expanded.
   const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(() => new Set());
   const [newOpen, setNewOpen] = useState(false);
+  // The component the user asked to open while the current one is dirty — held
+  // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
+  const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
 
   const reload = useCallback(async (): Promise<GuiFolder | null> => {
     setLoading(true);
@@ -140,6 +147,51 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       }
     },
     [dispatch],
+  );
+
+  // Guarded entry every row click goes through: if the open component is dirty
+  // and the user is switching to a DIFFERENT component, intercept with the
+  // Save/Discard/Cancel prompt before discarding edits (warn-on-switch, F11).
+  // A clean component (or re-selecting the open one) opens immediately.
+  const requestOpen = useCallback(
+    (ref: GuiComponentRef) => {
+      if (
+        decideSwitch({ openName: state.open?.name ?? null, dirty: state.dirty }, ref.name) ===
+        "proceed"
+      ) {
+        void openComponent(ref);
+        return;
+      }
+      setPendingSwitch(ref);
+    },
+    [state.open, state.dirty, openComponent],
+  );
+
+  // Resolve the warn-on-switch prompt. Save persists then switches (only if the
+  // save lands — a failed save keeps us on the current component with the prompt
+  // closed and the error surfaced by the Save button). Discard switches, losing
+  // edits. Cancel stays put.
+  const resolveSwitch = useCallback(
+    async (choice: SwitchChoice) => {
+      const ref = pendingSwitch;
+      if (choice === "cancel") {
+        setPendingSwitch(null);
+        return;
+      }
+      if (choice === "save") {
+        const ok = await save();
+        // A failed save must NOT discard the user's edits — abort the switch and
+        // leave them on the still-dirty component to retry or discard explicitly.
+        if (!ok) {
+          setPendingSwitch(null);
+          return;
+        }
+      }
+      // save succeeded, or the user chose to discard.
+      setPendingSwitch(null);
+      if (ref) void openComponent(ref);
+    },
+    [pendingSwitch, save, openComponent],
   );
 
   // After a create: refresh the tree, then open the new component if we can find it.
@@ -244,7 +296,7 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
                   row={row}
                   active={openName === row.component.name}
                   dirty={isDirty && openName === row.component.name}
-                  onOpen={() => void openComponent(row.component)}
+                  onOpen={() => requestOpen(row.component)}
                 />
               ),
             )}
@@ -257,6 +309,13 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
         onOpenChange={setNewOpen}
         tree={tree}
         onCreated={handleCreated}
+      />
+
+      <UnsavedSwitchDialog
+        open={pendingSwitch != null}
+        componentName={state.open?.name ?? null}
+        saving={savingSwitch}
+        onChoose={(choice) => void resolveSwitch(choice)}
       />
     </div>
   );

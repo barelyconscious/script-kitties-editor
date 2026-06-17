@@ -1,8 +1,19 @@
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 // BTreeMap (not HashMap) for stat maps: it iterates keys in sorted order, so
 // serde emits them alphabetically and deterministically. HashMap's randomized
 // iteration order churned the whole stats block on every save.
 use std::collections::BTreeMap;
+
+/// The GUI color palette: a flat, **order-preserving** map of palette name
+/// (an identifier, e.g. `TextDefault`) -> color-code string (`r,g,b,a`, e.g.
+/// `185,178,165,255`). The runtime resolves `textColor="TextDefault"` against
+/// this same map, so the on-disk shape is exactly this object.
+///
+/// `IndexMap` (not `BTreeMap`) because key order is author-controlled and must
+/// round-trip: re-saving an untouched palette should produce a byte-identical
+/// file, so an edit yields a minimal diff. Lives at `Data/gui_palette.json`.
+pub type Palette = IndexMap<String, String>;
 
 #[derive(Serialize, Deserialize)]
 pub enum GameObjectType {
@@ -240,6 +251,52 @@ pub struct ManifestUpdate {
     pub updated: Vec<String>,
     /// Asset names dropped because their file no longer exists on disk.
     pub removed: Vec<String>,
+}
+
+/// Whether a GUI component's root XML element is a `<View>` (a top-level screen)
+/// or anything else (a reusable widget). Classified by peeking only the root tag,
+/// never by parsing the component's body. Serialized lowercase to match the
+/// design's `"view" | "widget"` shape.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GuiComponentKind {
+    View,
+    Widget,
+}
+
+/// One `.xml` component file in the `gui/` tree, as surfaced to the component
+/// list. Deliberately lightweight: name + path + a root-tag classification +
+/// a sibling-controller hint. The full element tree is parsed only when the
+/// component is opened, not at list time.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GuiComponentRef {
+    /// Basename without extension, e.g. "bag_slot".
+    pub name: String,
+    /// Full filename, e.g. "bag_slot.xml".
+    pub file_name: String,
+    /// gui-relative path to the file, e.g. "widgets/bag_slot.xml".
+    pub path: String,
+    /// "view" if the root element is `<View>`, else "widget".
+    pub kind: GuiComponentKind,
+    /// Sibling "{name}_controller.lua" if one exists alongside the .xml, else null.
+    pub controller_file_name: Option<String>,
+}
+
+/// A folder in the `gui/` tree, recursive. The root folder has an empty `name`
+/// and empty `path`. Mirrors the on-disk subfolder structure exactly, including
+/// empty folders.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GuiFolder {
+    /// Folder name ("" for the gui/ root).
+    pub name: String,
+    /// gui-relative path ("" root, "widgets", "profile/cards").
+    pub path: String,
+    /// Subfolders, recursive.
+    pub folders: Vec<GuiFolder>,
+    /// `.xml` component files directly in this folder.
+    pub components: Vec<GuiComponentRef>,
 }
 
 #[derive(Serialize, Deserialize)]

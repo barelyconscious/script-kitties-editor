@@ -8,6 +8,7 @@ import {
   type RegistryEnumKey,
   useRegistry,
 } from "@/lib/registry";
+import RegistryPalette from "./RegistryPalette";
 
 /**
  * The enum sections, in display order, with editor-facing copy. `readOnly`
@@ -116,54 +117,76 @@ export default function Registry() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-semibold text-lg">Registry</h1>
-          <p className="max-w-prose text-muted-foreground text-sm">
-            Tweakable enums that populate the editor's dropdowns. Values are written into game data;
-            descriptions are notes for you.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {status && (
-            <span
-              className={status.ok ? "text-muted-foreground text-sm" : "text-destructive text-sm"}
-            >
-              {status.message}
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(registry)}
-          >
-            <RotateCcw /> Reset
-          </Button>
-          <Button size="sm" disabled={!dirty || saving} onClick={() => void handleSave()}>
-            <Save /> Save
-          </Button>
-        </div>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div>
+        <h1 className="font-semibold text-lg">Registry</h1>
+        <p className="max-w-prose text-muted-foreground text-sm">
+          Two kinds of data live here, each saved to its own file: the editor's own dropdown enums,
+          and the GUI color palette the game reads at runtime.
+        </p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
-          <p className="text-muted-foreground text-sm">Loading…</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {SECTIONS.map(({ key, title, blurb, readOnly }) => (
-              <EnumSection
-                key={key}
-                title={title}
-                blurb={blurb}
-                readOnly={readOnly}
-                entries={draft[key]}
-                onChange={(entries) => setSection(key, entries)}
-              />
-            ))}
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
+        {/* Region 1 — editor-facing enums; writes editor.registry.json. */}
+        <section>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-base">Editor enums</h2>
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] text-muted-foreground">
+                  editor.registry.json
+                </code>
+              </div>
+              <p className="max-w-prose text-muted-foreground text-sm">
+                Values that populate the editor's own dropdowns. Values are written into game data;
+                descriptions are notes for you.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {status && (
+                <span
+                  className={
+                    status.ok ? "text-muted-foreground text-sm" : "text-destructive text-sm"
+                  }
+                >
+                  {status.message}
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!dirty || saving}
+                onClick={() => setDraft(registry)}
+              >
+                <RotateCcw /> Reset
+              </Button>
+              <Button size="sm" disabled={!dirty || saving} onClick={() => void handleSave()}>
+                <Save /> Save
+              </Button>
+            </div>
           </div>
-        )}
+
+          {loading ? (
+            <p className="text-muted-foreground text-sm">Loading…</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {SECTIONS.map(({ key, title, blurb, readOnly }) => (
+                <EnumSection
+                  key={key}
+                  title={title}
+                  blurb={blurb}
+                  readOnly={readOnly}
+                  entries={draft[key]}
+                  onChange={(entries) => setSection(key, entries)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Region 2 — game-facing color palette; writes Data/gui_palette.json.
+            Its own draft + dirty + Save live inside the component. */}
+        <RegistryPalette />
       </div>
     </div>
   );

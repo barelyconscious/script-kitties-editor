@@ -8,9 +8,13 @@ use crate::commands::creatures::{get_creatures, save_creature};
 use crate::commands::dlc::{get_dlcs, save_dlc};
 use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
+use crate::commands::gui::{
+    create_component, create_folder, get_component, get_gui_tree, save_component,
+};
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
+use crate::commands::palette::{get_palette, save_palette};
 use crate::commands::registry::{get_registry, save_registry};
 use crate::commands::scripts::{create_script, get_script, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
@@ -186,10 +190,18 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .manage(dal)
-        .setup(|_app| {
+        .setup(|app| {
+            use tauri::Manager;
+
+            // Hand the DAL's filesystem watcher the AppHandle it emits through.
+            // The watcher was built in `Dal::new` (before the app existed) with an
+            // empty emit slot; this fills it so external edits under gui/ now emit
+            // the `gui-changed` event the XGUI editor live-reloads from.
+            app.state::<Dal>().set_app_handle(app.handle().clone());
+
             // Kill WebView2's native form autofill ("Saved info") app-wide.
             #[cfg(windows)]
-            disable_webview_autofill(_app);
+            disable_webview_autofill(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -215,6 +227,8 @@ pub fn run() {
             save_bundle,
             get_packs,
             save_pack,
+            get_palette,
+            save_palette,
             get_registry,
             save_registry,
             get_sprite,
@@ -223,7 +237,12 @@ pub fn run() {
             get_script,
             save_script,
             create_script,
-            get_game_objects
+            get_game_objects,
+            get_gui_tree,
+            get_component,
+            save_component,
+            create_component,
+            create_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

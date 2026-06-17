@@ -3,10 +3,19 @@
 A Tauri 2 desktop app for editing the `worlds-cpp` game's data. It
 reads and writes the game's JSON files (abilities, creatures, items, charms, biograms,
 effects, DLC) directly from a configurable game-install directory, with sprite previews,
-schema-driven edit forms, and a creature balancing view.
+schema-driven edit forms, a creature balancing view, and a visual GUI editor.
+
+![The GUI editor — component tree, live preview on a blueprint canvas, properties, and the auto-scaffolded data model](res/gui_editor.png)
 
 ## Features
 
+- **GUI Editor** — a visual editor for the game's GUI components (XML layouts + optional Lua
+  controllers), sourced from the project's `gui/` folder. Browse components in a folder tree,
+  edit the element hierarchy and properties, and see a **live preview** on a blueprint canvas
+  with zoom/pan and drag-to-move. Properties bind to a **data model** that auto-scaffolds from
+  the layout's `{token}` references; named colors come from an editable palette; a Lua
+  controller tab and a live XML view sit alongside the preview. Undo/redo, Cmd/Ctrl+S save, and
+  live reload when files change on disk.
 - **Data Tables** — browse, search, and edit abilities, biograms, charms, effects, and
   items. Items join their `itemDropTable` entry (rarity, value, biome) in one row.
 - **Creature Editor** — edit a creature's base stats and per-level growth in one grid,

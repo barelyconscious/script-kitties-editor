@@ -1,0 +1,167 @@
+import { describe, expect, it } from "vitest";
+import { mountDecision, resolveOverrides, srcBasename } from "./guiComponentMount";
+import type { GuiNode } from "./guiNode";
+import { mintNodeId } from "./guiNode";
+import { ScopeStack } from "./guiScope";
+
+/** Build a bare `<Component>` GuiNode with the given attrs. */
+function component(attrs: Record<string, string>): GuiNode {
+  return { nodeId: mintNodeId(), tag: "Component", attrs, children: [] };
+}
+
+describe("srcBasename", () => {
+  it("returns a bare basename unchanged", () => {
+    expect(srcBasename("bag_slot.xml")).toBe("bag_slot.xml");
+  });
+
+  it("strips path segments (defensive — src is basename by design)", () => {
+    expect(srcBasename("widgets/bag_slot.xml")).toBe("bag_slot.xml");
+    expect(srcBasename("a\\b\\bag_slot.xml")).toBe("bag_slot.xml");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(srcBasename("  bag_slot.xml  ")).toBe("bag_slot.xml");
+  });
+
+  it("maps blank/absent to the empty string (→ missing)", () => {
+    expect(srcBasename("")).toBe("");
+    expect(srcBasename("   ")).toBe("");
+    expect(srcBasename(undefined)).toBe("");
+  });
+});
+
+describe("resolveOverrides — child fresh-root model (F6a)", () => {
+  it("passes literal overrides straight through as concrete values", () => {
+    const node = component({ src: "row.xml", actionText: "Sell", qty: "3" });
+    const overrides = resolveOverrides(node, ScopeStack.root({}));
+    expect(overrides).toEqual({ actionText: "Sell", qty: "3" });
+  });
+
+  it("excludes structural attrs (src/forEach/key/id/geometry/layer/visible)", () => {
+    const node = component({
+      src: "row.xml",
+      forEach: "{rows}",
+      key: "{id}",
+      id: "slot",
+      position: "0,0,0,0",
+      size: "0,0,64,64",
+      layer: "5",
+      visible: "true",
+      label: "Hi",
+    });
+    const overrides = resolveOverrides(node, ScopeStack.root({}));
+    // Only the freeform `label` survives as a data override.
+    expect(overrides).toEqual({ label: "Hi" });
+  });
+
+  it("PRE-RESOLVES a bare token override in the PARENT's item scope (forEach)", () => {
+    // <Component label="{name}"/> sitting under a forEach over biograms — the
+    // parent's current item scope is THIS biogram, so {name} resolves to its name.
+    const itemScope = ScopeStack.root({ theme: "dark" }).push({ name: "Bitlynx" });
+    const node = component({ src: "slot.xml", label: "{name}" });
+    const overrides = resolveOverrides(node, itemScope);
+    expect(overrides).toEqual({ label: "Bitlynx" });
+  });
+
+  it("PRE-RESOLVES a $.token override against the PARENT root", () => {
+    const itemScope = ScopeStack.root({ theme: "dark" }).push({ name: "x" });
+    const node = component({ src: "slot.xml", tint: "{$.theme}" });
+    const overrides = resolveOverrides(node, itemScope);
+    expect(overrides).toEqual({ tint: "dark" });
+  });
+
+  it("interpolates string-form overrides in the parent scope", () => {
+    const scope = ScopeStack.root({ n: 7 });
+    const node = component({ src: "slot.xml", caption: "Item {n}" });
+    const overrides = resolveOverrides(node, scope);
+    expect(overrides).toEqual({ caption: "Item 7" });
+  });
+
+  it("passes an UNRESOLVED-in-parent override as its literal token form (visible miss)", () => {
+    // {missing} is not in the parent model → it stays "{missing}", surfacing the
+    // miss visibly at the boundary rather than silently re-resolving in the child.
+    const node = component({ src: "slot.xml", label: "{missing}" });
+    const overrides = resolveOverrides(node, ScopeStack.root({ other: 1 }));
+    expect(overrides).toEqual({ label: "{missing}" });
+  });
+
+  it("builds a fresh root with NO parent data leak", () => {
+    // The parent has `money`; the child is NOT handed it (not named as an override).
+    const node = component({ src: "slot.xml", qty: "3" });
+    const overrides = resolveOverrides(node, ScopeStack.root({ money: 999 }));
+    expect(overrides).not.toHaveProperty("money");
+    // And the child root resolves its own bare tokens against overrides only:
+    const childScope = ScopeStack.root(overrides);
+    expect(childScope.lookup("qty")).toBe("3");
+    expect(childScope.lookup("money")).toBeUndefined(); // no parent fall-through
+    // $. inside the child means the child's own root (= overrides), not parent root.
+    expect(childScope.lookup("$.qty")).toBe("3");
+    expect(childScope.lookup("$.money")).toBeUndefined();
+  });
+});
+
+describe("mountDecision — cycle guard + blank src", () => {
+  it("yields a mount decision for a resolvable src with empty ancestry", () => {
+    const decision = mountDecision(component({ src: "a.xml" }));
+    expect(decision).toEqual({
+      kind: "mount",
+      basename: "a.xml",
+      childAncestry: new Set(["a.xml"]),
+    });
+  });
+
+  it("carries the parent ancestry forward, adding this basename", () => {
+    const decision = mountDecision(component({ src: "b.xml" }), new Set(["a.xml"]));
+    expect(decision.kind).toBe("mount");
+    if (decision.kind === "mount") {
+      expect(decision.basename).toBe("b.xml");
+      expect([...decision.childAncestry].sort()).toEqual(["a.xml", "b.xml"]);
+    }
+  });
+
+  it("returns a 'missing' placeholder for a blank/absent src", () => {
+    expect(mountDecision(component({}))).toEqual({ kind: "placeholder", reason: "missing" });
+    expect(mountDecision(component({ src: "   " }))).toEqual({
+      kind: "placeholder",
+      reason: "missing",
+    });
+  });
+
+  it("returns a 'recursive' placeholder when src is already on the mount path (A→A)", () => {
+    const decision = mountDecision(component({ src: "a.xml" }), new Set(["a.xml"]));
+    expect(decision).toEqual({ kind: "placeholder", reason: "recursive" });
+  });
+
+  it("catches A→B→A via the ancestor set (not a depth cap)", () => {
+    // Simulate descending A (ancestry {}), then B (ancestry {a}), then A again.
+    const a = mountDecision(component({ src: "a.xml" }), new Set());
+    expect(a.kind).toBe("mount");
+    if (a.kind !== "mount") return;
+    const b = mountDecision(component({ src: "b.xml" }), a.childAncestry);
+    expect(b.kind).toBe("mount");
+    if (b.kind !== "mount") return;
+    // Now B mounts A again — already in {a, b} → recursive stub.
+    const aAgain = mountDecision(component({ src: "a.xml" }), b.childAncestry);
+    expect(aAgain).toEqual({ kind: "placeholder", reason: "recursive" });
+  });
+
+  it("does NOT false-trip on a legitimately deep acyclic chain (A→B→C→D)", () => {
+    let ancestry: ReadonlySet<string> = new Set();
+    for (const src of ["a.xml", "b.xml", "c.xml", "d.xml"]) {
+      const d = mountDecision(component({ src }), ancestry);
+      expect(d.kind).toBe("mount");
+      if (d.kind !== "mount") return;
+      ancestry = d.childAncestry;
+    }
+    // A sibling re-use of a NON-ancestor basename is fine (diamond, not cycle):
+    // mounting `b.xml` again from a path that does not contain it still mounts.
+    const fresh = mountDecision(component({ src: "b.xml" }), new Set(["a.xml"]));
+    expect(fresh.kind).toBe("mount");
+  });
+
+  it("normalizes the src basename before the ancestry check", () => {
+    // A path-y src collides with a bare-basename ancestor entry.
+    const decision = mountDecision(component({ src: "widgets/a.xml" }), new Set(["a.xml"]));
+    expect(decision).toEqual({ kind: "placeholder", reason: "recursive" });
+  });
+});

@@ -3111,6 +3111,7 @@ name = "script-kitties-editor"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "indexmap 2.14.0",
  "moka",
  "notify",
  "rfd",

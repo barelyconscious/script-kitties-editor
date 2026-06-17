@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>XGUI Editor — Mock</title>
+<style>
+  :root {
+    --bg: #1a1b1e;
+    --panel: #212327;
+    --panel-2: #26282d;
+    --line: #34373d;
+    --text: #d6d3cb;       /* matches default GUI textColor 185,178,165 vibe */
+    --muted: #8a8f98;
+    --dim: #5c6068;
+    --accent: #6ea8fe;
+    --accent-dim: #3a557f;
+    --warn: #e3b341;
+    --select: #2d3c54;
+    --token: #b48ead;       /* unresolved {token} styling */
+    --good: #7ec699;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden;
+  }
+  .app { display: grid; grid-template-columns: 48px 220px 290px 1fr; height: 100vh; }
+
+  /* ---------- navrail ---------- */
+  .navrail {
+    background: #161719; border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 10px;
+  }
+  .nav-btn {
+    width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center;
+    color: var(--muted); cursor: pointer; font-size: 18px;
+  }
+  .nav-btn:hover { background: #222; color: var(--text); }
+  .nav-btn.active { background: var(--accent-dim); color: #fff; }
+
+  /* ---------- generic panel chrome ---------- */
+  .col { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); background: var(--panel); }
+  .phead {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--line); background: var(--panel-2);
+    user-select: none;
+  }
+  .phead .actions { display: flex; gap: 6px; }
+  .iconbtn {
+    width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+    color: var(--muted); cursor: pointer; font-size: 14px; background: transparent; border: 0;
+  }
+  .iconbtn:hover { background: #33363c; color: var(--text); }
+
+  /* ---------- component list ---------- */
+  .search {
+    margin: 8px; padding: 6px 9px; background: #17181b; border: 1px solid var(--line);
+    border-radius: 7px; color: var(--muted); font-size: 12px;
+  }
+  .group-label { padding: 6px 12px 2px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .litem {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; color: var(--text);
+  }
+  .litem:hover { background: #2a2c31; }
+  .litem.active { background: var(--select); }
+  .litem .ic { width: 16px; text-align: center; color: var(--muted); }
+  .litem.active .ic { color: var(--accent); }
+  .litem .dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+  .badge { font-size: 9px; padding: 1px 5px; border-radius: 4px; background: #33363c; color: var(--muted); letter-spacing: .04em; }
+
+  /* ---------- structure column (3 vertical slices) ---------- */
+  .struct { display: grid; grid-template-rows: 1.1fr 1.4fr .9fr; min-height: 0; }
+  .slice { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+  .slice .body { overflow: auto; padding: 4px 0; }
+
+  .tnode { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+  .tnode:hover { background: #2a2c31; }
+  .tnode.sel { background: var(--select); box-shadow: inset 2px 0 0 var(--accent); }
+  .tnode .tag { color: var(--accent); }
+  .tnode .nid { color: var(--muted); }
+  .tnode .ic { color: var(--dim); width: 12px; text-align: center; }
+
+  /* properties */
+  .props { padding: 8px 10px; display: flex; flex-direction: column; gap: 9px; }
+  .computed { font-size: 11px; color: var(--muted); background: #17181b; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .computed b { color: var(--text); font-weight: 600; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field > label { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--dim); }
+  .field input, .field .fake {
+    background: #17181b; border: 1px solid var(--line); border-radius: 6px; color: var(--text);
+    padding: 5px 7px; font-size: 12px; width: 100%;
+  }
+  .quad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .quad .sub { display: flex; flex-direction: column; gap: 2px; }
+  .quad .sub small { font-size: 9px; color: var(--dim); text-align: center; }
+  .quad input { text-align: center; padding: 4px 2px; }
+  .swatch { display: flex; align-items: center; gap: 7px; }
+  .swatch .chip { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line); }
+
+  /* events */
+  .erow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; }
+  .erow .ename { color: var(--good); }
+  .erow .arrow { color: var(--dim); }
+  .erow .ehandler { color: var(--accent); }
+  .erow .x { margin-left: auto; color: var(--dim); cursor: pointer; }
+  .add-event { margin: 4px 10px; padding: 5px; text-align: center; font-size: 11px; color: var(--muted);
+    border: 1px dashed var(--line); border-radius: 6px; cursor: pointer; }
+  .add-event:hover { color: var(--text); border-color: var(--dim); }
+
+  /* ---------- main content ---------- */
+  .main { display: grid; grid-template-rows: auto 1fr; min-width: 0; background: var(--bg); }
+  .tabbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+  .tab { padding: 7px 14px; font-size: 12px; color: var(--muted); cursor: pointer; border-radius: 7px 7px 0 0; }
+  .tab.active { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-bottom-color: var(--bg); margin-bottom: -1px; }
+  .tabbar .spacer { margin-left: auto; }
+  .savebtn {
+    display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 6px; padding: 6px 12px; border-radius: 7px;
+    background: var(--accent-dim); color: #fff; font-size: 12px; cursor: pointer; border: 1px solid #41618f;
+  }
+  .savebtn .udot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+
+  .stage { display: grid; grid-template-columns: 1fr 270px; min-height: 0; }
+  .canvaswrap { position: relative; overflow: auto; display: grid; place-items: center; padding: 24px;
+    background:
+      linear-gradient(#0000 0 0) ,
+      repeating-conic-gradient(#1e1f23 0% 25%, #191a1d 0% 50%) 50% / 22px 22px; }
+
+  /* the previewed Bag GUI (approx of the example XML) */
+  .gui {
+    position: relative; width: 300px; height: 430px; background: #000; border: 1px solid #000;
+    color: var(--text); box-shadow: 0 10px 40px #0008;
+  }
+  .sel-outline { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .g-title { position: absolute; top: 18px; left: 0; right: 0; text-align: center; font-size: 22px; }
+  .g-moneybg { position: absolute; top: 318px; left: 18px; right: 20px; height: 36px; border: 1px solid #ff0; display: flex; align-items: center; }
+  .g-coin { width: 28px; height: 28px; margin: 2px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffe169, #c8941b); }
+  .g-money { margin-left: 6px; }
+  .token { color: var(--token); font-style: italic; border-bottom: 1px dashed var(--token); }
+  .g-close { position: absolute; top: 8px; right: 10px; width: 32px; height: 32px; border: 1px solid #444; display: grid; place-items: center; color: var(--muted); }
+  .g-slots { position: absolute; top: 60px; left: 18px; right: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .g-slot { aspect-ratio: 1; border: 1px solid #333; background: #0d0d0f; display: grid; place-items: center; color: var(--dim); font-size: 10px; }
+  .drag-tip { position: absolute; bottom: 8px; left: 10px; font-size: 11px; color: var(--dim); }
+  .grab { cursor: grab; }
+
+  /* data model panel */
+  .dm { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .dm pre { margin: 0; padding: 10px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--text); overflow: auto; }
+  .dm .k { color: var(--accent); }
+  .dm .n { color: var(--good); }
+  .dm .note { padding: 8px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+
+  .legend { position: fixed; bottom: 10px; right: 14px; font-size: 10px; color: var(--dim); display: flex; gap: 14px; }
+  .legend span b { color: var(--token); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- navrail -->
+  <nav class="navrail">
+    <div class="nav-btn" title="Workbench">▦</div>
+    <div class="nav-btn active" title="GUI Editor">▤</div>
+    <div class="nav-btn" title="Data Tables">▥</div>
+    <div class="nav-btn" title="Registry">⊞</div>
+  </nav>
+
+  <!-- component list -->
+  <section class="col">
+    <div class="phead">
+      <span>Components</span>
+      <div class="actions"><button class="iconbtn" title="New component">＋</button></div>
+    </div>
+    <div class="search">Search components…</div>
+
+    <div class="group-label">Screens (Views)</div>
+    <div class="litem"><span class="ic">▢</span> Profile</div>
+    <div class="litem active"><span class="ic">▢</span> Bag <span class="dot" title="Unsaved changes"></span></div>
+    <div class="litem"><span class="ic">▢</span> Battle</div>
+
+    <div class="group-label">Widgets</div>
+    <div class="litem"><span class="ic">◇</span> bag_slot <span class="badge">reusable</span></div>
+    <div class="litem"><span class="ic">◇</span> close_button <span class="badge">reusable</span></div>
+  </section>
+
+  <!-- structure column: tree / properties / events -->
+  <section class="col struct">
+
+    <!-- tree -->
+    <div class="slice">
+      <div class="phead"><span>Tree</span></div>
+      <div class="body">
+        <div class="tnode"><span class="ic">▾</span><span class="tag">&lt;View&gt;</span></div>
+        <div class="tnode" style="padding-left:24px"><span class="ic">▾</span><span class="tag">&lt;Panel&gt;</span><span class="nid">root</span></div>
+        <div class="tnode" style="padding-left:40px"><span class="ic">◇</span><span class="tag">&lt;Component&gt;</span><span class="nid">closeButton</span></div>
+        <div class="tnode" style="padding-left:40px"><span class="ic">·</span><span class="tag">&lt;Text&gt;</span><span class="nid">title</span></div>
+        <div class="tnode sel" style="padding-left:40px"><span class="ic">▾</span><span class="tag">&lt;Panel&gt;</span><span class="nid">moneyBg</span></div>
+        <div class="tnode" style="padding-left:56px"><span class="ic">·</span><span class="tag">&lt;Panel&gt;</span><span class="nid">coin</span></div>
+        <div class="tnode" style="padding-left:56px"><span class="ic">·</span><span class="tag">&lt;Text&gt;</span><span class="nid">money</span></div>
+        <div class="tnode" style="padding-left:56px"><span class="ic">·</span><span class="tag">&lt;Text&gt;</span><span class="nid">hint</span></div>
+        <div class="tnode" style="padding-left:40px"><span class="ic">◇</span><span class="tag">&lt;Component&gt;</span><span class="nid">slot1</span></div>
+        <div class="tnode" style="padding-left:40px"><span class="ic">◇</span><span class="tag">&lt;Component&gt;</span><span class="nid">slot2</span></div>
+        <div class="tnode" style="padding-left:40px"><span class="ic">◇</span><span class="tag">&lt;Component&gt;</span><span class="nid">slot3</span></div>
+      </div>
+    </div>
+
+    <!-- properties -->
+    <div class="slice">
+      <div class="phead"><span>Properties — &lt;Panel&gt;</span></div>
+      <div class="body props">
+        <div class="computed">id: <b>view.root.moneyBg</b></div>
+
+        <div class="field"><label>id (local)</label><input value="moneyBg"></div>
+
+        <div class="field">
+          <label>position &nbsp;·&nbsp; scale / offset</label>
+          <div class="quad">
+            <div class="sub"><input value="0"><small>sx</small></div>
+            <div class="sub"><input value="0"><small>sy</small></div>
+            <div class="sub"><input value="18"><small>ox</small></div>
+            <div class="sub"><input value="318"><small>oy</small></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>size &nbsp;·&nbsp; scale / offset</label>
+          <div class="quad">
+            <div class="sub"><input value="1"><small>sx</small></div>
+            <div class="sub"><input value="0"><small>sy</small></div>
+            <div class="sub"><input value="-38"><small>ox</small></div>
+            <div class="sub"><input value="36"><small>oy</small></div>
+          </div>
+        </div>
+
+        <div class="field"><label>border color</label>
+          <div class="swatch"><span class="chip" style="background:#ff0"></span><span class="fake" style="width:auto;flex:1">255, 255, 0, 255</span></div>
+        </div>
+        <div class="field"><label>on mouse entered</label><input value="showHint"></div>
+        <div class="field"><label>on mouse exited</label><input value="hideHint"></div>
+      </div>
+    </div>
+
+    <!-- events -->
+    <div class="slice" style="border-bottom:0">
+      <div class="phead"><span>Events (View)</span></div>
+      <div class="body">
+        <div class="erow"><span class="ename">OnItemSold</span><span class="arrow">→</span><span class="ehandler">refresh</span><span class="x">✕</span></div>
+        <div class="erow"><span class="ename">OnItemBought</span><span class="arrow">→</span><span class="ehandler">refresh</span><span class="x">✕</span></div>
+        <div class="add-event">＋ Add event listener</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- main content -->
+  <section class="main">
+    <div class="tabbar">
+      <div class="tab active">View</div>
+      <div class="tab">Controller</div>
+      <div class="spacer"></div>
+      <div class="savebtn"><span class="udot"></span> Save</div>
+    </div>
+
+    <div class="stage">
+      <!-- preview -->
+      <div class="canvaswrap">
+        <div class="gui">
+          <div class="g-close">✕</div>
+          <div class="g-title">Bag</div>
+          <div class="g-slots">
+            <div class="g-slot">slot1</div>
+            <div class="g-slot">slot2</div>
+            <div class="g-slot">slot3</div>
+          </div>
+          <div class="g-moneybg sel-outline grab" title="Selected — drag to move (offset only)">
+            <div class="g-coin"></div>
+            <div class="g-money"><span class="token">{money}</span></div>
+          </div>
+          <div class="drag-tip">drag to move · scale stays fixed</div>
+        </div>
+      </div>
+
+      <!-- data model -->
+      <aside class="dm">
+        <div class="phead"><span>Data Model</span><div class="actions"><button class="iconbtn" title="Collapse">»</button></div></div>
+        <pre>{
+  <span class="k">"money"</span>: <span class="n">240</span>,
+  <span class="k">"items"</span>: [
+    <span class="k">"potion"</span>, <span class="k">"key"</span>
+  ]
+}</pre>
+        <div class="note">The preview resolves <span class="token">{money}</span> → <b>240</b> when this model is applied. Empty model shows the literal token.</div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<div class="legend">
+  <span><b>{token}</b> = unresolved binding</span>
+  <span>● = unsaved changes</span>
+  <span>blue outline = current selection (tree ⇄ preview)</span>
+</div>
+</body>
+</html>

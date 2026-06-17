@@ -80,6 +80,42 @@ impl Dal {
         Ok(map)
     }
 
+    /// Remove a single entry from `assets.json` by name, preserving the order of
+    /// every remaining entry. The rollback counterpart of [`Dal::insert_manifest_entry`]:
+    /// used to undo a just-inserted entry when a later step of a multi-write create
+    /// fails (e.g. the `.xml` manifest entry landed but the controller `.lua` entry
+    /// failed). Best-effort by nature of rollback, but it fails loudly if the file
+    /// can't be read/parsed/written so callers can surface a wedged manifest.
+    ///
+    /// Returns the updated, ordered `HashMap` so the caller can re-seed the manifest
+    /// cache. A no-op (name absent) is not an error — removing an entry that was
+    /// never inserted is the benign case for a rollback that didn't get that far.
+    pub(crate) fn remove_manifest_entry(
+        &self,
+        name: &str,
+    ) -> Result<HashMap<String, AssetEntry>, String> {
+        let path = self.manifest_path();
+        let contents = fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+        let mut root: Value = serde_json::from_str(&contents)
+            .map_err(|e| format!("failed to parse {}: {}", path.display(), e))?;
+
+        let obj = root
+            .as_object_mut()
+            .ok_or_else(|| format!("{} is not a JSON object", path.display()))?;
+
+        obj.remove(name);
+
+        // Match the manifest's on-disk style: 2-space pretty, no trailing newline.
+        let serialized = serde_json::to_string_pretty(&root)
+            .map_err(|e| format!("failed to serialize manifest: {}", e))?;
+        crate::dal::atomic_write(&path, serialized.as_bytes())?;
+
+        let map: HashMap<String, AssetEntry> = serde_json::from_value(root)
+            .map_err(|e| format!("failed to re-read manifest after remove: {}", e))?;
+        Ok(map)
+    }
+
     /// Rescan the entire game install tree and rebuild `assets.json` so newly
     /// added sprites, scripts, and data files become resolvable. Ported from the
     /// game's Electron `assetUpdater` — same extension filter (`.lua`/`.png`/

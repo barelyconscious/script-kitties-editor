@@ -1,15 +1,17 @@
-import { Database, Hammer, Library, Settings } from "lucide-react";
+import { Database, Hammer, LayoutTemplate, Library, Settings } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type NavRailTool = "workbench" | "data-tables" | "registry";
+export type NavRailTool = "workbench" | "xgui" | "data-tables" | "registry";
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
 const TOOLS: { id: NavRailTool; label: string; icon: IconComponent }[] = [
   { id: "workbench", label: "Workbench", icon: Hammer },
+  // The GUI editor sits between the Workbench and Data Tables (design Overview).
+  { id: "xgui", label: "GUI Editor", icon: LayoutTemplate },
   { id: "data-tables", label: "Data Tables", icon: Database },
   { id: "registry", label: "Registry", icon: Library },
 ];

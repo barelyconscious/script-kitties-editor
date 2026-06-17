@@ -8,6 +8,7 @@ import { cn } from "./lib/utils";
 import DataTables from "./pages/DataTables";
 import Registry from "./pages/Registry";
 import Workbench from "./pages/Workbench";
+import Xgui from "./pages/Xgui";
 
 function App() {
   const [activeTool, setActiveTool] = useState<NavRailTool>("workbench");
@@ -17,6 +18,13 @@ function App() {
   // localStorage later without touching this component.
   const [objectListCollapsed, setObjectListCollapsed] = usePreference(
     "workbench.objectListCollapsed",
+  );
+
+  // Same pattern for the XGUI editor's component-list pane: its collapse state
+  // lives in the preferences layer so it survives tool switches, and the XGUI
+  // rail icon toggles it when already on the GUI Editor tool.
+  const [componentListCollapsed, setComponentListCollapsed] = usePreference(
+    "xgui.componentListCollapsed",
   );
 
   // Safety net for Ctrl+W on Windows/Linux webviews (WebView2 / WebKitGTK),
@@ -49,9 +57,13 @@ function App() {
         setObjectListCollapsed((v) => !v);
         return;
       }
+      if (tool === "xgui" && activeTool === "xgui") {
+        setComponentListCollapsed((v) => !v);
+        return;
+      }
       setActiveTool(tool);
     },
-    [activeTool, setObjectListCollapsed],
+    [activeTool, setObjectListCollapsed, setComponentListCollapsed],
   );
 
   return (
@@ -62,8 +74,9 @@ function App() {
           <main
             className={cn(
               "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
-              // The Workbench is full-bleed; the form-first tools keep their padding.
-              activeTool !== "workbench" && "p-4",
+              // The Workbench and GUI Editor are full-bleed; the form-first tools
+              // keep their padding.
+              activeTool !== "workbench" && activeTool !== "xgui" && "p-4",
             )}
           >
             {/* The Workbench stays mounted (hidden when inactive) so its open tabs
@@ -75,6 +88,14 @@ function App() {
               className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "workbench" && "hidden")}
             >
               <Workbench objectListCollapsed={objectListCollapsed} />
+            </div>
+            {/* The GUI Editor likewise stays mounted so an open component and its
+              unsaved edits survive leaving and returning. */}
+            <div className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "xgui" && "hidden")}>
+              <Xgui
+                componentListCollapsed={componentListCollapsed}
+                active={activeTool === "xgui"}
+              />
             </div>
             {activeTool === "data-tables" && <DataTables />}
             {activeTool === "registry" && <Registry />}

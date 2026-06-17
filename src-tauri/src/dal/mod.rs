@@ -8,11 +8,13 @@ use std::{
 use moka::sync::Cache;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 use crate::{
     config::EditorConfig,
     model::{
-        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, Item, ItemDrop, Pack,
+        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, GuiFolder, Item,
+        ItemDrop, Pack, Palette,
     },
 };
 
@@ -24,16 +26,35 @@ pub mod charms;
 pub mod creatures;
 pub mod dlc;
 pub mod effects;
+pub mod gui;
 pub mod item_drops;
 pub mod items;
 pub mod packs;
+pub mod palette;
 pub mod scripts;
 pub mod sprites;
+
+/// The Tauri event name emitted to the frontend when anything under `gui/`
+/// changes on disk (external editor, file move, etc.). The payload is the
+/// gui-relative path of the changed file when it can be derived, else `null`
+/// (a coarse "something under gui/ changed" signal). The XGUI editor listens
+/// for this to live-reload an open component and refresh the component list.
+pub const GUI_CHANGED_EVENT: &str = "gui-changed";
+
+/// A shared slot holding the `AppHandle` the filesystem watcher emits through.
+/// The watcher is built inside `Dal::new`, BEFORE the Tauri app (and thus its
+/// `AppHandle`) exists, so the watcher captures this empty slot and the setup
+/// hook fills it once the handle is available (see [`Dal::set_app_handle`]).
+/// Until then, watcher fires simply invalidate caches without emitting.
+type EmitSlot = Arc<Mutex<Option<AppHandle>>>;
 
 pub struct Dal {
     // Config is mutable at runtime via `update_config`; readers take a snapshot
     // through a short-lived read lock so they don't hold it across file I/O.
     config: RwLock<EditorConfig>,
+    // Shared with every watcher built for this Dal so a re-watch (config change)
+    // keeps emitting through the same handle without re-plumbing setup.
+    emit_slot: EmitSlot,
     pub(crate) abilities: Cache<(), Arc<Vec<Ability>>>,
     pub(crate) biograms: Cache<(), Arc<Vec<Biogram>>>,
     pub(crate) charms: Cache<(), Arc<Vec<Charm>>>,
@@ -44,6 +65,9 @@ pub struct Dal {
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
     pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
+    // The GUI color palette (name -> "r,g,b,a"), from Data/gui_palette.json. A
+    // single coarse cache unit under key `()`, like the per-domain caches above.
+    pub(crate) palette: Cache<(), Arc<Palette>>,
     // The game's assets.json manifest (logical name -> on-disk path).
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
     // Resolved sprite data URLs, keyed by logical sprite name.
@@ -51,6 +75,15 @@ pub struct Dal {
     // Script file contents, keyed by logical script name. `None` = script-less
     // (name absent from the manifest); `Some` = file contents.
     pub(crate) scripts: Cache<String, Arc<Option<String>>>,
+    // The whole `gui/` folder as one recursive tree (the component list source).
+    // A single coarse cache unit under key `()` (manifest-style), invalidated
+    // wholesale by the recursive `gui/` watch — the read model is a tree, so the
+    // cache unit is the tree.
+    pub(crate) gui_tree: Cache<(), Arc<GuiFolder>>,
+    // A GUI component's `.xml` body, keyed by its bare basename (e.g. `bag`).
+    // `None` = absent from the manifest (genuinely no such component); `Some` =
+    // the file contents. Mirrors `scripts`, but reads `.xml` rather than `.lua`.
+    pub(crate) components: Cache<String, Arc<Option<String>>>,
     // Swapped out by `update_config` so a new install path starts watching the
     // new Data dir and the old watcher (dropped here) stops firing.
     watcher: Mutex<RecommendedWatcher>,
@@ -68,21 +101,28 @@ impl Dal {
         let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
         let bundles: Cache<(), Arc<Vec<Bundle>>> = Cache::builder().max_capacity(1).build();
         let packs: Cache<(), Arc<Vec<Pack>>> = Cache::builder().max_capacity(1).build();
+        let palette: Cache<(), Arc<Palette>> = Cache::builder().max_capacity(1).build();
         let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
             Cache::builder().max_capacity(1).build();
         let sprites: Cache<String, Arc<Option<String>>> =
             Cache::builder().max_capacity(1024).build();
         let scripts: Cache<String, Arc<Option<String>>> =
             Cache::builder().max_capacity(1024).build();
+        let gui_tree: Cache<(), Arc<GuiFolder>> = Cache::builder().max_capacity(1).build();
+        let components: Cache<String, Arc<Option<String>>> =
+            Cache::builder().max_capacity(1024).build();
 
         let game_root = PathBuf::from(&config.game_install_path);
+        let emit_slot: EmitSlot = Arc::new(Mutex::new(None));
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &bundles, &packs, &manifest, &sprites, &scripts,
+            &item_drops, &bundles, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
+            &components, &emit_slot,
         )?;
 
         Ok(Self {
             config: RwLock::new(config),
+            emit_slot,
             abilities,
             biograms,
             charms,
@@ -93,9 +133,12 @@ impl Dal {
             item_drops,
             bundles,
             packs,
+            palette,
             manifest,
             sprites,
             scripts,
+            gui_tree,
+            components,
             watcher: Mutex::new(watcher),
         })
     }
@@ -119,9 +162,15 @@ impl Dal {
             &self.item_drops,
             &self.bundles,
             &self.packs,
+            &self.palette,
             &self.manifest,
             &self.sprites,
             &self.scripts,
+            &self.gui_tree,
+            &self.components,
+            // Reuse the same slot so the rebuilt watcher keeps emitting through
+            // the AppHandle the setup hook already installed.
+            &self.emit_slot,
         )?;
 
         *self.config.write().unwrap() = new_config;
@@ -138,15 +187,27 @@ impl Dal {
         self.item_drops.invalidate_all();
         self.bundles.invalidate_all();
         self.packs.invalidate_all();
+        self.palette.invalidate_all();
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
         self.scripts.invalidate_all();
+        self.gui_tree.invalidate_all();
+        self.components.invalidate_all();
 
         Ok(())
     }
 
     pub fn config(&self) -> EditorConfig {
         self.config.read().unwrap().clone()
+    }
+
+    /// Install the `AppHandle` the filesystem watcher emits frontend events
+    /// through. Called once from the Tauri `setup` hook, after the app (and its
+    /// handle) exists — the watcher itself is built earlier, in `Dal::new`, so it
+    /// captures an initially-empty slot this fills in. Idempotent: a later call
+    /// just replaces the stored handle.
+    pub fn set_app_handle(&self, handle: AppHandle) {
+        *self.emit_slot.lock().unwrap() = Some(handle);
     }
 
     pub(crate) fn data_dir(&self) -> PathBuf {
@@ -167,12 +228,17 @@ fn build_watcher(
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
     bundles: &Cache<(), Arc<Vec<Bundle>>>,
     packs: &Cache<(), Arc<Vec<Pack>>>,
+    palette: &Cache<(), Arc<Palette>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
     scripts: &Cache<String, Arc<Option<String>>>,
+    gui_tree: &Cache<(), Arc<GuiFolder>>,
+    components: &Cache<String, Arc<Option<String>>>,
+    emit_slot: &EmitSlot,
 ) -> Result<RecommendedWatcher, String> {
     let data_dir = game_root.join("Data");
     let scripts_dir = game_root.join("Scripts");
+    let gui_dir = game_root.join("gui");
 
     // (path the watcher reacts to, closure that invalidates the matching cache).
     // To register a new domain: clone its cache handle and push a row here.
@@ -218,6 +284,12 @@ fn build_watcher(
             let c = packs.clone();
             Box::new(move || c.invalidate(&()))
         }),
+        // The GUI palette lives under the already-watched Data/, so no new watch
+        // is needed — just an exact-path invalidator like the domain files above.
+        (data_dir.join("gui_palette.json"), {
+            let c = palette.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
         // assets.json lives at the game root. When it changes, both the manifest
         // and every resolved sprite (paths derived from it) may be stale.
         (game_root.join("assets.json"), {
@@ -236,6 +308,20 @@ fn build_watcher(
     // the exact-path invalidators above.
     let scripts_cache = scripts.clone();
     let scripts_dir_match = scripts_dir.clone();
+    // The whole gui/ tree is a single coarse cache unit: any create/delete/edit
+    // anywhere under gui/ (including nested folders) invalidates it wholesale, and
+    // the next read re-walks. Captured separately from the exact-path invalidators,
+    // like the Scripts/ wholesale rule.
+    let gui_cache = gui_tree.clone();
+    // Component `.xml` bodies are cached per-basename; like Scripts/, we can't
+    // cheaply map a changed gui file back to its logical name, so any change under
+    // gui/ invalidates the whole components cache wholesale.
+    let components_cache = components.clone();
+    let gui_dir_match = gui_dir.clone();
+    // The handle the gui/ branch emits `gui-changed` through. Cloned into the
+    // closure; empty until the setup hook installs the AppHandle, at which point
+    // every subsequent gui/ change emits to the frontend.
+    let emit_slot = emit_slot.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
         // Ignore access-only events; only react when the file's bytes change.
@@ -253,6 +339,23 @@ fn build_watcher(
                 && path.extension().and_then(|e| e.to_str()) == Some("lua")
             {
                 scripts_cache.invalidate_all();
+            }
+            // Any change anywhere under gui/ (the recursive watch covers nested
+            // folders) invalidates the single tree cache key and every cached
+            // component body (wholesale, like the Scripts/ rule).
+            if path.starts_with(&gui_dir_match) {
+                gui_cache.invalidate(&());
+                components_cache.invalidate_all();
+                // Emit AFTER invalidation so the frontend's re-fetch (get_gui_tree
+                // / get_component) reads fresh data, never the stale cache. The
+                // payload is the gui-relative path (forward-slashed) so the editor
+                // can tell whether the CURRENTLY-OPEN component changed; if the
+                // path can't be made relative it falls back to `None` (a coarse
+                // "something under gui/ changed" signal — the list still refreshes).
+                if let Some(handle) = emit_slot.lock().unwrap().as_ref() {
+                    let rel = gui_relative_path(&gui_dir_match, path);
+                    let _ = handle.emit(GUI_CHANGED_EVENT, rel);
+                }
             }
         }
     })
@@ -272,7 +375,27 @@ fn build_watcher(
     // can't be set up, the scripts cache simply won't auto-freshen on external edits.
     let _ = watcher.watch(&scripts_dir, RecursiveMode::NonRecursive);
 
+    // The gui/ folder is the app's one RECURSIVE watch: the component tree is
+    // deeply nested (gui/profile/, gui/battle/, …), so a non-recursive watch would
+    // miss edits inside subfolders — which is most of the tree. Best-effort: a
+    // fresh project may not have gui/ yet (the read returns an empty root), and the
+    // tree cache simply won't auto-freshen until the folder exists and is rewatched
+    // on the next config update.
+    let _ = watcher.watch(&gui_dir, RecursiveMode::Recursive);
+
     Ok(watcher)
+}
+
+/// Derive the gui-relative, forward-slashed path of a changed file for the
+/// `gui-changed` event payload. Returns `Some("widgets/bag.xml")` when `path`
+/// lives under `gui_dir`, or `None` when it can't be made relative (a coarse
+/// "something under gui/ changed" signal — the editor still refreshes the list).
+/// Backslashes are normalized to `/` so the payload matches the gui-relative
+/// `path` the frontend's `get_gui_tree` refs already use on every platform.
+fn gui_relative_path(gui_dir: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(gui_dir)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
 }
 
 /// Pretty-print a serializable value with 4-space indent and a trailing newline,
@@ -329,6 +452,32 @@ mod tests {
         // Existing .json writes must stage in the identical temp path as before.
         let p = Path::new("/games/install/Data/charms.json");
         assert_eq!(tmp_sibling(p), PathBuf::from("/games/install/Data/charms.json.tmp"));
+    }
+
+    #[test]
+    fn gui_relative_path_strips_gui_dir_and_forward_slashes() {
+        // A nested change yields the gui-relative path the frontend's tree refs use.
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/widgets/bag.xml");
+        assert_eq!(
+            gui_relative_path(gui_dir, changed),
+            Some("widgets/bag.xml".to_string())
+        );
+    }
+
+    #[test]
+    fn gui_relative_path_handles_top_level_file() {
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/main.xml");
+        assert_eq!(gui_relative_path(gui_dir, changed), Some("main.xml".to_string()));
+    }
+
+    #[test]
+    fn gui_relative_path_returns_none_when_outside_gui_dir() {
+        // A path not under gui/ can't be made relative → coarse signal (None).
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/Data/items.json");
+        assert_eq!(gui_relative_path(gui_dir, changed), None);
     }
 
     #[test]

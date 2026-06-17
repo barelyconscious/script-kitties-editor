@@ -37,7 +37,8 @@ import { ComponentList } from "./xgui/ComponentList";
 import { ControllerTab } from "./xgui/ControllerTab";
 import { DataModelPanel } from "./xgui/DataModelPanel";
 import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
-import { applyModelEdit, initDataModelState } from "./xgui/dataModelState";
+import { applyModelEdit, seedDataModel } from "./xgui/dataModelState";
+import { getPersistedModel, setPersistedModel } from "./xgui/dataModelStore";
 import {
   EditorStateProvider,
   type EditorTab,
@@ -367,23 +368,34 @@ function MainContent({ active }: { active: boolean }) {
  */
 function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTab: EditorTab }) {
   // The Data Model state — raw text (panel) + LAST GOOD parsed model (preview) —
-  // lifted here so ONE source feeds both. Seeded from the open component's stored
-  // model text; an edit advances the model only when the JSON parses (see
-  // `applyModelEdit`), so an invalid keystroke keeps the preview on the last valid
-  // state. The advance rule lives in the pure `dataModelState` module so it is
-  // unit-tested off the React tree.
+  // lifted here so ONE source feeds both. An edit advances the model only when the
+  // JSON parses (see `applyModelEdit`), so an invalid keystroke keeps the preview on
+  // the last valid state. The advance rule lives in the pure `dataModelState` module
+  // so it is unit-tested off the React tree.
   //
-  // AUTO-SCAFFOLD (task 482): on open we PRE-FILL the model from the component's
-  // `{token}` references — `scaffoldModelText` extracts the (scope-aware) tokens
-  // from the tree and additively merges placeholders into the seed text. The seed
-  // starts empty for most components, so the scaffold fills it; an existing model
-  // is preserved and only grown. We seed the state with the scaffolded text so the
-  // very first render already resolves its bindings.
-  const [dataModel, setDataModel] = useState(() => {
-    const seed = initDataModelState(open.modelText);
-    const scaffolded = scaffoldModelText(seed.text, open.root);
-    return scaffolded === null ? seed : applyModelEdit(seed, scaffolded);
-  });
+  // SEED (task 484): the model is PERSISTED per component path in localStorage, so a
+  // previously-edited model is RESTORED as the base; only when nothing is stored do
+  // we fall back to the component's own `modelText`. This is editor-local state — it
+  // is never written to game data.
+  //
+  // AUTO-SCAFFOLD (task 482): on open we then PRE-FILL the model from the component's
+  // `{token}` references — `scaffoldModelText` extracts the (scope-aware) tokens from
+  // the tree and additively merges placeholders into the seed text. Running the
+  // scaffold ON TOP of a restored model means tokens added while this component was
+  // away still appear, without disturbing the user's restored edits. An empty seed
+  // is filled wholesale; an existing model is preserved and only grown. We seed the
+  // state with the scaffolded text so the very first render already resolves bindings.
+  const [dataModel, setDataModel] = useState(() =>
+    seedDataModel(getPersistedModel(open.path), open.modelText, open.root),
+  );
+
+  // Persist the model text per component path on EVERY change — user keystrokes in
+  // the panel AND additive scaffold merges both flow through `dataModel.text`, so a
+  // single effect captures both. localStorage writes are cheap; no debounce needed.
+  // Keyed by `open.path` so switching back restores exactly this component's model.
+  useEffect(() => {
+    setPersistedModel(open.path, dataModel.text);
+  }, [open.path, dataModel.text]);
 
   // As the visual editor adds tokens (every immutable tree edit replaces
   // `open.root`), additively merge any NEW tokens into the model. `scaffoldModelText`

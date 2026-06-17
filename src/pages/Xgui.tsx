@@ -45,6 +45,7 @@ import {
   useEditorStore,
 } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
+import { scaffoldModelText } from "./xgui/guiModelScaffold";
 import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
@@ -371,7 +372,35 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
   // `applyModelEdit`), so an invalid keystroke keeps the preview on the last valid
   // state. The advance rule lives in the pure `dataModelState` module so it is
   // unit-tested off the React tree.
-  const [dataModel, setDataModel] = useState(() => initDataModelState(open.modelText));
+  //
+  // AUTO-SCAFFOLD (task 482): on open we PRE-FILL the model from the component's
+  // `{token}` references — `scaffoldModelText` extracts the (scope-aware) tokens
+  // from the tree and additively merges placeholders into the seed text. The seed
+  // starts empty for most components, so the scaffold fills it; an existing model
+  // is preserved and only grown. We seed the state with the scaffolded text so the
+  // very first render already resolves its bindings.
+  const [dataModel, setDataModel] = useState(() => {
+    const seed = initDataModelState(open.modelText);
+    const scaffolded = scaffoldModelText(seed.text, open.root);
+    return scaffolded === null ? seed : applyModelEdit(seed, scaffolded);
+  });
+
+  // As the visual editor adds tokens (every immutable tree edit replaces
+  // `open.root`), additively merge any NEW tokens into the model. `scaffoldModelText`
+  // returns a rewritten text ONLY when there is genuinely something new to add — so
+  // a tree edit that introduces no token (or a Data-Model keystroke, which doesn't
+  // change `open.root`) leaves the user's exact JSON untouched, avoiding reformat
+  // churn while they type. The merged model flows through `applyModelEdit`, so it
+  // still rides the last-good-model path that drives the preview.
+  const rootRef = useRef(open.root);
+  useEffect(() => {
+    if (open.root === rootRef.current) return;
+    rootRef.current = open.root;
+    setDataModel((prev) => {
+      const scaffolded = scaffoldModelText(prev.text, open.root);
+      return scaffolded === null ? prev : applyModelEdit(prev, scaffolded);
+    });
+  }, [open.root]);
   // Whether the Data Model panel is collapsed (task 476 keeps it collapsible).
   const [modelPanelOpen, setModelPanelOpen] = useState(true);
 

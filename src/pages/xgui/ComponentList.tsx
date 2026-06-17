@@ -2,9 +2,10 @@
  * ComponentList — the leftmost, collapsible component-list panel of the XGUI
  * editor (F8). A folder tree mirroring the on-disk `gui/` tree: collapsible
  * folders, a per-file View-vs-widget glyph, and an unsaved-changes dot on the
- * currently-open component when it is dirty. A folder-icon button creates a new
- * top-level folder; a header `+` creates a component at the gui/ root, and each
- * folder row reveals a hover `+` that creates a component scoped to that folder.
+ * currently-open component when it is dirty. A folder-icon button in the header
+ * creates a new top-level folder; a `gui/` root row and each folder row reveal a
+ * hover `+` that creates a component scoped to that folder (the root row's `+`
+ * targets the gui/ root).
  *
  * Tree data-prep (flatten + collision + folder options) lives in the pure
  * {@link guiTree} module; this component is the React shell that loads the tree
@@ -246,22 +247,6 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
           </TooltipTrigger>
           <TooltipContent>New folder</TooltipContent>
         </Tooltip>
-        {/* The root-scoped "+" keeps gui/-root component creation reachable now that
-            the top-level "New component" button is gone; per-folder creation lives on
-            each folder row's hover "+". */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="New component in gui/ root"
-              onClick={() => setNewFolder("")}
-              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Plus className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>New component in gui/ root</TooltipContent>
-        </Tooltip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
@@ -269,14 +254,20 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
           <p className="px-3 py-8 text-center text-muted-foreground text-sm">Loading components…</p>
         ) : error ? (
           <p className="px-3 py-8 text-center text-destructive text-sm">{error}</p>
-        ) : rows.length === 0 ? (
-          <p className="px-3 py-8 text-center text-muted-foreground text-sm">
-            {query.trim()
-              ? `Nothing matches “${query}”.`
-              : "No components yet. Use + to create one."}
-          </p>
         ) : (
           <ul>
+            {/* The gui/ root carries the same hover-"+" affordance as folder rows,
+                so root-component creation persists now that the header "+" is gone. */}
+            <RootRow onAddComponent={() => setNewFolder("")} />
+            {rows.length === 0 ? (
+              <li>
+                <p className="px-3 py-8 text-center text-muted-foreground text-sm">
+                  {query.trim()
+                    ? `Nothing matches “${query}”.`
+                    : "No components yet. Use + to create one."}
+                </p>
+              </li>
+            ) : null}
             {rows.map((row) =>
               row.kind === "folder" ? (
                 <FolderRow
@@ -322,6 +313,32 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
 /** Depth indentation step, in rem, applied per tree level. */
 const INDENT_REM = 0.75;
 
+/**
+ * The `gui/` root row. Not collapsible (it has no chevron/toggle) and renders no
+ * label button, but it mirrors {@link FolderRow}'s `group` hover-"+" so creating a
+ * component at the root stays consistent with per-folder creation.
+ */
+function RootRow({ onAddComponent }: { onAddComponent: () => void }) {
+  return (
+    <li>
+      <div className="group flex w-full min-w-0 items-center gap-1 pr-2 pl-2">
+        <span className="min-w-0 flex-1 select-none truncate py-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          gui/
+        </span>
+        <button
+          type="button"
+          aria-label="New component in gui/ root"
+          title="New component in gui/ root"
+          onClick={onAddComponent}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function FolderRow({
   row,
   onToggle,
@@ -344,7 +361,7 @@ function FolderRow({
           type="button"
           onClick={onToggle}
           title={row.path}
-          className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors group-hover:text-foreground"
+          className="flex min-w-0 flex-1 select-none items-center gap-1 py-1 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors group-hover:text-foreground"
         >
           {row.collapsed ? (
             <ChevronRight className="size-3.5 shrink-0" />
@@ -389,7 +406,7 @@ function ComponentRow({
         title={`${component.name} — ${kindLabel}`}
         style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
         className={cn(
-          "flex w-full items-center gap-2 py-1 pr-2 text-left text-sm transition-colors hover:bg-muted",
+          "flex w-full select-none items-center gap-2 py-1 pr-2 text-left text-sm transition-colors hover:bg-muted",
           active && "bg-muted font-medium",
         )}
       >

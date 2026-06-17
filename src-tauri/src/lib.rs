@@ -9,7 +9,7 @@ use crate::commands::dlc::{get_dlcs, save_dlc};
 use crate::commands::effects::{get_effects, save_effect};
 use crate::commands::game_objects::get_game_objects;
 use crate::commands::gui::{
-    create_component, create_folder, get_component, get_gui_tree, save_component,
+    create_component, create_folder, delete_component, get_component, get_gui_tree, save_component,
 };
 use crate::commands::item_drops::{get_item_drops, save_item_drop};
 use crate::commands::items::{get_items, save_item};
@@ -242,6 +242,7 @@ pub fn run() {
             get_component,
             save_component,
             create_component,
+            delete_component,
             create_folder
         ])
         .run(tauri::generate_context!())

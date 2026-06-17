@@ -449,6 +449,85 @@ impl Dal {
         Ok(())
     }
 
+    /// Delete an existing GUI component: remove its `.xml` file, its controller
+    /// `.lua` sibling (if present), and BOTH of their `assets.json` entries. This
+    /// is `create_component` run in reverse — the destructive counterpart of the
+    /// "first-time creation" door. (design `xgui_ta.md` — component-list deletion.)
+    ///
+    /// `name` is the bare basename (`"bag_slot"`). The component is located through
+    /// the **gui tree** (the on-disk walk) — the same disk-truth source
+    /// `get_component`/`save_component` use, NOT the manifest — so any component the
+    /// list shows is deletable even when its `.xml` was never registered (the
+    /// real-game state, where only `.lua` controllers are catalogued).
+    ///
+    /// `controller_file_name`, when `Some`, is the controller hint carried by the
+    /// component's [`GuiComponentRef`] (the frontend passes it straight through). It
+    /// is deleted alongside the `.xml`. When `None`, we still probe for the
+    /// `{name}_controller.lua` sibling convention and remove it if it exists, so a
+    /// stale/absent hint never strands a controller on disk.
+    ///
+    /// **Idempotent / defensive by design.** A missing `.xml`, a missing controller,
+    /// or absent manifest entries are all the benign already-gone case, never an
+    /// error: deleting twice, or deleting a half-present component, both converge on
+    /// "it's gone". `remove_manifest_entry` already treats an absent key as a no-op;
+    /// file removals tolerate `NotFound`. The only surfaced errors are genuine I/O
+    /// failures (a file that exists but can't be removed) or a manifest that can't be
+    /// read/parsed/written.
+    ///
+    /// **Ordering — manifest first, then files.** The mirror of create's "files
+    /// first, manifest last": we drop the (rollback-able, fail-loud) manifest entries
+    /// first, then unlink the files. A failure removing the manifest entry surfaces
+    /// before any file is touched (nothing destroyed yet); once the manifest is clean
+    /// the file unlinks are best-effort-but-surfaced. On success the manifest cache is
+    /// re-seeded and the gui-tree + component caches are invalidated so the list drops
+    /// the row and any open mount re-resolves.
+    pub fn delete_component(
+        &self,
+        name: &str,
+        controller_file_name: Option<String>,
+    ) -> Result<(), String> {
+        // Locate the component by basename in the on-disk gui tree (disk truth, not
+        // the manifest). Absent from the tree → already gone → idempotent success.
+        let tree = self.get_gui_tree()?;
+        let Some(rel_path) = find_component_path(&tree, name) else {
+            return Ok(());
+        };
+
+        let xml_name = format!("{name}.xml");
+        let xml_path = self.gui_path(&rel_path);
+        let folder_rel = parent_rel(&rel_path);
+        let folder_dir = self.gui_folder_path(&folder_rel);
+
+        // The controller filename to delete: the caller's hint when present, else the
+        // `{name}_controller.lua` sibling convention. Either way we only act on it if
+        // the file actually exists on disk (defensive about a stale hint).
+        let controller_name =
+            controller_file_name.unwrap_or_else(|| format!("{name}_controller.lua"));
+        let controller_path = folder_dir.join(&controller_name);
+
+        // Step 1: remove the manifest entries (fail-loud, rollback-able half). The
+        // .xml and controller entries may or may not be registered — remove_manifest_entry
+        // treats an absent key as a benign no-op, so this is idempotent. Each call
+        // rewrites the file and returns the resulting map; we keep the second (final)
+        // one to re-seed the cache once. The first call's map is intentionally
+        // dropped — it is the intermediate state before the controller is removed.
+        self.remove_manifest_entry(&xml_name)?;
+        let updated = self.remove_manifest_entry(&controller_name)?;
+
+        // Step 2: unlink the files (the destructive half, last). A NotFound is the
+        // already-gone case and is fine; any other I/O error surfaces.
+        remove_file_if_present(&xml_path)?;
+        remove_file_if_present(&controller_path)?;
+
+        // Step 3: re-seed the manifest cache with the final map and drop the gui tree
+        // + component caches so the list drops the row and any mount re-resolves
+        // (the deleted component now resolves to the missing-src placeholder).
+        self.manifest.insert((), Arc::new(updated));
+        self.gui_tree.invalidate(&());
+        self.components.invalidate(name);
+        Ok(())
+    }
+
     /// Create an empty GUI subfolder at `<gameInstallPath>/gui/<parent_rel>/<name>`
     /// via a plain `std::fs::create_dir`. Folders are **not** assets — they carry
     /// nothing the runtime resolves — so there is **no manifest involvement**.
@@ -493,6 +572,19 @@ fn gui_manifest_filepath(folder_rel: &str, file_name: &str) -> String {
     } else {
         let folder = folder_rel.replace('/', "\\");
         format!("gui\\{folder}\\{file_name}")
+    }
+}
+
+/// Remove a file, treating "already gone" (`NotFound`) as success. Used by
+/// `delete_component` so deleting a component whose `.xml` or controller has
+/// already vanished (a half-deleted or externally-removed component) converges on
+/// "it's gone" rather than erroring. A genuine I/O failure (the file exists but
+/// can't be removed) is surfaced.
+fn remove_file_if_present(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to remove {}: {}", path.display(), e)),
     }
 }
 
@@ -1807,6 +1899,176 @@ mod tests {
         assert_eq!(
             dal.get_component("bag").unwrap(),
             Some("<View id=\"second\"/>".to_string())
+        );
+    }
+
+    // ---- delete_component: remove both files + both manifest entries, idempotent ----
+
+    #[test]
+    fn delete_removes_both_files_and_both_manifest_entries() {
+        let root = temp_install();
+        // A registered component pair on disk under gui/ (what create_component left).
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        // Precondition: both files exist and both manifest keys resolve.
+        assert!(xml_path.exists());
+        assert!(ctrl_path.exists());
+        assert_eq!(
+            manifest_keys(&root),
+            vec!["bag.xml".to_string(), "bag_controller.lua".to_string()]
+        );
+
+        dal.delete_component("bag", Some("bag_controller.lua".to_string()))
+            .unwrap();
+
+        // Both files gone, no temp sidecars.
+        assert!(!xml_path.exists(), "the .xml must be deleted");
+        assert!(!ctrl_path.exists(), "the controller must be deleted");
+        assert!(!root.join("gui").join("bag.xml.tmp").exists());
+        // Both manifest entries removed — the manifest is now empty.
+        assert!(
+            manifest_keys(&root).is_empty(),
+            "both manifest entries must be removed"
+        );
+        // In-process resolution no longer finds either (manifest cache re-seeded).
+        assert_eq!(dal.resolve_asset("bag.xml").unwrap(), None);
+        assert_eq!(dal.resolve_asset("bag_controller.lua").unwrap(), None);
+        // The tree no longer lists the component (gui tree cache invalidated).
+        let tree = dal.get_gui_tree().unwrap();
+        assert!(
+            !tree.components.iter().any(|c| c.name == "bag"),
+            "the deleted component must drop out of the tree"
+        );
+    }
+
+    #[test]
+    fn delete_resolves_controller_by_sibling_when_hint_is_none() {
+        // The frontend passed no controller hint, but a `{name}_controller.lua`
+        // sibling exists on disk — delete must still remove it (and its entry).
+        let root = temp_install();
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        dal.delete_component("bag", None).unwrap();
+
+        assert!(!xml_path.exists());
+        assert!(
+            !ctrl_path.exists(),
+            "the sibling controller must be removed even without a hint"
+        );
+        assert!(manifest_keys(&root).is_empty());
+    }
+
+    #[test]
+    fn delete_a_controller_less_component_removes_only_the_xml() {
+        // A widget with NO controller: delete removes the .xml + its entry and leaves
+        // nothing behind. The (nonexistent) controller is a benign no-op.
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        let xml_path = gui.join("plain.xml");
+        std::fs::write(&xml_path, "<Panel/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{ "plain.xml": { "filepath": "gui\\plain.xml" } }"#);
+
+        dal.delete_component("plain", None).unwrap();
+
+        assert!(!xml_path.exists(), "the .xml must be deleted");
+        assert!(manifest_keys(&root).is_empty(), "its entry must be removed");
+        // No phantom controller materialized or errored over.
+        assert!(!gui.join("plain_controller.lua").exists());
+    }
+
+    #[test]
+    fn delete_a_tree_listed_component_absent_from_the_manifest() {
+        // The real-game state: a component .xml on disk that is NOT in assets.json.
+        // Deleting it must remove the file and tolerate the absent manifest entry.
+        let root = temp_install();
+        let nested = root.join("gui").join("abilityeditor");
+        std::fs::create_dir_all(&nested).unwrap();
+        let xml_path = nested.join("ability_editor.xml");
+        std::fs::write(&xml_path, "<View/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{}"#);
+
+        // Precondition: genuinely absent from the manifest.
+        assert_eq!(dal.resolve_asset("ability_editor.xml").unwrap(), None);
+
+        dal.delete_component("ability_editor", None).unwrap();
+
+        assert!(
+            !xml_path.exists(),
+            "an unregistered-but-on-disk component must still be deletable"
+        );
+        // Manifest stays empty (no entry to remove — a benign no-op).
+        assert!(manifest_keys(&root).is_empty());
+    }
+
+    #[test]
+    fn delete_is_idempotent_for_a_component_that_exists_nowhere() {
+        // Deleting a name that is not in the tree at all is a benign no-op success
+        // (e.g. a double-delete, or a stale row). No error, no manifest change.
+        let root = temp_install();
+        std::fs::create_dir_all(root.join("gui")).unwrap();
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "item_bandage.png": { "filepath": "Sprites\\item_bandage.png" } }"#,
+        );
+
+        dal.delete_component("ghost", Some("ghost_controller.lua".to_string()))
+            .expect("deleting a nonexistent component must be a no-op success");
+
+        // The unrelated manifest entry is untouched.
+        assert_eq!(manifest_keys(&root), vec!["item_bandage.png".to_string()]);
+    }
+
+    #[test]
+    fn delete_twice_converges_on_gone() {
+        // A full delete followed by a second delete of the same name: the second is
+        // the idempotent already-gone path (the component is no longer in the tree).
+        let root = temp_install();
+        let (xml_path, ctrl_path) = seed_bag_files(&root);
+        let dal = dal_with_manifest(&root, BAG_MANIFEST);
+
+        dal.delete_component("bag", Some("bag_controller.lua".to_string()))
+            .unwrap();
+        // Second delete is a clean no-op — must not error on the missing files/entries.
+        dal.delete_component("bag", Some("bag_controller.lua".to_string()))
+            .expect("a second delete must be an idempotent no-op");
+
+        assert!(!xml_path.exists());
+        assert!(!ctrl_path.exists());
+        assert!(manifest_keys(&root).is_empty());
+    }
+
+    #[test]
+    fn delete_invalidates_the_component_read_cache() {
+        // get_component caches positive reads by name; after a delete the cache entry
+        // must be dropped so a re-open does not serve the deleted body.
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("bag.xml"), "<View id=\"x\"/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{ "bag.xml": { "filepath": "gui\\bag.xml" } }"#);
+
+        // Prime the component read cache.
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            Some("<View id=\"x\"/>".to_string())
+        );
+        assert!(dal.components.get("bag").is_some(), "read should be cached");
+
+        dal.delete_component("bag", None).unwrap();
+
+        // The cache entry was invalidated; the next read (tree no longer lists it)
+        // is a clean None rather than the stale cached body.
+        assert!(
+            dal.components.get("bag").is_none(),
+            "the component read cache must be invalidated on delete"
+        );
+        assert_eq!(
+            dal.get_component("bag").unwrap(),
+            None,
+            "a deleted component must read as absent, not the stale cached body"
         );
     }
 

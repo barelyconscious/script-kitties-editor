@@ -24,12 +24,15 @@ import {
   MonitorPlay,
   Plus,
   SearchIcon,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
+import { DeleteComponentDialog } from "./DeleteComponentDialog";
+import { deleteComponentArgs, shouldCloseOpen } from "./deleteComponent";
 import { useEditorStore } from "./editorState";
 import {
   flattenTree,
@@ -90,6 +93,12 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
+  // The component the user asked to DELETE — held until the destructive confirm
+  // resolves, or null when the confirm is closed. Components only (folders are not
+  // deletable in this task).
+  const [pendingDelete, setPendingDelete] = useState<GuiComponentRef | null>(null);
+  // True while a confirmed delete is in flight (disables the confirm buttons).
+  const [deleting, setDeleting] = useState(false);
 
   // The panel shows either kind of error: a failed tree load or a failed open.
   const error = treeError ?? openError;
@@ -184,6 +193,40 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       if (ref) void openComponent(ref);
     },
     [pendingSwitch, save, openComponent],
+  );
+
+  // Resolve the delete confirm. Cancel just closes it. Confirm calls
+  // delete_component (passing the controller hint so the backend removes the
+  // sibling .lua), then — if the deleted component was the OPEN one — closes the
+  // editor so it doesn't dangle, clears any stale open error, and refreshes the
+  // list to drop the row. A failed delete surfaces inline and keeps the row.
+  const resolveDelete = useCallback(
+    async (confirmed: boolean) => {
+      const ref = pendingDelete;
+      if (!confirmed || !ref) {
+        setPendingDelete(null);
+        return;
+      }
+      setDeleting(true);
+      try {
+        await invoke("delete_component", deleteComponentArgs(ref));
+        // If the deleted component is the one open in the editor, close it so the
+        // editor isn't left pointing at a component that no longer exists.
+        if (shouldCloseOpen(state.open?.name ?? null, ref.name)) {
+          dispatch({ type: "close" });
+        }
+        // Clear an inline open error that may name the just-deleted component.
+        setOpenError(null);
+        setPendingDelete(null);
+        void reload();
+      } catch (err) {
+        setOpenError(err instanceof Error ? err.message : String(err));
+        setPendingDelete(null);
+      } finally {
+        setDeleting(false);
+      }
+    },
+    [pendingDelete, state.open, dispatch, reload],
   );
 
   // After a create: refresh the tree, then open the new component if we can find it.
@@ -283,6 +326,7 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
                   active={openName === row.component.name}
                   dirty={isDirty && openName === row.component.name}
                   onOpen={() => requestOpen(row.component)}
+                  onDelete={() => setPendingDelete(row.component)}
                 />
               ),
             )}
@@ -305,6 +349,14 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
         componentName={state.open?.name ?? null}
         saving={savingSwitch}
         onChoose={(choice) => void resolveSwitch(choice)}
+      />
+
+      <DeleteComponentDialog
+        open={pendingDelete != null}
+        componentName={pendingDelete?.name ?? null}
+        hasController={pendingDelete?.controllerFileName != null}
+        deleting={deleting}
+        onChoose={(confirmed) => void resolveDelete(confirmed)}
       />
     </div>
   );
@@ -389,44 +441,62 @@ function ComponentRow({
   active,
   dirty,
   onOpen,
+  onDelete,
 }: {
   row: Extract<GuiTreeRow, { kind: "component" }>;
   active: boolean;
   dirty: boolean;
   onOpen: () => void;
+  onDelete: () => void;
 }) {
   const { component } = row;
   const Icon = component.kind === "view" ? MonitorPlay : FileCode2;
   const kindLabel = component.kind === "view" ? "View (screen)" : "Widget";
   return (
     <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        title={`${component.name} — ${kindLabel}`}
-        style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
+      {/* The row is a `group` so the hover trash (mirroring the folder rows' hover
+          "+" affordance) reveals on hover; the open button and the trash are
+          siblings, never nested buttons. */}
+      <div
         className={cn(
-          "flex w-full select-none items-center gap-2 py-1 pr-2 text-left text-sm transition-colors hover:bg-muted",
+          "group flex w-full select-none items-center gap-2 pr-2 text-sm transition-colors hover:bg-muted",
           active && "bg-muted font-medium",
         )}
       >
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            component.kind === "view" ? "text-primary" : "text-muted-foreground",
-          )}
-          aria-hidden="true"
-        />
-        <span className="min-w-0 flex-1 truncate">{component.name}</span>
-        {dirty && (
-          <span
-            role="img"
-            aria-label="Unsaved changes"
-            title="Unsaved changes"
-            className="size-1.5 shrink-0 rounded-full bg-primary"
+        <button
+          type="button"
+          onClick={onOpen}
+          title={`${component.name} — ${kindLabel}`}
+          style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+        >
+          <Icon
+            className={cn(
+              "size-4 shrink-0",
+              component.kind === "view" ? "text-primary" : "text-muted-foreground",
+            )}
+            aria-hidden="true"
           />
-        )}
-      </button>
+          <span className="min-w-0 flex-1 truncate">{component.name}</span>
+          {dirty && (
+            <span
+              role="img"
+              aria-label="Unsaved changes"
+              title="Unsaved changes"
+              className="size-1.5 shrink-0 rounded-full bg-primary"
+            />
+          )}
+        </button>
+        <button
+          type="button"
+          aria-label={`Delete ${component.name}`}
+          title={`Delete ${component.name}`}
+          onClick={onDelete}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
     </li>
   );
 }

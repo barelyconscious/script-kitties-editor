@@ -66,6 +66,23 @@ pub fn create_component(
     dal.create_component(&folder_rel, &name, xml, controller)
 }
 
+/// Delete a GUI component: remove its `.xml`, its controller `.lua` (if present),
+/// and both `assets.json` entries. `name` is the bare basename; the component is
+/// located by its on-disk path via the gui tree (not the manifest), so any listed
+/// component is deletable. `controllerFileName`, when present, is the controller
+/// hint from the component's tree ref (the `{name}_controller.lua` sibling is
+/// probed when it is null). Idempotent/defensive: missing files or manifest entries
+/// are the benign already-gone case, not errors. Refreshes the manifest, gui-tree,
+/// and component caches so the list drops the row and any mount re-resolves.
+#[tauri::command]
+pub fn delete_component(
+    name: String,
+    controller_file_name: Option<String>,
+    dal: State<Dal>,
+) -> Result<(), String> {
+    dal.delete_component(&name, controller_file_name)
+}
+
 /// Create an empty GUI subfolder at `gui/<parentRel>/<name>`. Folders are not
 /// assets, so this touches no manifest. Refuses if the directory already exists.
 #[tauri::command]

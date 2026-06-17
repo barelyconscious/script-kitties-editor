@@ -13,6 +13,8 @@
  */
 
 import { parseDataModel } from "../../lib/guiDataModel";
+import type { GuiNode } from "../../lib/guiNode";
+import { scaffoldModelText } from "./guiModelScaffold";
 
 /** The Data Model panel's state: the raw text (panel) + the last-good model (preview). */
 export type DataModelState = {
@@ -45,4 +47,29 @@ export function applyModelEdit(prev: DataModelState, nextText: string): DataMode
     text: nextText,
     model: parse.ok ? parse.model : prev.model,
   };
+}
+
+/**
+ * Seed the Data Model state when a component opens (tasks 482 + 484): RESTORE the
+ * persisted model as the base, then run the additive scaffold/merge ON TOP so tokens
+ * added while this component was away still appear.
+ *
+ *   - `persisted` is the model text saved per component path (task 484), or
+ *     `undefined` when none is stored — in which case the component's own
+ *     `modelText` is the base, scaffolding FRESH exactly as before persistence.
+ *   - `scaffoldModelText` additively merges any tokens the tree references into the
+ *     base and returns the rewritten text, or `null` when nothing new is added — in
+ *     which case the restored base is kept verbatim (no reformat churn).
+ *
+ * Pure (no React, no storage): the caller resolves `persisted` from the store and
+ * passes the tree, so the restore-then-merge rule is unit-tested off the React tree.
+ */
+export function seedDataModel(
+  persisted: string | undefined,
+  modelText: string,
+  root: GuiNode,
+): DataModelState {
+  const seed = initDataModelState(persisted ?? modelText);
+  const scaffolded = scaffoldModelText(seed.text, root);
+  return scaffolded === null ? seed : applyModelEdit(seed, scaffolded);
 }

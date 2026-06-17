@@ -27,11 +27,11 @@ import {
   PanelLeftOpen,
   Save,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { serializeGui } from "@/lib/guiNode";
-import { setPreference } from "@/lib/preferences";
+import { setPreference, usePreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
 import { ControllerTab } from "./xgui/ControllerTab";
@@ -49,6 +49,7 @@ import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
 import { StructureTree } from "./xgui/StructureTree";
+import { clampTreeFraction, fractionForPointer } from "./xgui/structureSplit";
 import { useComponentSave } from "./xgui/useComponentSave";
 import { useEditorKeyboard } from "./xgui/useEditorKeyboard";
 import { XmlView } from "./xgui/XmlView";
@@ -112,18 +113,89 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
  * property list don't fight for the column's height.
  */
 function StructureColumn() {
+  // The measured height of the stacked tree+properties region (excludes the
+  // header), needed to convert the persisted fraction and a drag's pointer-Y into
+  // pixel heights. Measured via a ResizeObserver so it tracks window resizes.
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const [regionHeight, setRegionHeight] = useState(0);
+  const [treeFraction, setTreeFraction] = usePreference("xgui.structureTreeFraction");
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    const el = splitRef.current;
+    if (!el) return;
+    const measure = () => setRegionHeight(el.clientHeight);
+    measure();
+    const obs = new ResizeObserver(measure);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // The tree slice's height in px, clamped so both slices keep their minimums for
+  // the CURRENT region height (so a stored fraction from a taller window still
+  // honors the minimums after a shrink). The properties slice takes the rest.
+  const clampedFraction = clampTreeFraction(treeFraction, regionHeight);
+  const treeHeightPx = regionHeight > 0 ? clampedFraction * regionHeight : undefined;
+
+  // Divider drag: while the handle is held, each pointer move maps the cursor's
+  // offset from the top of the region into a clamped tree fraction and persists it
+  // (so the split survives tool switches via the preferences layer). Pointer
+  // capture keeps moves flowing even when the cursor leaves the thin handle.
+  const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const el = splitRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    setTreeFraction(fractionForPointer(e.clientY - top, el.clientHeight));
+  };
+  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-background/40">
-      <div className="border-b px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      <div className="border-b px-3 py-3.25 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Structure
       </div>
-      {/* TREE slice (F9a) — upper region, scrolls independently. */}
-      <div className="flex min-h-0 flex-[1.2] flex-col">
-        <StructureTree />
-      </div>
-      {/* PROPERTIES slice (F9b) — lower region, scrolls independently. */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <PropertiesPanel />
+      {/* The stacked tree + properties region, split by a draggable divider (478).
+        The TREE slice gets the persisted (clamped) fraction; PROPERTIES takes the
+        rest. Each scrolls independently within its own region. */}
+      <div ref={splitRef} className="flex min-h-0 flex-1 flex-col">
+        {/* TREE slice (F9a) — upper region, scrolls independently. */}
+        <div
+          className="flex min-h-0 flex-col"
+          style={treeHeightPx !== undefined ? { height: `${treeHeightPx}px` } : { flex: "1.2" }}
+        >
+          <StructureTree />
+        </div>
+        {/* Draggable horizontal divider — grab cursor, a hairline that thickens on
+          hover so it's findable. Resizes the slices above/below it. */}
+        <div
+          onPointerDown={onDividerPointerDown}
+          onPointerMove={onDividerPointerMove}
+          onPointerUp={endDividerDrag}
+          onPointerCancel={endDividerDrag}
+          className="group relative h-px shrink-0 cursor-row-resize bg-border"
+          aria-hidden="true"
+        >
+          {/* A taller invisible hit area so the 1px line is easy to grab. */}
+          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 group-hover:bg-primary/20" />
+        </div>
+        {/* PROPERTIES slice (F9b) — lower region, scrolls independently, takes the
+          remaining height. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <PropertiesPanel />
+        </div>
       </div>
     </aside>
   );

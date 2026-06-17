@@ -17,11 +17,15 @@ import { useCallback, useSyncExternalStore } from "react";
 export type Preferences = {
   "workbench.objectListCollapsed": boolean;
   "xgui.componentListCollapsed": boolean;
+  /** The XGUI structure column's TREE-slice fraction of the stacked tree/properties
+   *  region (the rest is the properties slice). Set by dragging the divider (478). */
+  "xgui.structureTreeFraction": number;
 };
 
 const DEFAULTS: Preferences = {
   "workbench.objectListCollapsed": false,
   "xgui.componentListCollapsed": false,
+  "xgui.structureTreeFraction": 0.545,
 };
 
 // --- Backing store (the swappable seam) ------------------------------------

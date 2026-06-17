@@ -291,7 +291,12 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       onPointerMove={handleViewportPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
-      className="relative h-full min-h-0 overflow-hidden"
+      // A plain, darker VOID fills the viewport area OUTSIDE the 1280×768 stage
+      // (478) so the stage — which carries the blueprint grid backdrop — reads as a
+      // distinct canvas floating in the viewport, making the screen bounds visible.
+      // This is a flat background on the clipping viewport only; the stage sits on
+      // top via the view transform and its own (grid) background.
+      className="relative h-full min-h-0 overflow-hidden bg-[#0d0d10]"
       style={{ cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined }}
     >
       <GuiPreview

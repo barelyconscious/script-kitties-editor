@@ -196,10 +196,14 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
     case "Component":
       // `src` and `id` are handled specially by the panel; the rest of the
       // documented <Component> props plus freeform overrides cover the body.
+      // `layer` is exposed (like Panel/Text) so a Component's z-order among its
+      // siblings is editable — a Component renders as a leaf in the parent tree,
+      // so the global F5b z-order already applies its layer (task 486).
       return [
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "visible", label: "visible", kind: "boolean" },
+        { name: "layer", label: "layer", kind: "text" },
       ];
     case "Event":
       return [

@@ -23,6 +23,7 @@
  */
 
 import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -32,18 +33,24 @@ import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { useEditorStore } from "./editorState";
 import {
+  deriveRows,
+  mintRowId,
+  type OverrideRow,
+  reconcileRows,
+  rowsEqual,
+  rowsToAttrs,
+} from "./freeformRows";
+import {
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
   computedId,
   type FieldKind,
   fieldsForTag,
   formatCompound,
-  freeformAttrs,
   isBoundField,
   nodeHasId,
   type PropertyField,
   parseCompound,
-  renameAttr,
   srcBasename,
   withAttr,
 } from "./guiProperties";
@@ -155,8 +162,12 @@ export function PropertiesPanel() {
           <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
         ))}
 
-        {/* Freeform override rows (Component overrides + any unrecognized attr). */}
-        <FreeformRows node={node} onSet={setAttr} onReplace={setAttrs} />
+        {/* Freeform override rows (Component overrides + any unrecognized attr).
+            Keyed by nodeId so switching the selected element re-derives fresh
+            local rows for it (a clean mount), rather than carrying the previous
+            node's in-progress rows across. Same-node external changes (undo/redo)
+            are handled inside via reconcileRows. */}
+        <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
       </div>
     </div>
   );
@@ -423,30 +434,65 @@ function ColorField({
 /**
  * The freeform override rows — name→value pairs the schema doesn't cover (a
  * `<Component>`'s arbitrary override props, or any unrecognized attribute).
- * Renaming a key and editing/removing its value are supported; an "Add property"
- * button appends a blank row.
+ *
+ * STABLE ROW IDENTITY (task 486): the rows are driven from LOCAL state, each row
+ * carrying a stable {@link OverrideRow.id} that survives name/value edits. The
+ * inputs are keyed by that id (not the editable attr name), so typing never
+ * remounts an input and focus is kept. Editing updates local state and commits a
+ * rebuilt attrs map ({@link rowsToAttrs}) for live preview; an empty value is
+ * KEPT (never treated as remove), and a row is removed ONLY via its x button.
+ * `node.attrs` is re-synced into the rows only on EXTERNAL change (undo/redo,
+ * another panel) via {@link reconcileRows}, preserving ids so focus survives.
  */
 function FreeformRows({
   node,
-  onSet,
   onReplace,
 }: {
   node: GuiNode;
-  onSet: (name: string, value: string) => void;
   onReplace: (attrs: Record<string, string>) => void;
 }) {
-  const names = freeformAttrs(node);
   const isComponent = node.tag === "Component";
 
-  // A blank key is the in-progress "Add property" row; only Component (and other
-  // tags via an unrecognized attr) shows the add affordance, since freeform
-  // overrides are primarily a <Component> feature.
-  const addBlank = () => {
-    if ("" in node.attrs) return; // a blank row already exists
-    onReplace({ ...node.attrs, "": "" });
+  // Local rows are the source of truth WHILE editing; `node.attrs` is synced in
+  // on external change. The initializer derives fresh rows (with fresh ids) for
+  // the node the panel first mounts on.
+  const [rows, setRows] = useState<OverrideRow[]>(() => deriveRows(node));
+
+  // Resync on EXTERNAL attr changes (undo/redo, another panel, switching the
+  // selected node), preserving row ids where names still match so an in-flight
+  // input is not remounted. reconcileRows returns a content-equal list when the
+  // rows already mirror the attrs (our own commit just wrote them), so rowsEqual
+  // skips the redundant update — avoiding a render loop.
+  useEffect(() => {
+    setRows((prev) => {
+      const next = reconcileRows(prev, node);
+      return rowsEqual(prev, next) ? prev : next;
+    });
+  }, [node, node.attrs]);
+
+  // Apply a new row list: update local state AND commit the rebuilt attrs map so
+  // the preview updates live. Blank-named rows are not committed (rowsToAttrs
+  // skips them) but stay in local state so the user can keep filling them in.
+  const apply = (next: OverrideRow[]) => {
+    setRows(next);
+    onReplace(rowsToAttrs(node, next));
   };
 
-  if (names.length === 0 && !isComponent) return null;
+  const setName = (id: string, name: string) =>
+    apply(rows.map((r) => (r.id === id ? { ...r, name } : r)));
+  const setValue = (id: string, value: string) =>
+    apply(rows.map((r) => (r.id === id ? { ...r, value } : r)));
+  const removeRow = (id: string) => apply(rows.filter((r) => r.id !== id));
+
+  // Add an in-progress blank row (only Component shows the affordance, since
+  // freeform overrides are primarily a <Component> feature). Local-only until it
+  // gets a name — no attr churn for an empty add.
+  const addRow = () => {
+    if (rows.some((r) => r.name === "")) return; // a blank row already exists
+    setRows([...rows, { id: mintRowId(), name: "", value: "" }]);
+  };
+
+  if (rows.length === 0 && !isComponent) return null;
 
   return (
     <div className="mt-3 border-t pt-2">
@@ -457,38 +503,35 @@ function FreeformRows({
         {isComponent && (
           <button
             type="button"
-            onClick={addBlank}
+            onClick={addRow}
             className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Plus className="size-3" /> Add
           </button>
         )}
       </div>
-      {names.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-muted-foreground/60 text-xs">No override properties.</p>
       ) : (
         <div className="space-y-1.5">
-          {names.map((attrName) => (
-            <div key={attrName} className="flex items-center gap-1">
+          {rows.map((row) => (
+            <div key={row.id} className="flex items-center gap-1">
               <Input
-                value={attrName}
-                onChange={(e) => onReplace(renameAttr(node.attrs, attrName, e.currentTarget.value))}
+                value={row.name}
+                onChange={(e) => setName(row.id, e.currentTarget.value)}
                 placeholder="name"
                 className="h-7 w-24 font-mono text-xs"
               />
               <Input
-                value={node.attrs[attrName] ?? ""}
-                onChange={(e) => onSet(attrName, e.currentTarget.value)}
+                value={row.value}
+                onChange={(e) => setValue(row.id, e.currentTarget.value)}
                 placeholder="literal or {token}"
-                className={cn(
-                  "h-7 flex-1 text-xs",
-                  isBoundField(node.attrs[attrName] ?? "") && boundInputClass,
-                )}
+                className={cn("h-7 flex-1 text-xs", isBoundField(row.value) && boundInputClass)}
               />
               <button
                 type="button"
-                aria-label={`Remove ${attrName}`}
-                onClick={() => onSet(attrName, "")}
+                aria-label={`Remove ${row.name || "property"}`}
+                onClick={() => removeRow(row.id)}
                 className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
               >
                 <Trash2 className="size-3" />

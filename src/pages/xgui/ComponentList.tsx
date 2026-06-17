@@ -2,8 +2,9 @@
  * ComponentList — the leftmost, collapsible component-list panel of the XGUI
  * editor (F8). A folder tree mirroring the on-disk `gui/` tree: collapsible
  * folders, a per-file View-vs-widget glyph, and an unsaved-changes dot on the
- * currently-open component when it is dirty. A `+` opens the New-component
- * dialog; a folder icon button creates a new top-level folder.
+ * currently-open component when it is dirty. A folder-icon button creates a new
+ * top-level folder; a header `+` creates a component at the gui/ root, and each
+ * folder row reveals a hover `+` that creates a component scoped to that folder.
  *
  * Tree data-prep (flatten + collision + folder options) lives in the pure
  * {@link guiTree} module; this component is the React shell that loads the tree
@@ -81,7 +82,10 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   const [query, setQuery] = useState("");
   // Collapsed folder paths. Empty = everything expanded.
   const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(() => new Set());
-  const [newOpen, setNewOpen] = useState(false);
+  // The destination folder the New-component dialog is scoped to ("" = gui/ root),
+  // or null when the dialog is closed. Set by a folder row's hover "+" or the
+  // header's root "+"; the dialog only asks for a name and creates into this folder.
+  const [newFolder, setNewFolder] = useState<string | null>(null);
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
@@ -242,18 +246,21 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
           </TooltipTrigger>
           <TooltipContent>New folder</TooltipContent>
         </Tooltip>
+        {/* The root-scoped "+" keeps gui/-root component creation reachable now that
+            the top-level "New component" button is gone; per-folder creation lives on
+            each folder row's hover "+". */}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="New component"
-              onClick={() => setNewOpen(true)}
+              aria-label="New component in gui/ root"
+              onClick={() => setNewFolder("")}
               className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <Plus className="size-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>New component</TooltipContent>
+          <TooltipContent>New component in gui/ root</TooltipContent>
         </Tooltip>
       </div>
 
@@ -276,6 +283,7 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
                   key={`folder:${row.path}`}
                   row={row}
                   onToggle={() => toggleFolder(row.path)}
+                  onAddComponent={() => setNewFolder(row.path)}
                 />
               ) : (
                 <ComponentRow
@@ -292,9 +300,12 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       </div>
 
       <NewComponentDialog
-        open={newOpen}
-        onOpenChange={setNewOpen}
+        open={newFolder != null}
+        onOpenChange={(next) => {
+          if (!next) setNewFolder(null);
+        }}
         tree={tree}
+        scopedFolder={newFolder}
         onCreated={handleCreated}
       />
 
@@ -314,26 +325,44 @@ const INDENT_REM = 0.75;
 function FolderRow({
   row,
   onToggle,
+  onAddComponent,
 }: {
   row: Extract<GuiTreeRow, { kind: "folder" }>;
   onToggle: () => void;
+  onAddComponent: () => void;
 }) {
   return (
     <li>
-      <button
-        type="button"
-        onClick={onToggle}
-        title={row.path}
+      {/* The row is a `group` so the hover "+" (mirroring StructureTree's add-child
+          affordance) reveals on hover; the toggle and "+" are siblings, not nested
+          buttons. */}
+      <div
+        className="group flex w-full min-w-0 items-center gap-1 pr-2 transition-colors hover:text-foreground"
         style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
-        className="flex w-full min-w-0 items-center gap-1 py-1 pr-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
       >
-        {row.collapsed ? (
-          <ChevronRight className="size-3.5 shrink-0" />
-        ) : (
-          <ChevronDown className="size-3.5 shrink-0" />
-        )}
-        <span className="min-w-0 truncate">{row.name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          title={row.path}
+          className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors group-hover:text-foreground"
+        >
+          {row.collapsed ? (
+            <ChevronRight className="size-3.5 shrink-0" />
+          ) : (
+            <ChevronDown className="size-3.5 shrink-0" />
+          )}
+          <span className="min-w-0 truncate">{row.name}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`New component in ${row.path}/`}
+          title={`New component in ${row.path}/`}
+          onClick={onAddComponent}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
     </li>
   );
 }

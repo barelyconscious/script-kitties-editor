@@ -4,6 +4,7 @@ import {
   collisionMessage,
   flattenTree,
   folderRelFromSelectValue,
+  folderScopeLabel,
   type GuiFolder,
   indexComponentsByName,
   isValidBasename,
@@ -222,6 +223,17 @@ describe("toComponentBasename", () => {
     expect(toComponentBasename("Profile-Card")).toBe("profile_card");
     expect(toComponentBasename("__weird__name__")).toBe("weird_name");
     expect(toComponentBasename("ALLCAPS")).toBe("allcaps");
+  });
+});
+
+describe("folderScopeLabel", () => {
+  it("reads the gui/ root as 'gui/'", () => {
+    expect(folderScopeLabel("")).toBe("gui/");
+  });
+
+  it("appends a trailing slash to a folder path", () => {
+    expect(folderScopeLabel("widgets")).toBe("widgets/");
+    expect(folderScopeLabel("profile/cards")).toBe("profile/cards/");
   });
 });
 

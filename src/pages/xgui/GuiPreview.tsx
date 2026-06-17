@@ -428,7 +428,10 @@ function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMount
   // within THIS <Component> box. A local z-order map ranks the child's own boxes.
   const childZOrder = computeZOrder(entry.root, overrides);
   return (
-    <div className="absolute inset-0" style={{ position: "absolute", zIndex: 0 }}>
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{ position: "absolute", zIndex: 0 }}
+    >
       {renderChildren(
         entry.root.children,
         // Selection inside a mounted child is out of F6b scope (the child's nodes

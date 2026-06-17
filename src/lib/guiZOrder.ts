@@ -1,45 +1,48 @@
 /**
- * guiZOrder — the pure, unit-testable FLATTEN + GLOBAL z-order pass for the XGUI
- * preview (F5b).
+ * guiZOrder — the pure, unit-testable z-order pass for the XGUI preview.
  *
- * The `layer` attribute is a GLOBAL paint order across the WHOLE component, not a
- * per-branch one: a deeply-nested box with a high `layer` must paint above a
- * shallow box with a low `layer` in a DIFFERENT branch. CSS can express that only
- * if every leaf's `z-index` competes inside ONE shared stacking context (the root
- * stage) — see `design/xgui_ta.md`, "F5a — confirmed render contract for the
- * layer / global z-order model". This module computes the single global ordering
- * the renderer assigns as `z-index`.
+ * **The intuitive NESTED model (supersedes the old global-flat one).** An
+ * element's `layer` controls its draw order RELATIVE TO ITS SIBLINGS: a higher
+ * `layer` paints above a lower-`layer` sibling, and ties break by document order.
+ * A container's `layer` lifts the container AND ITS WHOLE SUBTREE as a group,
+ * because each box forms a normal CSS stacking context that contains its own
+ * descendants — exactly how UI engines (and a user's mental model) treat z-order.
+ * See `design/xgui_ta.md`, "F5a/F5b — nested z-order model".
  *
- * The two-pass approach (F5a, confirmed against React's render output):
+ * Why this replaced the global-flat scheme: the previous model ranked every LEAF
+ * box in ONE global `(layer, doc-order)` ordering and gave wrappers `z-index:
+ * auto`. That made a CONTAINER's `layer` a silent no-op (it never reached the DOM)
+ * and meant `layer` was not inherited — setting `layer` on a Panel-with-children
+ * did nothing visible. The nested model fixes both: every box (leaf or container)
+ * gets a `z-index` from its own resolved `layer` among its siblings.
  *
- *   1. FLATTEN pass. Walk the tree in DOCUMENT ORDER (depth-first, pre-order — the
- *      order nodes appear in the serialized XML), expanding `forEach` exactly as
- *      the renderer does (same {@link stampForEach} + {@link ScopeStack}, so the
- *      flatten and the render agree on which boxes exist and in what order). For
- *      each visual box capture `{ boxKey, resolvedLayer, docOrderIndex }`.
- *      `resolvedLayer` is the `layer` attribute AFTER token/literal resolution
- *      (layer is bindable — F3), defaulting to `0`. `docOrderIndex` is the box's
- *      position in this pre-order walk: the stable tiebreaker.
- *   2. SORT + ASSIGN pass. Stable-sort by `(resolvedLayer asc, docOrderIndex asc)`
- *      and assign each box a `z-index` equal to its RANK in the sorted list (a
- *      dense `0..N-1` sequence — only the relative order matters). The result is a
- *      `boxKey → zIndex` map the renderer hands to each LEAF `<div>`; structural
- *      wrappers get NO `z-index` (they stay `z-index: auto` and therefore do NOT
- *      form stacking contexts, which is the load-bearing CSS guarantee).
+ * The pass (pure, no React/DOM):
  *
- * Assigning RANK (not raw `layer`) as the z-index also removes duplicate-z-index
- * document-order ambiguity: equal-`layer` boxes get distinct, document-ordered
- * ranks, so paint order is fully determined and never relies on the browser's
- * tie-break.
+ *   1. FLATTEN pass. Walk the tree in DOCUMENT ORDER (depth-first, pre-order),
+ *      expanding `forEach` exactly as the renderer does (same {@link stampForEach}
+ *      + {@link ScopeStack}, so flatten and render agree on which boxes exist).
+ *      For each visual box capture `{ boxKey, parentKey, resolvedLayer,
+ *      siblingIndex }`. `resolvedLayer` is the `layer` attribute AFTER
+ *      token/literal resolution (layer is bindable — F3), defaulting to `0`.
+ *      `siblingIndex` is the box's 0-based position AMONG ITS SIBLINGS (the
+ *      document-order tiebreaker WITHIN a sibling group).
+ *   2. RANK pass. Within EACH sibling group (boxes sharing a `parentKey`),
+ *      stable-sort by `(resolvedLayer asc, siblingIndex asc)` and assign each box a
+ *      `z-index` equal to its rank in that group (a dense `0..k-1` sequence per
+ *      group — only the relative order within the group matters). The renderer
+ *      applies the mapped `z-index` to EVERY box; a box with a non-default layer
+ *      legitimately forms a stacking context, and that is the DESIRED grouping
+ *      (each subtree stays contained within its parent's stacking context).
  *
- * This module is PURE (no React, no DOM). The renderer computes the SAME
- * {@link boxKey} per box as it descends (see {@link makeBoxKey}) and looks its
- * z-index up in the returned map. Keeping the flatten here as a clean, standalone
- * seam is also the forward-compat hook for a future flat-emit renderer (the
- * escape hatch for when a panel needs `opacity`/`transform` — NOT built here).
+ * Assigning RANK (not raw `layer`) as the z-index removes duplicate-z-index
+ * document-order ambiguity: equal-`layer` siblings get distinct, document-ordered
+ * ranks within their group, so paint order is fully determined and never relies on
+ * the browser's tie-break.
  *
- * @see design/xgui_ta.md — "F5a — confirmed render contract for the layer /
- *   global z-order model".
+ * The renderer computes the SAME {@link boxKey} per box as it descends (see
+ * {@link makeBoxKey}) and looks its z-index up in the returned map.
+ *
+ * @see design/xgui_ta.md — "F5a/F5b — nested z-order model".
  */
 
 import { resolveTypedProp } from "./guiBinding";
@@ -47,7 +50,7 @@ import { isForEachTemplate, stampForEach } from "./guiForEach";
 import type { GuiNode } from "./guiNode";
 import { ScopeStack } from "./guiScope";
 
-/** The attribute name carrying a box's global paint order. Bindable (F3). */
+/** The attribute name carrying a box's paint order among its siblings. Bindable (F3). */
 export const LAYER_ATTR = "layer";
 
 /** The `layer` value used when a box has no `layer` attribute (or it's unresolved). */
@@ -101,16 +104,19 @@ export function makeBoxKey(
 }
 
 /**
- * One box captured by the flatten pass, before sorting: its render identity, its
- * resolved global layer, and its document-order position (the tiebreaker).
+ * One box captured by the flatten pass, before ranking: its render identity, its
+ * parent's identity (the sibling-group key), its resolved layer, and its
+ * position among its siblings (the within-group document-order tiebreaker).
  */
 export type FlatBox = {
   /** The render-reproducible identity of this box (see {@link BoxKey}). */
   boxKey: BoxKey;
+  /** The {@link BoxKey} of this box's parent box (`""` for a direct child of the stage). */
+  parentKey: BoxKey;
   /** The `layer` attribute resolved against this box's scope; {@link DEFAULT_LAYER} if absent/unresolved. */
   resolvedLayer: number;
-  /** This box's 0-based position in the pre-order (document-order) walk. */
-  docOrderIndex: number;
+  /** This box's 0-based position AMONG ITS SIBLINGS (the within-group tiebreaker). */
+  siblingIndex: number;
 };
 
 /**
@@ -138,14 +144,14 @@ export function resolveLayer(node: GuiNode, scope: ScopeStack): number {
 /**
  * FLATTEN pass: walk the tree in document order (pre-order DFS), expanding
  * `forEach` exactly as the renderer does, and emit one {@link FlatBox} per visual
- * box. The returned list is in DOCUMENT ORDER (its index IS each box's
- * `docOrderIndex`).
+ * box. Each box records its `parentKey` (the sibling-group key) and its
+ * `siblingIndex` (its position among the boxes sharing that parent).
  *
  * `root` is expected to be the `<View>` stage; its children are the first
- * participating boxes (the stage itself is not a box). The traversal pushes each
- * `forEach` item onto the scope stack as it descends, so a child's `layer` token
- * resolves item-relative — identical to how the renderer resolves the rest of the
- * child's attributes.
+ * participating boxes (the stage itself is not a box, so its children's
+ * `parentKey` is `""`). The traversal pushes each `forEach` item onto the scope
+ * stack as it descends, so a child's `layer` token resolves item-relative —
+ * identical to how the renderer resolves the rest of the child's attributes.
  */
 export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   const boxes: FlatBox[] = [];
@@ -154,41 +160,48 @@ export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   /**
    * Visit the visual children of `parent` in document order. Each plain child is
    * one box; each `forEach` template is expanded into its instances (in order),
-   * each in its own item scope. Descends into a box's own children after recording
-   * it (pre-order).
+   * each in its own item scope. All boxes produced here share `parentKey` and are
+   * numbered by their position in this sibling group. Descends into a box's own
+   * children (their OWN sibling group) after recording it (pre-order).
    */
   function visitChildren(children: GuiNode[], parentKey: BoxKey, parentScope: ScopeStack): void {
+    let siblingIndex = 0; // position WITHIN this sibling group (forEach instances count)
     for (const child of children) {
       if (!isVisualTag(child.tag)) continue; // <Event> et al. — non-visual, no box
 
       if (!isForEachTemplate(child)) {
-        emit(child, parentKey, parentScope, undefined);
+        emit(child, parentKey, parentScope, undefined, siblingIndex);
+        siblingIndex += 1;
         continue;
       }
-      // A `forEach` template: one box per stamped instance, each item-scoped. An
-      // empty/unresolved collection yields zero instances — the template paints
-      // nothing here, exactly as the renderer does.
+      // A `forEach` template: one box per stamped instance, each item-scoped, each
+      // its own sibling slot. An empty/unresolved collection yields zero instances —
+      // the template paints nothing here, exactly as the renderer does.
       for (const instance of stampForEach(child, parentScope)) {
-        emit(child, parentKey, instance.scope, instance.instanceKey);
+        emit(child, parentKey, instance.scope, instance.instanceKey, siblingIndex);
+        siblingIndex += 1;
       }
     }
   }
 
-  /** Record one box (assigning its doc-order index) then recurse into its children. */
+  /** Record one box (with its sibling position) then recurse into its children. */
   function emit(
     node: GuiNode,
     parentKey: BoxKey,
     boxScope: ScopeStack,
     instanceKey: string | undefined,
+    siblingIndex: number,
   ): void {
     const boxKey = makeBoxKey(parentKey, node.nodeId, instanceKey);
     boxes.push({
       boxKey,
+      parentKey,
       resolvedLayer: resolveLayer(node, boxScope),
-      docOrderIndex: boxes.length, // pre-order position == insertion order
+      siblingIndex,
     });
     // Descend into this box's children in the SAME item scope (a `forEach` instance
-    // carries its item scope into its subtree). `<Component>` has no children.
+    // carries its item scope into its subtree). `<Component>` has no children. This
+    // box's key becomes the parentKey of its own children's sibling group.
     visitChildren(node.children, boxKey, boxScope);
   }
 
@@ -198,42 +211,55 @@ export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
 
 /**
  * The z-order assignment: a map from each box's {@link BoxKey} to its `z-index`.
- * The integers are a dense `0..N-1` rank sequence — only their relative order is
- * meaningful. A leaf `<div>` styled with its mapped `z-index` participates directly
- * in the root stage's single stacking context.
+ * The integers are dense `0..k-1` rank sequences ASSIGNED PER SIBLING GROUP — only
+ * a box's rank relative to its siblings is meaningful (its parent's own z-index
+ * contains the whole group within the parent's stacking context). A box styled
+ * with its mapped `z-index` competes only within its parent's stacking context.
  */
 export type ZOrderMap = ReadonlyMap<BoxKey, number>;
 
 /**
- * SORT + ASSIGN pass: stable-sort the flattened boxes by `(resolvedLayer asc,
- * docOrderIndex asc)` and assign each its RANK in that order as a `z-index`.
+ * RANK pass: within EACH sibling group (boxes sharing a `parentKey`), stable-sort
+ * by `(resolvedLayer asc, siblingIndex asc)` and assign each box its RANK in that
+ * group as a `z-index`.
  *
- * The sort is made fully deterministic by the `docOrderIndex` tiebreaker, so two
- * boxes never compare equal — equal-`layer` boxes fall back to document order, and
- * the assigned ranks are distinct. Stability of the underlying sort is therefore
- * not even relied upon, but the comparator is total regardless.
+ * Each sibling group is ranked independently: a box's z-index orders it only among
+ * its siblings, and because the parent box carries its OWN z-index (its rank in the
+ * grandparent group), the whole subtree is lifted/lowered as a group via normal
+ * nested CSS stacking. The `siblingIndex` tiebreaker makes the within-group sort
+ * fully deterministic, so equal-`layer` siblings fall back to document order and
+ * the assigned ranks are distinct.
  */
 export function assignZOrder(boxes: readonly FlatBox[]): ZOrderMap {
-  const sorted = [...boxes].sort((a, b) => {
-    if (a.resolvedLayer !== b.resolvedLayer) return a.resolvedLayer - b.resolvedLayer;
-    return a.docOrderIndex - b.docOrderIndex;
-  });
+  // Bucket boxes by their sibling-group key (parentKey).
+  const groups = new Map<BoxKey, FlatBox[]>();
+  for (const box of boxes) {
+    const group = groups.get(box.parentKey);
+    if (group === undefined) groups.set(box.parentKey, [box]);
+    else group.push(box);
+  }
+
   const map = new Map<BoxKey, number>();
-  sorted.forEach((box, rank) => {
-    map.set(box.boxKey, rank);
-  });
+  for (const group of groups.values()) {
+    const sorted = [...group].sort((a, b) => {
+      if (a.resolvedLayer !== b.resolvedLayer) return a.resolvedLayer - b.resolvedLayer;
+      return a.siblingIndex - b.siblingIndex;
+    });
+    sorted.forEach((box, rank) => {
+      map.set(box.boxKey, rank);
+    });
+  }
   return map;
 }
 
 /**
- * The whole F5b pass in one call: flatten the tree (document order, `forEach`
- * expanded, `layer` resolved against each box's scope) then assign the global
- * `(layer, doc-order)` z-order. Returns the `boxKey → zIndex` map the renderer
- * applies to each leaf box.
+ * The whole nested z-order pass in one call: flatten the tree (document order,
+ * `forEach` expanded, `layer` resolved against each box's scope) then assign the
+ * per-sibling-group z-order. Returns the `boxKey → zIndex` map the renderer applies
+ * to each box.
  *
  * This is what `GuiPreview` calls once per render; the two stages are exported
- * separately so each is independently testable (and so a future flat-emit renderer
- * can reuse {@link flattenBoxes} directly).
+ * separately so each is independently testable.
  */
 export function computeZOrder(root: GuiNode, model?: unknown): ZOrderMap {
   return assignZOrder(flattenBoxes(root, model));

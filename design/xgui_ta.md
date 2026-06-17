@@ -540,11 +540,13 @@ This is **derived state, rebuilt every render** — there is no mapping to inval
 - **Overflow is honored by doing nothing:** no `overflow: hidden` anywhere — children that exceed their parent paint outside it, matching the runtime. (The design explicitly wants this.)
 - Negative and >100% values work natively (`calc(100% + -300px)` for the `position="1,0,-300,0"` right-anchored panel in the example). No clamping.
 
-**Applying `layer` (draw order) — and the stacking-context trap.**
+**Applying `layer` (draw order) — the NESTED model.**
 
-`layer` is an integer; higher paints on top, across the *whole* component, not just among siblings. The naïve `z-index: layer` per element **does not work** because of CSS stacking contexts: a `z-index` only competes *within its parent's stacking context*, so a deeply-nested high-`layer` element cannot rise above a shallow low-`layer` element in a different branch. Document-order/branch nesting would leak back in — exactly what the design says must not happen.
+> **SUPERSEDED (task 487).** The "global flat, one stacking context, leaves only" model described in this subsection and pinned by F5a/F5b below was replaced by the **intuitive nested z-order model**. See "F5a/F5b — nested z-order model" immediately after this block for the model that ships. The text below is retained as the historical reasoning that motivated the change. The decisive defect: a global-flat ranking applied a numeric `z-index` to LEAF boxes only and left every wrapper at `z-index: auto`, so a **container's `layer` was a silent no-op** (setting `layer` on a Panel-with-children did nothing) and `layer` was not inherited by a subtree — which is not how users (or UI engines) expect `layer` to behave.
 
-Resolution: **flatten layering into a single stacking context.**
+`layer` is an integer; higher paints on top, across the *whole* component, not just among siblings. The naïve `z-index: layer` per element **does not work** because of CSS stacking contexts: a `z-index` only competes *within its parent's stacking context*, so a deeply-nested high-`layer` element cannot rise above a shallow low-`layer` element in a different branch. Document-order/branch nesting would leak back in — exactly what the design *originally* said must not happen.
+
+Resolution (original, now superseded): **flatten layering into a single stacking context.**
 
 - The preview renders the tree into nested DOM (so the rel/abs parent-relative math works), but **does not** set `z-index` on the structural nesting. Instead, every box that participates in layering gets its `z-index` from a **single global ordering computed across the entire flattened node list**, and the structural parent boxes are kept from creating competing stacking contexts.
 - Concretely for the MVP, the robust approach is a **two-pass render**:
@@ -555,7 +557,30 @@ Resolution: **flatten layering into a single stacking context.**
 
 **Why this shape (coupling summary).** The `GuiNode` tree is the single source of truth; tree/properties/preview are three projections of it joined only by `nodeId`; the DOM carries `nodeId` so the mapping is never a separate structure to maintain; rel/abs maps to `calc()` so there's no layout engine; and `layer` is applied as one global z-order to dodge stacking-context coupling. The one explicit, named coupling that remains is **structural-nesting (for percentage math) vs. global paint-order (for layer)** pulling in opposite directions — resolved by keeping intermediate wrappers out of the stacking-context game. That tension is the thing most likely to be reintroduced accidentally later; it is called out so it stays guarded.
 
-##### F5a — confirmed render contract for the layer / global z-order model (architect)
+##### F5a/F5b — nested z-order model (the model that ships; supersedes global-flat)
+
+**This replaces the global-flat, leaves-only, single-stacking-context model** described above and pinned by the original F5a/F5b contract (kept below, struck through, for history). It is what `src/lib/guiZOrder.ts` + `src/pages/xgui/GuiPreview.tsx` implement.
+
+**Why the change (the bug global-flat caused).** The global-flat scheme ranked every LEAF box in ONE `(layer, doc-order)` ordering and assigned each leaf a numeric `z-index`, while every structural WRAPPER stayed `z-index: auto` (so wrappers never formed a stacking context). Two consequences made `layer` feel broken: (1) a **container's `layer` was ignored entirely** — it was never applied to the DOM, so setting `layer` on a Panel-with-children did nothing visible; (2) `layer` was **not inherited** — a container's high `layer` did not lift its descendants, because each leaf kept its own resolved `layer` (default 0). A leaf's `layer` *did* reorder it globally, but that is the minority case; the intuitive expectation (and how UI engines work) is that `layer` orders an element among its siblings and a container's `layer` carries its whole subtree.
+
+**The nested model.**
+
+- An element's `layer` controls its draw order **relative to its siblings**: a higher `layer` paints above a lower-`layer` sibling; **ties break by document order** (later sibling on top).
+- A **container's `layer` lifts the container AND its whole subtree as a group.** This is ordinary nested CSS stacking: each box gets a `z-index` derived from its own resolved `layer` (default 0) among its siblings, and therefore forms its own stacking context that **contains** its descendants. A box with a non-default `layer` legitimately forming a stacking context is now **desired** — the nested containment *is* the grouping. (This explicitly reverses the old F5a "no stacking contexts on wrappers" rule.)
+- `layer` is **bindable** (F3): it is resolved against the box's scope (the `forEach` item scope inside a repeated subtree) **before** ordering. An unresolved/non-numeric bound layer falls back to `0`.
+- **Components** are leaves in the parent document, but their `layer` must order them among their siblings too (task 486 exposed the field); a `<Component>` box gets its sibling-rank `z-index` like any other box, and the mounted child subtree is contained within it.
+
+**Implementation (`guiZOrder.ts`).** Two pure passes over the same `GuiNode` tree, `forEach` expanded exactly as the renderer expands it:
+1. **Flatten pass.** Pre-order (document-order) walk emitting one `FlatBox` per visual box, capturing `{ boxKey, parentKey, resolvedLayer, siblingIndex }`. `parentKey` is the box's parent's `boxKey` (the sibling-group key; `""` for stage children); `siblingIndex` is the box's position **among its siblings** (the within-group tiebreaker).
+2. **Rank pass.** Bucket boxes by `parentKey`, and **within each sibling group** stable-sort by `(resolvedLayer asc, siblingIndex asc)` and assign each box its rank in that group as its `z-index` (a dense `0..k-1` per group). Assigning rank (not raw `layer`) removes duplicate-`z-index` ambiguity within a group.
+
+The renderer (`GuiPreview.GuiBox`) applies the mapped `z-index` to **every** box (no leaf/wrapper distinction). The root stage remains the one zoom/pan transform host (the view transform stays on the stage only — a transform on an intermediate box would warp its child geometry and break the drag-delta math; that is now the reason it stays on the stage, not the old stacking-context reason). Rel/abs positioning, selection/drag/hit-testing (`closest('[data-node-id]')` still hit-tests the topmost painted box), the blueprint backdrop, and zoom/pan are all unaffected by the change.
+
+**Tests (`guiZOrder.test.ts`).** Cover: a higher-layer sibling outranks a lower-layer sibling; ties break by document order; a container's `layer` lifts its subtree above a lower-layer sibling subtree (and a very high `layer` on a deep child only lifts it WITHIN its parent group, never across branches — the deliberate supersede of the old global-flat cross-branch behavior); bound layer resolves before ranking; an unresolved bound layer falls back to default; `forEach`/Component-style siblings order by their per-item layer; and that ranks restart per sibling group.
+
+##### F5a — confirmed render contract for the layer / global z-order model (architect) — ~~SUPERSEDED by the nested model above (task 487)~~
+
+> **SUPERSEDED (task 487).** This global-flat contract no longer describes what ships — see "F5a/F5b — nested z-order model" above. Retained verbatim for history.
 
 The model above is correct in principle; this is the **implementation contract the F5b build task must satisfy**, pinned against how CSS stacking contexts actually form so the trap can't be silently reintroduced in React 19's DOM output. Nothing above is revised — this makes it precise and testable.
 

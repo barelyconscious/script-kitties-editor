@@ -13,10 +13,11 @@
  *                                   sharing `data-node-id` + a `data-instance-key`
  *                                   (selection already collapses to the template
  *                                   because it only reads `data-node-id`).
- *   F5b layer z-order             → a flatten pass over the same tree assigning
- *                                   each LEAF box a numeric `z-index`; wrappers
- *                                   stay `z-index: auto` (this component already
- *                                   keeps stacking-context props off wrappers).
+ *   F5  layer z-order             → a flatten pass over the same tree assigning
+ *                                   EACH box a numeric `z-index` = its rank among
+ *                                   its siblings (the intuitive NESTED model:
+ *                                   layer orders a box among its siblings, and a
+ *                                   container's layer lifts its whole subtree).
  *   F6b component mounting        → replace a `<Component>`'s plain box with the
  *                                   mounted src subtree / missing-src placeholder.
  *   F7  drag                      → a pointer handler that writes Δpx back to the
@@ -27,14 +28,16 @@
  * `lib/guiGeometry.ts` / `lib/guiSelection.ts`; this component is the thin React
  * shell that wires them to the DOM.
  *
- * CRITICAL layering constraint (from the F5a contract): structural wrapper
- * boxes must NOT form CSS stacking contexts — no `transform`, `opacity < 1`,
- * `filter`, `isolation`, `mix-blend-mode`, or numeric `z-index` on a box with
- * layering descendants — or cross-branch global z-order (F5b) silently breaks.
- * The selection highlight is therefore drawn with `outline` + `box-shadow`
- * (neither forms a stacking context), never `transform`/`opacity`.
+ * Nested z-order model (supersedes the old F5a global-flat one): an element's
+ * `layer` orders it among its SIBLINGS, and a container's layer lifts the
+ * container AND its whole subtree as a group. Every box carries its own
+ * sibling-rank `z-index` and so forms its own stacking context — that nested
+ * containment IS the grouping, no longer something to avoid. The selection
+ * highlight still uses `outline` + `box-shadow` only (no transform/opacity) so it
+ * never warps geometry. The ROOT stage is still the one intentional zoom/pan
+ * transform host (the view transform lives only there, never on a child box).
  *
- * @see design/xgui_ta.md — "Preview back-reference + layer rendering model resolved"
+ * @see design/xgui_ta.md — "F5a/F5b — nested z-order model"
  */
 
 import { type CSSProperties, useRef } from "react";
@@ -78,24 +81,6 @@ function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
 }
 
-/**
- * Whether a box has any child that produces a box of its own (a Panel/Text/
- * Component child, including a `forEach` template). A box with NO such children is
- * a LEAF — and only leaves receive a numeric `z-index` (F5a): a leaf has no
- * layering descendants to trap, so its own stacking context is harmless, while a
- * wrapper carrying a numeric `z-index` WOULD trap its descendants and break global
- * cross-branch paint order. Wrappers therefore stay `z-index: auto`.
- *
- * Note this is a STRUCTURAL leaf check (does the node have visual children at
- * all), independent of the data model: a `forEach` wrapper whose collection is
- * currently empty has zero rendered children but is still treated as a wrapper, so
- * it never picks up a z-index. That is correct — it has nothing to paint, so the
- * absence of a z-index is moot, and the check stays model-independent.
- */
-function hasVisualChild(node: GuiNode): boolean {
-  return node.children.some((child) => isVisualTag(child.tag));
-}
-
 /** Default text color when `textColor` is absent (design default). */
 const DEFAULT_TEXT_COLOR = "185,178,165,255";
 
@@ -133,15 +118,15 @@ type GuiBoxProps = {
   scope: ScopeStack;
   palette: Palette;
   /**
-   * This box's render-reproducible identity path (F5b), built from its parent's
-   * key + its own `nodeId`(+`instanceKey`). Used to look the box's global `z-index`
-   * up in {@link zOrder} and to derive each child's key.
+   * This box's render-reproducible identity path, built from its parent's key + its
+   * own `nodeId`(+`instanceKey`). Used to look the box's sibling-rank `z-index` up
+   * in {@link zOrder} and to derive each child's key.
    */
   boxKey: BoxKey;
   /**
-   * The global `boxKey → z-index` map for the whole component (F5b). A LEAF box
-   * applies its mapped z-index so it competes in the stage's single stacking
-   * context; wrappers ignore it and stay `z-index: auto`.
+   * The nested `boxKey → z-index` map for the whole component. EVERY box applies
+   * its mapped z-index, which orders it among its siblings within its parent's
+   * stacking context; a container's z-index lifts its whole subtree as a group.
    */
   zOrder: ZOrderMap;
   /**
@@ -266,20 +251,21 @@ function GuiBox({
   const hasBorder = borderColor !== undefined && borderColor !== "transparent";
   const isText = node.tag === "Text";
 
-  // F5b global z-order: only a LEAF box (no layering descendants) gets a numeric
-  // z-index, drawn from the single global `(layer, doc-order)` ranking so it
-  // competes directly in the stage's one stacking context. A WRAPPER (a box with
-  // visual children) gets NO z-index and stays `z-index: auto` — if it carried a
-  // numeric z-index it would form a stacking context and trap its descendants'
-  // z-index locally, breaking cross-branch global paint order (the F5a trap).
-  const isLeaf = !hasVisualChild(node);
-  const zIndex = isLeaf ? zOrder.get(boxKey) : undefined;
+  // Nested z-order: EVERY box gets a numeric z-index = its rank among its siblings
+  // (resolved `layer`, ties → document order). Because each box carries its own
+  // z-index it forms a stacking context, so its z-index orders it only within its
+  // PARENT's context and its whole subtree is contained inside it — a container's
+  // layer therefore lifts/lowers the container and its subtree as a group. (This
+  // intentional per-box stacking context supersedes the old "no z-index on
+  // wrappers" rule: nesting the contexts is exactly the desired grouping.)
+  const zIndex = zOrder.get(boxKey);
   const textColor = isText ? colorCodeToCss(attrs.textColor ?? DEFAULT_TEXT_COLOR) : undefined;
   const fontSize = isText ? Number(attrs.fontSize) : Number.NaN;
 
-  // Highlight via outline + box-shadow ONLY. These do not form a stacking
-  // context, so a selected wrapper does not trap its descendants' z-index
-  // (the F5a constraint). Never use transform/opacity/filter/isolation here.
+  // Highlight via outline + box-shadow ONLY (drawn in-flow, no extra DOM). Avoid
+  // transform/opacity/filter so the highlight never warps geometry or affects the
+  // box's compositing; the box already forms its own (intended) stacking context
+  // via its z-index, so the highlight doesn't change the layering model.
   const style: CSSProperties = {
     ...geometry,
     backgroundColor,
@@ -298,8 +284,8 @@ function GuiBox({
     fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
-    // F5b: leaf boxes only — a wrapper keeps z-index `auto` (undefined here) so it
-    // never forms a stacking context that would trap its descendants.
+    // Nested z-order: every box applies its sibling-rank z-index (a container's
+    // z-index lifts its subtree as a group via the nested stacking context).
     zIndex,
     outline: selected ? "2px solid var(--ring, #3b82f6)" : undefined,
     outlineOffset: selected ? "-1px" : undefined,
@@ -321,11 +307,10 @@ function GuiBox({
       className={cn(
         "select-none",
         // A faint hairline so empty/transparent boxes are still visible and
-        // clickable in the editor. Border is stacking-context-safe.
+        // clickable in the editor.
         hasBorder ? null : "border border-white/10 border-dashed",
-        // Waiting-binding affordance — a dashed amber ring + slight dim. Outline
-        // and opacity-via-text-color are stacking-context-safe on a leaf-ish box;
-        // we avoid `opacity` on wrappers to honor the F5a layering constraint.
+        // Waiting-binding affordance — a dashed amber ring drawn with `outline` (no
+        // transform/opacity, so it never warps the box or its geometry).
         waiting && "rounded-[2px] outline outline-dashed outline-1 outline-amber-400/70",
       )}
       style={style}
@@ -395,9 +380,11 @@ type ComponentMountProps = {
  *      overrides (F6a): `ScopeStack.root(resolveOverrides(...))`. The parent scope
  *      and its `$` root do NOT cross the boundary — the child sees ONLY its props.
  *
- * The mounted child gets its OWN z-order map (its `layer`s compete within this
- * component box's local stacking context, not the parent stage's global one). This
- * keeps the mount self-contained; cross-mount global z-order is out of F6b scope.
+ * The mounted child gets its OWN z-order map (its boxes' `layer`s order them among
+ * THEIR siblings within this component box's stacking context). This composes
+ * cleanly with the nested model: the `<Component>` box already carries its own
+ * sibling-rank z-index in the parent doc, so the whole mounted subtree is lifted
+ * with it as a group; cross-file z-order across the mount boundary is out of scope.
  */
 function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMountProps) {
   // Pure decision first: blank src / cycle are settled with no fetch.
@@ -425,7 +412,8 @@ function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMount
   const overrides = resolveOverrides(node, parentScope);
   const childScope = ScopeStack.root(overrides);
   // The child mounts as its own little stage: its boxes are positioned/ordered
-  // within THIS <Component> box. A local z-order map ranks the child's own boxes.
+  // within THIS <Component> box. A nested z-order map ranks the child's own boxes
+  // among their siblings, contained by this mount wrapper's stacking context.
   const childZOrder = computeZOrder(entry.root, overrides);
   return (
     <div
@@ -492,8 +480,9 @@ export type GuiPreviewProps = {
    * The view transform applied to the root stage (473): an absolute `scale` plus a
    * screen-pixel `panX`/`panY`. Defaults to native 100% at the origin. It does TWO
    * things:
-   * it's applied as `translate(panX, panY) scale(scale)` on the root stage (the one
-   * intentional stacking context — never on intermediate wrappers, per F5a), and
+   * it's applied as `translate(panX, panY) scale(scale)` on the root stage ONLY
+   * (never on an intermediate box — a transform there would warp the child geometry
+   * and break the drag-delta math), and
    * its `scale` converts the drag's screen-pixel delta into logical-pixel delta
    * (÷ scale) so dragging stays accurate when the stage is zoomed. Pan is a pure
    * translate, so it does NOT affect the drag delta conversion — element drag stays
@@ -542,12 +531,12 @@ export function GuiPreview({
   // no `forEach` entered, the current item IS the root, so this is a strict
   // superset of F3's flat-root scope.
   const scope = ScopeStack.root(model);
-  // F5b: compute the ONE global `boxKey → z-index` ranking for the whole component
-  // up front, then hand it down so each leaf box can apply its rank. The flatten
-  // mirrors this render's `forEach` expansion + scope, so the map's keys line up
-  // with the boxes rendered below. The stage itself is the single shared stacking
-  // context every leaf's z-index competes within (`position: relative` + an
-  // explicit `zIndex: 0` below); no wrapper in between forms one.
+  // Nested z-order: compute the `boxKey → z-index` map (each box ranked among its
+  // siblings by resolved `layer`, ties → document order) up front, then hand it
+  // down so each box can apply its rank. The flatten mirrors this render's `forEach`
+  // expansion + scope, so the map's keys line up with the boxes rendered below.
+  // Each box's z-index orders it within its parent's stacking context, so a
+  // container's layer lifts its whole subtree as a group.
   const zOrder = computeZOrder(root, model);
   // The DOM half of the back-reference: walk outward from the click target to
   // the nearest box carrying a node id. `closest` matches the target itself
@@ -683,17 +672,17 @@ export function GuiPreview({
         backgroundColor: "#1b1b1f",
         // View transform (473): a single `translate(panX, panY) scale(scale)` on the
         // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
-        // The stage is the one intentional stacking context, so a transform on IT is
-        // fine and intended; NEVER add transform/opacity/filter/isolation to an
-        // intermediate wrapper box (the F5a trap). `top left` origin makes the pan
-        // (in viewport screen px) place the stage's top-left exactly at (panX, panY)
-        // within the clipping viewport — fit-and-center bakes the centering into pan.
+        // The transform belongs ONLY on the stage — a transform on an intermediate
+        // box would warp that box's child geometry and break the drag-delta math.
+        // `top left` origin makes the pan (in viewport screen px) place the stage's
+        // top-left exactly at (panX, panY) within the clipping viewport — fit-and-
+        // center bakes the centering into pan.
         transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
         transformOrigin: "top left",
-        // F5b: the stage is the ONE intentional stacking context — it is the root
-        // for this subtree, so every leaf's numeric z-index is interpreted relative
-        // to it. `position: relative` + a numeric `z-index` forms that context; the
-        // structural wrappers in between deliberately do NOT (they stay `auto`).
+        // The stage forms the root stacking context for the whole tree (`position:
+        // relative` + a numeric `z-index`). Its direct children are ranked among
+        // themselves by `layer` within it; each of those children in turn forms its
+        // own context for its subtree (the nested z-order model).
         zIndex: 0,
       }}
     >

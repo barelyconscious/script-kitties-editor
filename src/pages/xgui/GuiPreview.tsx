@@ -671,22 +671,13 @@ export function GuiPreview({
         position: "relative",
         width: `${STAGE_WIDTH}px`,
         height: `${STAGE_HEIGHT}px`,
-        // Blueprint/stencil backdrop (478). A two-tier graph-paper grid painted as
-        // the stage's OWN background, so it lives in the 1280×768 LOGICAL space and
-        // pans/zooms WITH the content under the stage transform — the grid is a
-        // literal picture of the coordinate grid. Two repeating-linear-gradient
-        // layers stack a faint MINOR grid (every 20 logical px) under a slightly
-        // stronger MAJOR grid (every 100 px), over a flat canvas color. Subtle,
-        // blue-tinted, dark-theme-appropriate — rendered GUI boxes sit on top and
-        // stay legible. This is a pure backdrop: it is a background image on the
-        // root stage (the one intentional stacking context, per F5a), never a child
-        // element, so it adds nothing to hit-testing/selection/drag.
-        backgroundColor: "#15151a",
-        backgroundImage: STAGE_GRID_IMAGE,
-        backgroundSize: STAGE_GRID_SIZE,
-        // Anchor the grid to the stage's top-left so a line falls on (0,0) — the
-        // grid is fixed to the logical canvas, not scrolled.
-        backgroundPosition: "0 0",
+        // Solid stage (479). The 1280×768 stage is a flat, opaque artboard color —
+        // the blueprint graph-paper grid now lives BEHIND the stage, on the clipping
+        // viewport (see GuiPreviewHost), so the solid stage reads as an artboard
+        // sitting on a blueprint canvas. Rendered GUI boxes sit on top of this flat
+        // fill and stay legible. (Task 478 painted the grid ON the stage; 479 flips
+        // it back to a solid fill and moves the grid to the viewport backdrop.)
+        backgroundColor: "#1b1b1f",
         // View transform (473): a single `translate(panX, panY) scale(scale)` on the
         // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
         // The stage is the one intentional stacking context, so a transform on IT is
@@ -707,43 +698,6 @@ export function GuiPreview({
     </div>
   );
 }
-
-/**
- * Blueprint backdrop grid (478). Spacing of the MINOR and MAJOR grid lines in
- * the stage's 1280×768 LOGICAL pixels: a faint line every {@link GRID_MINOR_PX}
- * and a slightly stronger line every {@link GRID_MAJOR_PX}. Because the grid is
- * the stage's own background, these are logical-space distances that scale with
- * the view transform — so the spacing tracks the content at any zoom.
- */
-const GRID_MINOR_PX = 20;
-const GRID_MAJOR_PX = 100;
-
-/** The faint MINOR / stronger MAJOR grid line colors — blue-tinted, very low
- *  alpha so the grid reads as a backdrop and never competes with rendered boxes. */
-const GRID_MINOR_COLOR = "rgba(120, 150, 220, 0.06)";
-const GRID_MAJOR_COLOR = "rgba(130, 165, 235, 0.12)";
-
-/**
- * The four-layer `background-image` that paints the two-tier graph-paper grid.
- * Each tier is a pair of 1px repeating-linear-gradients (vertical + horizontal
- * lines); the MAJOR pair is listed FIRST so it paints on top of the MINOR pair
- * where they coincide. Paired with {@link STAGE_GRID_SIZE} (one tile size per
- * layer, in the same order) on `background-size`.
- */
-const STAGE_GRID_IMAGE = [
-  `repeating-linear-gradient(to right, ${GRID_MAJOR_COLOR} 0 1px, transparent 1px ${GRID_MAJOR_PX}px)`,
-  `repeating-linear-gradient(to bottom, ${GRID_MAJOR_COLOR} 0 1px, transparent 1px ${GRID_MAJOR_PX}px)`,
-  `repeating-linear-gradient(to right, ${GRID_MINOR_COLOR} 0 1px, transparent 1px ${GRID_MINOR_PX}px)`,
-  `repeating-linear-gradient(to bottom, ${GRID_MINOR_COLOR} 0 1px, transparent 1px ${GRID_MINOR_PX}px)`,
-].join(", ");
-
-/** The per-layer tile size matching {@link STAGE_GRID_IMAGE} (major, major, minor, minor). */
-const STAGE_GRID_SIZE = [
-  `${GRID_MAJOR_PX}px ${GRID_MAJOR_PX}px`,
-  `${GRID_MAJOR_PX}px ${GRID_MAJOR_PX}px`,
-  `${GRID_MINOR_PX}px ${GRID_MINOR_PX}px`,
-  `${GRID_MINOR_PX}px ${GRID_MINOR_PX}px`,
-].join(", ");
 
 /** The empty `<Component>`-`src` ancestor set at the stage root (no mounts above). */
 const EMPTY_ANCESTRY: ReadonlySet<string> = new Set();

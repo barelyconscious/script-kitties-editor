@@ -46,6 +46,7 @@ import { usePalette } from "../../lib/guiPalette";
 import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
 import { GuiPreviewToolbar } from "./GuiPreviewToolbar";
+import { viewportGridStyle } from "./guiBlueprintGrid";
 import { withAttr } from "./guiProperties";
 import { findNode } from "./guiTreeEdit";
 
@@ -291,13 +292,19 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       onPointerMove={handleViewportPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
-      // A plain, darker VOID fills the viewport area OUTSIDE the 1280×768 stage
-      // (478) so the stage — which carries the blueprint grid backdrop — reads as a
-      // distinct canvas floating in the viewport, making the screen bounds visible.
-      // This is a flat background on the clipping viewport only; the stage sits on
-      // top via the view transform and its own (grid) background.
-      className="relative h-full min-h-0 overflow-hidden bg-[#0d0d10]"
-      style={{ cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined }}
+      // Blueprint backdrop (479). The clipping viewport — the area BEHIND/around the
+      // 1280×768 stage — paints a two-tier graph-paper grid that TRACKS THE VIEW
+      // (cell size scales with zoom, origin offset by pan), so the solid stage reads
+      // as an artboard sitting on one continuous infinite blueprint canvas. The grid
+      // is purely the viewport's `background-*` (built by the pure `viewportGridStyle`
+      // from the same `{scale,panX,panY}` the stage transform uses) — it adds nothing
+      // to hit-testing/selection/drag, and the stage sits on top via the view
+      // transform with its own solid fill. The cursor style is merged in below.
+      className="relative h-full min-h-0 overflow-hidden"
+      style={{
+        ...viewportGridStyle(view),
+        cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined,
+      }}
     >
       <GuiPreview
         root={root}

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { LUA_LANGUAGE_ID } from "./lua";
-import { resolveMonacoTheme, scriptEditorOptions } from "./options";
+import {
+  dataModelEditorOptions,
+  JSON_LANGUAGE_ID,
+  resolveMonacoTheme,
+  scriptEditorOptions,
+} from "./options";
 
 describe("resolveMonacoTheme", () => {
   it("maps dark mode to vs-dark", () => {
@@ -24,5 +29,19 @@ describe("scriptEditorOptions", () => {
 
   it("enables automatic layout so the editor fills its container", () => {
     expect(scriptEditorOptions(false).automaticLayout).toBe(true);
+  });
+});
+
+describe("dataModelEditorOptions", () => {
+  it("pins the JSON language so the Data Model gets JSON highlighting + validation", () => {
+    expect(dataModelEditorOptions().language).toBe(JSON_LANGUAGE_ID);
+  });
+
+  it("stays editable (read/write) so the Data Model can be typed into", () => {
+    expect(dataModelEditorOptions().readOnly).toBe(false);
+  });
+
+  it("enables automatic layout so the editor fills the panel", () => {
+    expect(dataModelEditorOptions().automaticLayout).toBe(true);
   });
 });

@@ -1,52 +1,43 @@
 import { describe, expect, it } from "vitest";
-import type { ViewTransform } from "../../lib/guiGeometry";
 import {
-  GRID_MAJOR_LOGICAL_PX,
-  GRID_MINOR_LOGICAL_PX,
+  GRID_MAJOR_PX,
+  GRID_MINOR_PX,
   VIEWPORT_VOID_COLOR,
   viewportGridStyle,
 } from "./guiBlueprintGrid";
 
-const view = (scale: number, panX = 0, panY = 0): ViewTransform => ({ scale, panX, panY });
-
 describe("viewportGridStyle", () => {
   it("paints the flat void color behind the grid", () => {
-    expect(viewportGridStyle(view(1)).backgroundColor).toBe(VIEWPORT_VOID_COLOR);
+    expect(viewportGridStyle().backgroundColor).toBe(VIEWPORT_VOID_COLOR);
   });
 
-  it("scales the cell size by the current zoom (tracks zoom)", () => {
-    const at1 = viewportGridStyle(view(1)).backgroundSize as string;
-    // At 100%, the minor tile is the logical spacing; the major tile its multiple.
-    expect(at1).toContain(`${GRID_MINOR_LOGICAL_PX}px ${GRID_MINOR_LOGICAL_PX}px`);
-    expect(at1).toContain(`${GRID_MAJOR_LOGICAL_PX}px ${GRID_MAJOR_LOGICAL_PX}px`);
-
-    const at2 = viewportGridStyle(view(2)).backgroundSize as string;
-    // At 200% the cells double, so the grid grows WITH the artboard.
-    expect(at2).toContain(`${GRID_MINOR_LOGICAL_PX * 2}px ${GRID_MINOR_LOGICAL_PX * 2}px`);
-    expect(at2).toContain(`${GRID_MAJOR_LOGICAL_PX * 2}px ${GRID_MAJOR_LOGICAL_PX * 2}px`);
+  it("uses fixed integer cell sizes (does not track zoom)", () => {
+    const size = viewportGridStyle().backgroundSize as string;
+    // Minor + major tiles are the constant integer spacings, independent of any view.
+    expect(size).toContain(`${GRID_MINOR_PX}px ${GRID_MINOR_PX}px`);
+    expect(size).toContain(`${GRID_MAJOR_PX}px ${GRID_MAJOR_PX}px`);
+    // The spacings are integers and the major is an integer multiple of the minor.
+    expect(Number.isInteger(GRID_MINOR_PX)).toBe(true);
+    expect(Number.isInteger(GRID_MAJOR_PX)).toBe(true);
+    expect(GRID_MAJOR_PX % GRID_MINOR_PX).toBe(0);
   });
 
-  it("offsets the origin by the pan (tracks pan) on every layer", () => {
-    const style = viewportGridStyle(view(1, 37, -12));
-    const position = style.backgroundPosition as string;
-    // Every layer shares the pan origin so major/minor phases stay locked.
-    expect(position.split(", ").every((p) => p === "37px -12px")).toBe(true);
+  it("anchors at a static integer origin (does not track pan)", () => {
+    // A fixed (0,0) background-position keeps every line on a whole pixel.
+    expect(viewportGridStyle().backgroundPosition).toBe("0 0");
   });
 
-  it("draws four layers (minor + major, each H and V) at normal zoom", () => {
-    const image = viewportGridStyle(view(1)).backgroundImage as string;
+  it("draws four layers (minor + major, each H and V) with hard 1px stops", () => {
+    const image = viewportGridStyle().backgroundImage as string;
     // Four comma-separated repeating-linear-gradient layers.
     expect(image.match(/repeating-linear-gradient/g)).toHaveLength(4);
+    // Each line is a hard 1px stop, not a soft gradient — so it renders crisp.
+    expect(image.match(/0 1px, transparent 1px/g)).toHaveLength(4);
   });
 
-  it("drops the minor tier when zoomed out enough to alias (keeps major)", () => {
-    // minor cell = 20 * scale; below ~4px the minor tier is dropped. 0.1 → 2px.
-    const style = viewportGridStyle(view(0.1));
-    const image = style.backgroundImage as string;
-    // Only the two MAJOR layers survive.
-    expect(image.match(/repeating-linear-gradient/g)).toHaveLength(2);
-    // And the size/position layer counts stay consistent (2 each).
-    expect((style.backgroundSize as string).split(", ")).toHaveLength(2);
-    expect((style.backgroundPosition as string).split(", ")).toHaveLength(2);
+  it("returns a stable style regardless of how it is called (it is view-independent)", () => {
+    // No view argument: the same backdrop every time, so it stays fixed while the
+    // artboard zooms/pans on top of it.
+    expect(viewportGridStyle()).toEqual(viewportGridStyle());
   });
 });

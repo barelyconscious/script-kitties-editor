@@ -292,17 +292,18 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       onPointerMove={handleViewportPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
-      // Blueprint backdrop (479/480). The clipping viewport — the area BEHIND/around
-      // the 1280×768 stage — paints a two-tier graph-paper grid as a FIXED backdrop:
-      // constant integer cell sizes at a static origin, so it stays put while the
-      // view-transformed stage zooms/pans on top of it. The solid stage reads as an
-      // artboard sitting on the blueprint canvas. The grid is purely the viewport's
-      // `background-*` (built by the pure, view-independent `viewportGridStyle`), so
-      // it adds nothing to hit-testing/selection/drag. The cursor style is merged in
-      // below.
+      // Blueprint backdrop (479/480/481). The clipping viewport — the area
+      // BEHIND/around the 1280×768 stage — paints a two-tier graph-paper grid. It
+      // PANS with the view (its background-position is offset by the rounded view
+      // pan) so the graph paper feels anchored to the canvas and scrolls under the
+      // artboard as the user pans, but it does NOT zoom: the cell sizes are constant
+      // integers regardless of scale. The solid stage reads as an artboard on the
+      // blueprint canvas. The grid is purely the viewport's `background-*` (built by
+      // the pure `viewportGridStyle`), so it adds nothing to hit-testing/selection/
+      // drag. The cursor style is merged in below.
       className="relative h-full min-h-0 overflow-hidden"
       style={{
-        ...viewportGridStyle(),
+        ...viewportGridStyle({ panX: view.panX, panY: view.panY }),
         cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined,
       }}
     >

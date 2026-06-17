@@ -3,23 +3,25 @@
  * graph-paper grid (tasks 479/480).
  *
  * Task 478 painted the grid ON the 1280×768 stage; 479 flipped it so the stage is
- * a SOLID artboard and the grid lives BEHIND it on the clipping viewport. 480
- * makes the grid a FIXED backdrop: it does NOT pan or zoom with the artboard — it
- * stays put while the view-transformed stage moves on top of it. A minor line
- * every {@link GRID_MINOR_PX} px sits under a stronger major line every
- * {@link GRID_MAJOR_PX} — both blue-tinted and very low alpha so the grid reads as
- * a backdrop and never competes with content.
+ * a SOLID artboard and the grid lives BEHIND it on the clipping viewport. 480 made
+ * the grid a fully FIXED backdrop. 481 re-introduces PAN (but NOT zoom): the grid
+ * PANS with the view — its background-position is offset by the view's pan — so the
+ * graph paper feels anchored to the canvas and scrolls under the artboard as the
+ * user pans. It still does NOT zoom: the cell size stays a constant integer, screen-
+ * fixed, regardless of scale. A minor line every {@link GRID_MINOR_PX} px sits under
+ * a stronger major line every {@link GRID_MAJOR_PX} — both blue-tinted and very low
+ * alpha so the grid reads as a backdrop and never competes with content.
  *
- * Crispness comes from drawing with INTEGER cell sizes, integer line widths, and a
- * static integer background-position via HARD-stop repeating-linear-gradients: each
- * line spans exactly `0 1px` then transparent to the integer cell edge, anchored at
- * the origin, so every line falls on a whole device pixel and renders sharp (no
- * fractional sub-pixel offsets to blur it).
+ * Crispness comes from drawing with INTEGER cell sizes, integer line widths, and an
+ * INTEGER-rounded background-position via HARD-stop repeating-linear-gradients: each
+ * line spans exactly `0 1px` then transparent to the integer cell edge, and the pan
+ * offset is rounded to whole pixels, so every line falls on a whole device pixel and
+ * renders sharp (no fractional sub-pixel offsets to blur it) even while panning.
  *
- * This is a PURE style builder (no DOM, no React, no view transform) so the layer
- * order and tile sizing are assertable without a real editor. The caller drops the
- * returned `CSSProperties` onto the clipping viewport as a pure backdrop — it is
- * only `background-*`, adding nothing to hit-testing/selection/drag.
+ * This is a PURE style builder (no DOM, no React) so the layer order, tile sizing,
+ * and pan offset are assertable without a real editor. The caller drops the returned
+ * `CSSProperties` onto the clipping viewport as a pure backdrop — it is only
+ * `background-*`, adding nothing to hit-testing/selection/drag.
  */
 
 import type { CSSProperties } from "react";
@@ -69,21 +71,31 @@ function gridSizeLayers(): string {
   ].join(", ");
 }
 
+/** The view's pan offset in screen pixels — the only part of the view the grid uses. */
+export type GridPan = {
+  panX: number;
+  panY: number;
+};
+
 /**
- * Build the viewport's FIXED blueprint backdrop style.
+ * Build the viewport's blueprint backdrop style for the given pan offset.
  *
- * The grid is independent of the view transform: constant integer cell sizes and a
- * static (0,0) origin, so it stays put while the artboard zooms/pans on top. Every
- * line falls on a whole pixel (integer size + integer position + hard gradient
- * stops), so the grid renders crisp rather than blurry.
+ * The grid PANS with the view but does NOT zoom: the cell sizes are constant
+ * integers (screen-fixed, never multiplied by scale), and the background-position is
+ * offset by the view's pan so the graph paper scrolls under the artboard as the user
+ * pans. The pan offset is ROUNDED to whole pixels so every line still falls on a
+ * whole pixel (integer size + integer position + hard gradient stops) and the grid
+ * renders crisp rather than blurry, even mid-pan.
  */
-export function viewportGridStyle(): CSSProperties {
+export function viewportGridStyle({ panX, panY }: GridPan): CSSProperties {
+  // Round the pan to whole pixels so all four layers anchor on integer offsets and
+  // the lines stay sharp while the major/minor phases stay locked together.
+  const x = Math.round(panX);
+  const y = Math.round(panY);
   return {
     backgroundColor: VIEWPORT_VOID_COLOR,
     backgroundImage: gridImageLayers(),
     backgroundSize: gridSizeLayers(),
-    // Static integer origin: all four layers anchored at (0,0) so lines stay on
-    // whole pixels and the major/minor phases stay locked.
-    backgroundPosition: "0 0",
+    backgroundPosition: `${x}px ${y}px`,
   };
 }

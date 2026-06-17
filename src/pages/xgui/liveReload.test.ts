@@ -1,16 +1,29 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type GuiNode, type GuiTag, parseGui } from "../../lib/guiNode";
 import {
   changedPathIsOpenComponent,
   decideLiveReload,
   nodeIdAtIndexPath,
   nodeIndexPath,
+  onGuiChangedAlways,
   remapSelection,
 } from "./liveReload";
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
 }
+
+describe("onGuiChangedAlways — unconditional per-change side effects", () => {
+  it("refreshes the list AND invalidates the mount cache on every change", () => {
+    const refreshList = vi.fn();
+    const invalidateMounts = vi.fn();
+    onGuiChangedAlways(refreshList, invalidateMounts);
+    // Both must fire regardless of branch — the mount-cache clear is what makes
+    // includers re-fetch a saved/edited child (task 488).
+    expect(refreshList).toHaveBeenCalledTimes(1);
+    expect(invalidateMounts).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("decideLiveReload — the three reconciliation branches", () => {
   const base = { openName: "bag", openPath: "widgets/bag.xml", dirty: false };

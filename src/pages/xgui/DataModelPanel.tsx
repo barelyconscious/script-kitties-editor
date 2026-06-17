@@ -96,10 +96,6 @@ export function DataModelPanel({ value, onChange }: DataModelPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="font-medium text-sm">Data Model</h2>
-        <span className="text-muted-foreground text-xs">JSON drives the preview</span>
-      </div>
       <div ref={containerRef} className="min-h-0 flex-1" aria-invalid={!parse.ok} />
       {!parse.ok && (
         <p className="text-destructive text-xs" role="alert">

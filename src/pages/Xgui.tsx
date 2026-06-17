@@ -430,7 +430,8 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
           Controller, and XML; collapsible to a slim toggle rail. */}
       {modelPanelOpen ? (
         <div className="flex w-80 shrink-0 flex-col border-border border-l">
-          <div className="flex shrink-0 items-center justify-end border-b px-1.5 py-1">
+          <div className="flex shrink-0 items-center justify-between border-b py-1 pr-1.5 pl-3">
+            <h2 className="font-medium text-sm">Data Model</h2>
             <Button
               variant="ghost"
               size="icon-sm"

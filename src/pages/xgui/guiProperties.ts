@@ -120,13 +120,18 @@ export function isBoundField(value: string): boolean {
 }
 
 /**
- * Whether a node of `tag` HAS an id — i.e. whether the Properties panel should show
- * the computed read-only id + the editable local id (475). Every visual/structural
- * tag does; `<Event>` does NOT (task 471 — events are addressed by `name`/`handler`,
- * not by a hierarchical id), so the panel hides both id rows for it.
+ * Whether a node of `tag` shows id rows in the Properties panel — i.e. whether the
+ * panel should render the computed read-only id + the editable local id.
+ *
+ * `<Panel>`/`<Text>`/`<Component>` do. `<Event>` does NOT (task 471 — events are
+ * addressed by `name`/`handler`, not a hierarchical id). The root `<View>` does NOT
+ * either: it is the component itself, its `id` is auto-set on create, and the panel
+ * shows it no editable properties at all (its `controller` is wired via the
+ * Controller tab). Both still carry their `id` on the node — it's just not edited
+ * here, and {@link computedId} still reads it to prefix descendants.
  */
 export function nodeHasId(tag: GuiTag): boolean {
-  return tag !== "Event";
+  return tag !== "Event" && tag !== "View";
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +175,11 @@ export type PropertyField = {
 export function fieldsForTag(tag: GuiTag): PropertyField[] {
   switch (tag) {
     case "View":
-      return [{ name: "controller", label: "controller", kind: "text" }];
+      // The root View has NO editable properties in the panel. Its `id` is
+      // auto-set on create, and its `controller` is wired through the Controller
+      // tab's "Add script" flow — neither belongs here. Both attrs are preserved
+      // on the node (see specialAttrs) so they don't surface as freeform rows.
+      return [];
     case "Panel":
       return [
         { name: "position", label: "position", kind: "compound" },
@@ -224,10 +233,19 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
  * a freeform override.
  */
 function specialAttrs(tag: GuiTag): Set<string> {
-  // `id` is special only for tags that HAVE one (475): an `<Event>` shows no id rows,
-  // so a stray `id` attr on one should surface as a freeform row rather than vanish.
+  // `id` is special only for tags that HAVE an id row (475): an `<Event>` shows no
+  // id rows, so a stray `id` attr on one should surface as a freeform row rather
+  // than vanish.
   const special = new Set<string>(nodeHasId(tag) ? ["id"] : []);
   if (tag === "Component") special.add("src");
+  if (tag === "View") {
+    // The View shows no fields at all, but its structural attrs are managed
+    // elsewhere (id auto-set on create; controller via the Controller tab). Mark
+    // them special so they are PRESERVED on the node rather than leaking into the
+    // freeform "other properties" rows.
+    special.add("id");
+    special.add("controller");
+  }
   return special;
 }
 

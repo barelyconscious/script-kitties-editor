@@ -55,6 +55,13 @@ describe("deriveRows", () => {
   it("returns no rows for a node with only known/special attrs", () => {
     expect(deriveRows(node("Component", { id: "c", src: "x", position: "0,0,0,0" }))).toEqual([]);
   });
+
+  it("excludes the View's id and controller (managed elsewhere, not freeform)", () => {
+    // The View shows no fields; neither its id nor its controller may surface as an
+    // editable override row.
+    const n = node("View", { id: "view", controller: "bag_controller.lua" });
+    expect(deriveRows(n)).toEqual([]);
+  });
 });
 
 describe("reconcileRows", () => {

@@ -10,15 +10,30 @@ import { cn } from "@/lib/utils";
  *
  * On wide screens the 15 stats split into two side-by-side tables so the grid
  * isn't a tall, mostly-empty column.
+ *
+ * When `onStatSelect` is supplied, a row is also a SELECTION target: clicking
+ * anywhere on it (or focusing one of its inputs) reports the stat up, and the
+ * row matching `activeStat` highlights. The Workbench's Stats-graph pane uses
+ * this to keep the plotted stat in sync with the row you're working on.
  */
 export function StatGrowthTable({
   creature,
   onChange,
   disabled,
+  activeStat,
+  onStatSelect,
 }: {
   creature: Creature;
   onChange: (next: Creature) => void;
   disabled?: boolean;
+  /** The currently-plotted stat, highlighted in the grid. Omit for no selection. */
+  activeStat?: string | null;
+  /**
+   * Called with a stat key when its row is clicked or one of its inputs is
+   * focused. When omitted, rows are not selectable (the standalone editor's
+   * plain grid). When present, rows become clickable selection targets.
+   */
+  onStatSelect?: (stat: string) => void;
 }) {
   function setBase(stat: string, n: number) {
     onChange({ ...creature, baseStats: { ...creature.baseStats, [stat]: n } });
@@ -30,6 +45,8 @@ export function StatGrowthTable({
       statGainsPerLevel: { ...creature.statGainsPerLevel, [stat]: n },
     });
   }
+
+  const selectable = onStatSelect != null;
 
   // Split the two columns at the first element stat, so the left column is the
   // core stats and the right column leads with Fire Damage (the element block).
@@ -56,12 +73,26 @@ export function StatGrowthTable({
                 const base = creature.baseStats[stat] ?? 0;
                 const gain = creature.statGainsPerLevel[stat] ?? 0;
                 const atMax = projectStat(base, gain, MAX_LEVEL);
+                const active = selectable && activeStat === stat;
                 return (
-                  <tr key={stat} className="border-b last:border-b-0 hover:bg-muted/30">
+                  // Row selection is a mouse convenience; the same stat is reported
+                  // via the inputs' onFocus below, which IS keyboard-reachable, so
+                  // the row click needs no separate key handler.
+                  <tr
+                    key={stat}
+                    onClick={selectable ? () => onStatSelect(stat) : undefined}
+                    className={cn(
+                      "border-b last:border-b-0",
+                      selectable && "cursor-pointer",
+                      active ? "bg-primary/10" : "hover:bg-muted/30",
+                    )}
+                  >
                     <td className="px-3 py-1.5">
                       <span className="flex items-center gap-2">
                         {Icon && <Icon className={cn("size-4 shrink-0", meta.color)} />}
-                        <span>{meta?.label ?? stat}</span>
+                        <span className={cn(active && "font-medium text-foreground")}>
+                          {meta?.label ?? stat}
+                        </span>
                       </span>
                     </td>
                     <td className="px-2 py-1.5 text-right">
@@ -69,6 +100,7 @@ export function StatGrowthTable({
                         value={base}
                         min={0}
                         onValue={(n) => setBase(stat, n)}
+                        onFocus={selectable ? () => onStatSelect(stat) : undefined}
                         disabled={disabled}
                         className="ml-auto h-8 w-20 text-right"
                       />
@@ -78,6 +110,7 @@ export function StatGrowthTable({
                         value={gain}
                         min={0}
                         onValue={(n) => setGain(stat, n)}
+                        onFocus={selectable ? () => onStatSelect(stat) : undefined}
                         disabled={disabled}
                         className="ml-auto h-8 w-20 text-right"
                       />

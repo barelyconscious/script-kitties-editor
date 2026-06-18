@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { colorCodeToCss } from "../../lib/guiBinding";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
+import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
 import {
   deriveRows,
@@ -54,7 +55,7 @@ import {
   srcBasename,
   withAttr,
 } from "./guiProperties";
-import { nodePath } from "./guiTreeEdit";
+import { makeChildNode, nodePath } from "./guiTreeEdit";
 
 export function PropertiesPanel() {
   const { state, dispatch } = useEditorStore();
@@ -157,6 +158,12 @@ export function PropertiesPanel() {
           </FieldRow>
         )}
 
+        {/* The root View has no editable properties here — its id is auto-set on
+            create and its controller is wired via the Controller tab. Instead of a
+            dead-end note, offer the add-child actions so the panel is a starting
+            point rather than an empty surface. */}
+        {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
+
         {/* Well-known fields for the tag. */}
         {fieldsForTag(node.tag).map((field) => (
           <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
@@ -170,6 +177,60 @@ export function PropertiesPanel() {
         <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The root `<View>` has no editable properties, so its Properties slice instead
+ * offers the add-child actions — Add Panel / Add Text / Add Component — mirroring
+ * the structure tree's add menu. Each dispatches the SAME `addChildNode` action
+ * the tree uses (which appends under the View and selects the new node, so the
+ * panel immediately swings to editing what you just added). Component opens the
+ * shared {@link ComponentPicker} to choose a `src` basename first.
+ */
+function ViewChildAdder({ viewNodeId }: { viewNodeId: string }) {
+  const { dispatch } = useEditorStore();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const addChild = (tag: "Panel" | "Text") =>
+    dispatch({ type: "addChildNode", parentNodeId: viewNodeId, child: makeChildNode(tag) });
+
+  const addComponent = (basename: string) => {
+    dispatch({
+      type: "addChildNode",
+      parentNodeId: viewNodeId,
+      child: makeChildNode("Component", basename),
+    });
+    setPickerOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-muted-foreground/70 text-xs leading-relaxed">
+        The root <span className="font-mono">View</span> has no properties of its own. Add a child
+        element to start building.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <AddChildButton onClick={() => addChild("Panel")}>Add Panel</AddChildButton>
+        <AddChildButton onClick={() => addChild("Text")}>Add Text</AddChildButton>
+        <AddChildButton onClick={() => setPickerOpen(true)}>Add Component…</AddChildButton>
+      </div>
+      <ComponentPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={addComponent} />
+    </div>
+  );
+}
+
+/** A full-width add-child action button for the View properties slice. */
+function AddChildButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-1.5 rounded-md border border-dashed px-2 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:border-solid hover:bg-muted hover:text-foreground"
+    >
+      <Plus className="size-3.5 shrink-0" />
+      {children}
+    </button>
   );
 }
 

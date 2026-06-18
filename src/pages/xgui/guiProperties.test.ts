@@ -187,11 +187,17 @@ describe("fieldsForTag", () => {
     expect(fields.map((f) => f.name)).toEqual(["name", "handler"]);
     expect(fields.every((f) => f.kind === "text")).toBe(true);
   });
+
+  it("gives the root View no editable fields", () => {
+    // The View is the component itself: its id is auto-set on create and its
+    // controller is wired via the Controller tab — neither shows in Properties.
+    expect(fieldsForTag("View")).toEqual([]);
+  });
 });
 
-describe("nodeHasId — id rows hidden for Event (475)", () => {
-  it("every visual/structural tag has an id", () => {
-    for (const tag of ["View", "Panel", "Text", "Component"] as const) {
+describe("nodeHasId — id rows hidden for Event (475) and View", () => {
+  it("child structural/visual tags have an id", () => {
+    for (const tag of ["Panel", "Text", "Component"] as const) {
       expect(nodeHasId(tag)).toBe(true);
     }
   });
@@ -200,6 +206,12 @@ describe("nodeHasId — id rows hidden for Event (475)", () => {
     // Task 471 — events are addressed by name/handler, not a hierarchical id; the
     // panel hides both the computed id and the editable id row for an Event.
     expect(nodeHasId("Event")).toBe(false);
+  });
+
+  it("the root View has NO id rows (no editable properties at all)", () => {
+    // The View is the component itself; its id is auto-set on create and not edited
+    // in the panel. computedId still reads the attr to prefix descendants.
+    expect(nodeHasId("View")).toBe(false);
   });
 });
 
@@ -230,6 +242,13 @@ describe("freeformAttrs", () => {
   it("preserves authored order", () => {
     const n = node("Component", { src: "x", zebra: "1", alpha: "2" });
     expect(freeformAttrs(n)).toEqual(["zebra", "alpha"]);
+  });
+
+  it("does not surface the View's id or controller as freeform (managed elsewhere)", () => {
+    // The View shows no fields, but its structural attrs must be preserved on the
+    // node — not leaked into the freeform 'other properties' rows.
+    const n = node("View", { id: "view", controller: "bag_controller.lua" });
+    expect(freeformAttrs(n)).toEqual([]);
   });
 });
 

@@ -20,6 +20,24 @@
     @apply font-sans;
   }
 
+  /* This is a desktop IDE, not a web page: the window itself must never scroll
+     or rubber-band. Lock the document to the viewport (the app shell is
+     h-screen and owns its own inner scroll regions) and kill overscroll
+     chaining everywhere, so bottoming out a pane doesn't bounce the navrail,
+     benches, or the whole screen. `overscroll-behavior: none` on every element
+     stops a bottomed-out scroll container from passing the gesture to its
+     ancestors (and the elastic bounce that comes with it). */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  * {
+    overscroll-behavior: none;
+  }
+
   /* Overlay-style scrollbars: thin, rounded, and transparent until the user is
      actively scrolling the container (the `is-scrolling` class is toggled on
      the scrolled element by initAutohideScrollbars) or hovering it. Mirrors

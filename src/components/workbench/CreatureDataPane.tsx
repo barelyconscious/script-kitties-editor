@@ -70,12 +70,16 @@ export function CreatureDataPane() {
           <CreatureIdentityFields creature={draft} onChange={setDraft} />
         </section>
 
+        {/* Stat grid is suppressed here — it lives in the Stats-graph pane, under
+            the chart (showStatGrowth={false}). This pane keeps identity, base
+            abilities, and per-level unlocks. */}
         <CreatureForm
           creature={draft}
           population={populationWithDraft(population, draft)}
           abilityOptions={abilities}
           onChange={setDraft}
           showProgressionChart={false}
+          showStatGrowth={false}
           singleColumnStats
           onStatFocus={setActiveStat}
         />

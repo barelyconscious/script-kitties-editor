@@ -10,6 +10,7 @@ import {
   filterPickItems,
   findNode,
   makeChildNode,
+  nextAutoId,
   nodeLabel,
   nodePath,
   removeNode,
@@ -24,6 +25,64 @@ function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
 function nodeWith(tag: GuiTag, attrs: Record<string, string>): GuiNode {
   return { nodeId: `${tag}-x`, tag, attrs, children: [] };
 }
+
+describe("nextAutoId — running auto-id for newly-added elements", () => {
+  it("starts at 1 for the tag when no numeric ids exist", () => {
+    const root = node("root", "View");
+    expect(nextAutoId(root, "Panel")).toBe("Panel1");
+    expect(nextAutoId(root, "Text")).toBe("Text1");
+  });
+
+  it("uses ONE running counter shared across tags (Panel1 then Text2)", () => {
+    const root: GuiNode = {
+      nodeId: "root",
+      tag: "View",
+      attrs: { id: "view" },
+      children: [nodeWith("Panel", { id: "Panel1" })],
+    };
+    // The highest trailing number anywhere is 1, so the next id — whatever tag —
+    // is …2, matching the intended Panel1 / Text2 sequence.
+    expect(nextAutoId(root, "Text")).toBe("Text2");
+  });
+
+  it("scans the WHOLE tree and out-numbers the highest trailing number", () => {
+    const root: GuiNode = {
+      nodeId: "root",
+      tag: "View",
+      attrs: { id: "view" },
+      children: [
+        nodeWith("Panel", { id: "Panel1" }),
+        {
+          nodeId: "p2",
+          tag: "Panel",
+          attrs: { id: "Panel2" },
+          children: [nodeWith("Text", { id: "Text7" })],
+        },
+      ],
+    };
+    expect(nextAutoId(root, "Panel")).toBe("Panel8");
+  });
+
+  it("ignores ids that don't end in a number (renamed ids never seed a collision)", () => {
+    const root: GuiNode = {
+      nodeId: "root",
+      tag: "View",
+      attrs: { id: "view" },
+      children: [nodeWith("Panel", { id: "healthBar" }), nodeWith("Text", { id: "title" })],
+    };
+    expect(nextAutoId(root, "Panel")).toBe("Panel1");
+  });
+
+  it("respects an explicit numbered id so the next auto-id won't collide with it", () => {
+    const root: GuiNode = {
+      nodeId: "root",
+      tag: "View",
+      attrs: { id: "view" },
+      children: [nodeWith("Panel", { id: "Panel7" })],
+    };
+    expect(nextAutoId(root, "Panel")).toBe("Panel8");
+  });
+});
 
 describe("allowedChildTags / canAddChild — element rules", () => {
   it("View accepts Panel, Text, Component, and Event", () => {

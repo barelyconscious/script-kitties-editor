@@ -98,9 +98,11 @@ export function canAddChild(parentTag: GuiTag, childTag: GuiTag): boolean {
  *    the same default geometry; it has NO children by rule.
  *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
  *
- * `id` is intentionally left UNSET — the local id is the user's to choose in the
- * Properties panel (F9b); the design's computed-id is derived from the hierarchy,
- * not auto-minted here.
+ * `id` is left UNSET here — the auto-id (`Panel1`, `Text2`, …) is assigned at
+ * INSERTION time by the store's `addChildNode` action (which needs the whole tree
+ * to pick a free running number), not minted in this per-node factory. The user
+ * then renames it in the Properties panel (F9b). `<Event>` and the root `<View>`
+ * get no auto-id (see {@link nextAutoId}).
  */
 export function makeChildNode(tag: GuiTag, src?: string): GuiNode {
   const node: GuiNode = { nodeId: mintNodeId(), tag, attrs: {}, children: [] };
@@ -128,6 +130,41 @@ export function makeChildNode(tag: GuiTag, src?: string): GuiNode {
     }
   }
   return node;
+}
+
+/**
+ * The next auto-assigned local `id` for a newly-added element of `tag` — e.g.
+ * `Panel1`, `Text2`, `Component3`. Numbering is a single running counter SHARED
+ * across tags (the second element added is `…2` whatever its tag, matching the
+ * intended `Panel1` / `Text2` sequence), derived by scanning every existing `id`
+ * in the tree for a trailing number and returning one more than the highest found.
+ *
+ * That scheme makes the new id unique tree-wide (it always out-numbers every
+ * existing numeric id) AND deterministic — it needs no persisted counter, so it
+ * survives reload/undo without drift. Ids that don't end in a number (a
+ * user-renamed `healthBar`, the root `view`) simply don't contribute to the max,
+ * so renaming away from the auto scheme never seeds a future collision; an
+ * explicit `Panel7` pushes the next number past 7.
+ *
+ * This computes the value only; the store's `addChildNode` decides WHICH tags get
+ * one (id-bearing tags — not `<Event>` or the root `<View>`) and assigns it at
+ * insertion time, when the whole tree is in hand.
+ */
+export function nextAutoId(root: GuiNode, tag: GuiTag): string {
+  let max = 0;
+  const visit = (node: GuiNode): void => {
+    const id = node.attrs.id?.trim();
+    if (id) {
+      const match = /(\d+)$/.exec(id);
+      if (match) {
+        const num = Number.parseInt(match[1], 10);
+        if (num > max) max = num;
+      }
+    }
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return `${tag}${max + 1}`;
 }
 
 /**

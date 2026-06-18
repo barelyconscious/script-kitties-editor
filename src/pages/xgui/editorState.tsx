@@ -67,7 +67,8 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
-import { addChild, findNode, removeNode, setNodeAttrs } from "./guiTreeEdit";
+import { nodeHasId } from "./guiProperties";
+import { addChild, findNode, nextAutoId, removeNode, setNodeAttrs } from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
 
 /**
@@ -416,7 +417,24 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     case "addChildNode": {
       if (!state.open) return state;
-      const nextRoot = addChild(state.open.root, action.parentNodeId, action.child);
+      // Auto-assign a working local id (`Panel1`, `Text2`, …) so every added
+      // element is addressable from the controller/bindings the instant it exists
+      // — the user renames it in Properties. Only id-bearing tags get one
+      // (`<Event>` is name→handler, the root `<View>` is the component itself), and
+      // only when the child doesn't already carry an explicit id. Assigned HERE,
+      // not in `makeChildNode`, because picking a free running number needs the
+      // whole tree. `id` goes FIRST in attrs so the serialized XML reads naturally.
+      const child =
+        nodeHasId(action.child.tag) && !action.child.attrs.id?.trim()
+          ? {
+              ...action.child,
+              attrs: {
+                id: nextAutoId(state.open.root, action.child.tag),
+                ...action.child.attrs,
+              },
+            }
+          : action.child;
+      const nextRoot = addChild(state.open.root, action.parentNodeId, child);
       // Parent not found → addChild returns the SAME reference → no-op (don't
       // dirty or move selection on a phantom add).
       if (nextRoot === state.open.root) return state;
@@ -424,8 +442,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         open: { ...state.open, root: nextRoot },
         // Select the freshly-added node so it highlights in the tree and preview
-        // immediately — the user sees what they just added.
-        selectedNodeId: action.child.nodeId,
+        // immediately — the user sees what they just added (nodeId is unchanged by
+        // the auto-id, so this still points at the inserted node).
+        selectedNodeId: child.nodeId,
         dirty: true,
         // A discrete add is its own undo step (no coalescing).
         ...pushHistory(state, undefined),

@@ -82,7 +82,9 @@ describe("XML view live derivation (task 476)", () => {
     const next = editorReducer(state, { type: "addChildNode", parentNodeId: "root", child });
 
     const xml = liveXml(next);
-    expect(xml).toContain('<Panel label="Go"/>');
+    // The added Panel is auto-assigned a running id (`Panel1`) at insertion, written
+    // first in the attrs so it leads the serialized element.
+    expect(xml).toContain('<Panel id="Panel1" label="Go"/>');
     // The root now wraps the child rather than being self-closing.
     expect(xml).toContain("<View>");
     expect(xml).toContain("</View>");

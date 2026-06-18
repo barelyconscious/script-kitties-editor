@@ -25,13 +25,14 @@
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
 
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
+import { nodeHasId } from "./guiProperties";
 import { allowedChildTags, EVENT_PLACEHOLDER_LABEL, makeChildNode, nodeLabel } from "./guiTreeEdit";
 
 /** Per-tag accent for the tag chip, so the tree reads at a glance. */
@@ -135,6 +136,12 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
   // Events label by name (no `#` prefix); other tags prefix their id with `#`.
   const isEvent = tag === "Event";
   const selected = node.nodeId === selectedNodeId;
+  // Flag an id-bearing element (Panel/Text/Component) that has no `id`: it can't be
+  // referenced from the controller or data bindings, and won't appear in any
+  // descendant's computed id path. Newly-added elements are auto-id'd, so this only
+  // lights up for imported components or an id the user deliberately cleared — which
+  // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
+  const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
   const addable = allowedChildTags(tag);
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
@@ -199,6 +206,19 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
                 </span>
               )}
             </button>
+
+            {missingId && (
+              // Always-visible status flag (not hover-gated): this element has no id,
+              // so it isn't addressable. The title spells out the consequence.
+              <span
+                role="img"
+                title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
+                aria-label="Missing id"
+                className="shrink-0 text-amber-500"
+              >
+                <TriangleAlert className="size-3" />
+              </span>
+            )}
 
             {removable && (
               // A visible delete affordance on hover mirrors the right-click menu, so

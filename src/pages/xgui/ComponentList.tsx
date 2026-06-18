@@ -2,8 +2,10 @@
  * ComponentList — the leftmost, collapsible component-list panel of the XGUI
  * editor (F8). A folder tree mirroring the on-disk `gui/` tree: collapsible
  * folders, a per-file View-vs-widget glyph, and an unsaved-changes dot on the
- * currently-open component when it is dirty. A `+` opens the New-component
- * dialog; a folder icon button creates a new top-level folder.
+ * currently-open component when it is dirty. A folder-icon button in the header
+ * creates a new top-level folder; a `gui/` root row and each folder row reveal a
+ * hover `+` that creates a component scoped to that folder (the root row's `+`
+ * targets the gui/ root).
  *
  * Tree data-prep (flatten + collision + folder options) lives in the pure
  * {@link guiTree} module; this component is the React shell that loads the tree
@@ -81,7 +83,10 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   const [query, setQuery] = useState("");
   // Collapsed folder paths. Empty = everything expanded.
   const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(() => new Set());
-  const [newOpen, setNewOpen] = useState(false);
+  // The destination folder the New-component dialog is scoped to ("" = gui/ root),
+  // or null when the dialog is closed. Set by a folder row's hover "+" or the
+  // header's root "+"; the dialog only asks for a name and creates into this folder.
+  const [newFolder, setNewFolder] = useState<string | null>(null);
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
@@ -242,19 +247,6 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
           </TooltipTrigger>
           <TooltipContent>New folder</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="New component"
-              onClick={() => setNewOpen(true)}
-              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Plus className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>New component</TooltipContent>
-        </Tooltip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
@@ -262,20 +254,27 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
           <p className="px-3 py-8 text-center text-muted-foreground text-sm">Loading components…</p>
         ) : error ? (
           <p className="px-3 py-8 text-center text-destructive text-sm">{error}</p>
-        ) : rows.length === 0 ? (
-          <p className="px-3 py-8 text-center text-muted-foreground text-sm">
-            {query.trim()
-              ? `Nothing matches “${query}”.`
-              : "No components yet. Use + to create one."}
-          </p>
         ) : (
           <ul>
+            {/* The gui/ root carries the same hover-"+" affordance as folder rows,
+                so root-component creation persists now that the header "+" is gone. */}
+            <RootRow onAddComponent={() => setNewFolder("")} />
+            {rows.length === 0 ? (
+              <li>
+                <p className="px-3 py-8 text-center text-muted-foreground text-sm">
+                  {query.trim()
+                    ? `Nothing matches “${query}”.`
+                    : "No components yet. Use + to create one."}
+                </p>
+              </li>
+            ) : null}
             {rows.map((row) =>
               row.kind === "folder" ? (
                 <FolderRow
                   key={`folder:${row.path}`}
                   row={row}
                   onToggle={() => toggleFolder(row.path)}
+                  onAddComponent={() => setNewFolder(row.path)}
                 />
               ) : (
                 <ComponentRow
@@ -292,9 +291,12 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       </div>
 
       <NewComponentDialog
-        open={newOpen}
-        onOpenChange={setNewOpen}
+        open={newFolder != null}
+        onOpenChange={(next) => {
+          if (!next) setNewFolder(null);
+        }}
         tree={tree}
+        scopedFolder={newFolder}
         onCreated={handleCreated}
       />
 
@@ -311,29 +313,73 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
 /** Depth indentation step, in rem, applied per tree level. */
 const INDENT_REM = 0.75;
 
+/**
+ * The `gui/` root row. Not collapsible (it has no chevron/toggle) and renders no
+ * label button, but it mirrors {@link FolderRow}'s `group` hover-"+" so creating a
+ * component at the root stays consistent with per-folder creation.
+ */
+function RootRow({ onAddComponent }: { onAddComponent: () => void }) {
+  return (
+    <li>
+      <div className="group flex w-full min-w-0 items-center gap-1 pr-2 pl-2">
+        <span className="min-w-0 flex-1 select-none truncate py-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          gui/
+        </span>
+        <button
+          type="button"
+          aria-label="New component in gui/ root"
+          title="New component in gui/ root"
+          onClick={onAddComponent}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function FolderRow({
   row,
   onToggle,
+  onAddComponent,
 }: {
   row: Extract<GuiTreeRow, { kind: "folder" }>;
   onToggle: () => void;
+  onAddComponent: () => void;
 }) {
   return (
     <li>
-      <button
-        type="button"
-        onClick={onToggle}
-        title={row.path}
+      {/* The row is a `group` so the hover "+" (mirroring StructureTree's add-child
+          affordance) reveals on hover; the toggle and "+" are siblings, not nested
+          buttons. */}
+      <div
+        className="group flex w-full min-w-0 items-center gap-1 pr-2 transition-colors hover:text-foreground"
         style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
-        className="flex w-full min-w-0 items-center gap-1 py-1 pr-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground"
       >
-        {row.collapsed ? (
-          <ChevronRight className="size-3.5 shrink-0" />
-        ) : (
-          <ChevronDown className="size-3.5 shrink-0" />
-        )}
-        <span className="min-w-0 truncate">{row.name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          title={row.path}
+          className="flex min-w-0 flex-1 select-none items-center gap-1 py-1 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors group-hover:text-foreground"
+        >
+          {row.collapsed ? (
+            <ChevronRight className="size-3.5 shrink-0" />
+          ) : (
+            <ChevronDown className="size-3.5 shrink-0" />
+          )}
+          <span className="min-w-0 truncate">{row.name}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`New component in ${row.path}/`}
+          title={`New component in ${row.path}/`}
+          onClick={onAddComponent}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
     </li>
   );
 }
@@ -360,7 +406,7 @@ function ComponentRow({
         title={`${component.name} — ${kindLabel}`}
         style={{ paddingLeft: `${0.5 + row.depth * INDENT_REM}rem` }}
         className={cn(
-          "flex w-full items-center gap-2 py-1 pr-2 text-left text-sm transition-colors hover:bg-muted",
+          "flex w-full select-none items-center gap-2 py-1 pr-2 text-left text-sm transition-colors hover:bg-muted",
           active && "bg-muted font-medium",
         )}
       >

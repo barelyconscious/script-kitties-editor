@@ -15,11 +15,12 @@
  * and adds once the user chooses a basename for `src`. Both mutate the store's tree
  * (so the preview updates) and select the new node.
  *
- * Remove: `<Event>` rows carry a remove affordance (right-click "Remove event" /
- * an inline trash button) wired to the store's `removeNode` action — events are
- * managed entirely through the tree + Properties now that the dedicated events
- * panel is gone. General element delete/reparent stays deferred (task 452 / design
- * subsection 2), so remove is scoped to `<Event>` nodes only.
+ * Delete: every NON-ROOT row carries a delete affordance (right-click "Delete" /
+ * an inline trash button) wired to the store's `removeNode` action, which removes
+ * the element AND its whole subtree. The root `<View>` is never deletable. Deletion
+ * goes through the document history, so Cmd+Z restores it; a selection the removal
+ * orphans is cleared by the reducer. `<Event>` rows are just one case of this
+ * general delete (their affordance reads "Remove event").
  *
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
@@ -83,9 +84,10 @@ export function StructureTree() {
     setPickerParentId(null);
   };
 
-  // Remove a node from the tree (history-tracked `removeNode`). The tree exposes
-  // this only for `<Event>` nodes for now — general element delete stays deferred
-  // (task 452) — but events MUST be removable now that the events panel is gone.
+  // Remove a node (and its whole subtree) from the tree via the history-tracked
+  // `removeNode` action. Exposed on every non-root row; the root `<View>` is guarded
+  // both here (the pure `removeNode` no-ops on the root) and at the affordance level
+  // (no trash/menu item is rendered for the root).
   const handleRemove = (nodeId: string) => {
     dispatch({ type: "removeNode", nodeId });
   };
@@ -134,11 +136,11 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
   const isEvent = tag === "Event";
   const selected = node.nodeId === selectedNodeId;
   const addable = allowedChildTags(tag);
-  // Remove is scoped to <Event> nodes for now (general element delete deferred,
-  // task 452) — but events must be removable now that the events panel is gone.
-  const removable = isEvent;
+  // Every non-root element is deletable (the root `<View>` is rendered at depth 0
+  // and is never removable). Events are just one case of this general delete.
+  const removable = depth > 0;
   // The row carries a context menu when there's anything to do on it: add a child
-  // (containers) or remove it (events).
+  // (containers) or delete it (any non-root element).
   const hasMenu = addable.length > 0 || removable;
 
   return (
@@ -174,7 +176,7 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
             <button
               type="button"
               onClick={() => onSelect(node.nodeId)}
-              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              className="flex min-w-0 flex-1 select-none items-center gap-1.5 text-left"
             >
               <span className={cn("shrink-0 font-medium font-mono", tagChipClass(tag))}>{tag}</span>
               {secondary && (
@@ -198,22 +200,22 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
               )}
             </button>
 
-            {addable.length > 0 && (
-              // A visible add affordance on hover/selection mirrors the right-click
-              // menu, so add-child is discoverable without knowing about it.
-              <AddMenu node={node} addable={addable} onAdd={onAdd} />
-            )}
             {removable && (
-              // A visible remove affordance on hover mirrors the right-click menu, so
-              // deleting an event is discoverable without knowing the context menu.
+              // A visible delete affordance on hover mirrors the right-click menu, so
+              // deleting an element is discoverable without knowing the context menu.
               <button
                 type="button"
-                aria-label="Remove event"
+                aria-label={isEvent ? "Remove event" : `Delete ${tag}`}
                 onClick={() => onRemove(node.nodeId)}
                 className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
               >
                 <Trash2 className="size-3" />
               </button>
+            )}
+            {addable.length > 0 && (
+              // A visible add affordance on hover/selection mirrors the right-click
+              // menu, so add-child is discoverable without knowing about it.
+              <AddMenu node={node} addable={addable} onAdd={onAdd} />
             )}
           </div>
         </ContextMenu.Trigger>
@@ -244,7 +246,7 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
                   onSelect={() => onRemove(node.nodeId)}
                   className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-destructive outline-none data-[highlighted]:bg-muted"
                 >
-                  <Trash2 className="size-3" /> Remove event
+                  <Trash2 className="size-3" /> {isEvent ? "Remove event" : "Delete"}
                 </ContextMenu.Item>
               )}
             </ContextMenu.Content>

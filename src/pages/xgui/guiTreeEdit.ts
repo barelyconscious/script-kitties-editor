@@ -193,11 +193,10 @@ export function setNodeAttrs(
  * UNCHANGED (same reference) — callers (and the store) treat an unchanged
  * reference as a no-op (don't dirty on a phantom remove).
  *
- * SCOPE (F9c): the only remove affordance in the editor today is the structure
- * TREE deleting an `<Event>` child of `<View>` (right-click "Remove event" / the
- * inline trash button). General element delete from the tree is still deferred
- * (design subsection 2 / task 452) — this function is the shared immutable
- * primitive, scoped to `<Event>` removal by its sole caller.
+ * The structure TREE exposes this on every non-root row (right-click "Delete" /
+ * the inline trash button) — removing the element and its whole subtree. `<Event>`
+ * removal is one case of this general delete. This function is the shared immutable
+ * primitive; root-protection lives here (a root `nodeId` is a no-op).
  */
 export function removeNode(root: GuiNode, nodeId: string): GuiNode {
   // The root is never removable — only descendants.

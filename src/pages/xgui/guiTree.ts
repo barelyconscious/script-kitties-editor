@@ -216,3 +216,12 @@ export function toComponentBasename(input: string): string {
 export function isValidBasename(name: string): boolean {
   return /^[a-z][a-z0-9_]*$/.test(name);
 }
+
+/**
+ * Human label for the folder a scoped New-component create targets, used in the
+ * dialog's "New component in {…}" line. The `gui/` root ("") reads as "gui/";
+ * any other gui-relative path reads as "{path}/" (e.g. "widgets/cards/").
+ */
+export function folderScopeLabel(folderRel: string): string {
+  return folderRel === "" ? "gui/" : `${folderRel}/`;
+}

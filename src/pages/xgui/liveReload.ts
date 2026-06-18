@@ -66,6 +66,26 @@ export function changedPathIsOpenComponent(
 }
 
 /**
+ * The side effects that run on EVERY `gui-changed` event, regardless of the
+ * decision branch (refresh-only / reload-open / notice-dirty):
+ *
+ *  - `refreshList` — re-fetch the component LIST so external add/delete/rename
+ *    always surfaces.
+ *  - `invalidateMounts` — clear the frontend child-mount cache (F6b's
+ *    guiComponentCache) so components that mount the changed one via
+ *    `<Component src>` re-fetch the fresh child, whether opened later or already
+ *    mounted in the open preview.
+ *
+ * Both are unconditional and order-independent. Kept here, off-React, so the
+ * "always fire both, no matter the branch" contract is unit-tested without
+ * rendering — the same pure-core posture as {@link decideLiveReload}.
+ */
+export function onGuiChangedAlways(refreshList: () => void, invalidateMounts: () => void): void {
+  refreshList();
+  invalidateMounts();
+}
+
+/**
  * Decide how to reconcile a `gui-changed` event against the open document.
  *
  * - Nothing open, or the change isn't the open component → `"refresh-only"`.

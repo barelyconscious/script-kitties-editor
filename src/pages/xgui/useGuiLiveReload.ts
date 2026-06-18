@@ -25,10 +25,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invalidateComponents } from "../../lib/guiComponentCache";
 import { useEditorStore } from "./editorState";
 import { GUI_CHANGED_EVENT } from "./guiEvents";
 import type { GuiComponentRef } from "./guiTree";
-import { decideLiveReload, remapSelection } from "./liveReload";
+import { decideLiveReload, onGuiChangedAlways, remapSelection } from "./liveReload";
 import { buildOpenComponent } from "./openComponent";
 
 export type GuiLiveReload = {
@@ -115,8 +116,13 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
     let disposed = false;
     void listen<string | null>(GUI_CHANGED_EVENT, (event) => {
       const changedPath = event.payload ?? null;
-      // ALWAYS refresh the list so external add/delete/rename appears.
-      void reloadTreeRef.current();
+      // ALWAYS, regardless of branch: refresh the component list (external
+      // add/delete/rename) AND clear the frontend child-mount cache so components
+      // that mount the changed one via <Component src> re-fetch the fresh child.
+      // The cache clear is safe here because `gui-changed` fires AFTER the backend
+      // caches are invalidated, so re-fetches read fresh data. Coarse by design:
+      // any gui change drops the whole mount cache; mounts re-fetch cheaply.
+      onGuiChangedAlways(() => void reloadTreeRef.current(), invalidateComponents);
       const s = stateRef.current;
       const decision = decideLiveReload(
         { openName: s.open?.name ?? null, openPath: s.open?.path ?? null, dirty: s.dirty },

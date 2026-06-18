@@ -67,7 +67,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
-import { addChild, removeNode, setNodeAttrs } from "./guiTreeEdit";
+import { addChild, findNode, removeNode, setNodeAttrs } from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
 
 /**
@@ -219,11 +219,12 @@ export type EditorAction =
       coalesceKey?: string;
     }
   /**
-   * Remove the node identified by `nodeId` from the tree (F9c events delete) —
+   * Remove the node identified by `nodeId` from the tree (and its whole subtree) —
    * marks dirty. A no-op (no dirty) if nothing is open, the node is not found, or
-   * the node is the root. The immutable detach is delegated to the pure
-   * {@link removeNode} so the mutation is tested off-store. Scoped to `<Event>`
-   * removal today; general tree delete remains deferred.
+   * the node is the root (the `<View>` is never removable). The immutable detach is
+   * delegated to the pure {@link removeNode} so the mutation is tested off-store.
+   * Any element is deletable from the structure tree (events are one case); a
+   * selection that the removal orphans (the removed node OR a descendant) is cleared.
    */
   | { type: "removeNode"; nodeId: string }
   /**
@@ -453,8 +454,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         open: { ...state.open, root: nextRoot },
-        // If the removed node was selected, drop the dangling selection.
-        selectedNodeId: state.selectedNodeId === action.nodeId ? null : state.selectedNodeId,
+        // Drop a dangling selection: clear it when the selected node is no longer in
+        // the tree — i.e. the removed node OR any descendant of it (general subtree
+        // delete, not just the exact node). A still-present selection is preserved.
+        selectedNodeId:
+          state.selectedNodeId != null && findNode(nextRoot, state.selectedNodeId) == null
+            ? null
+            : state.selectedNodeId,
         dirty: true,
         // A discrete remove is its own undo step (no coalescing).
         ...pushHistory(state, undefined),

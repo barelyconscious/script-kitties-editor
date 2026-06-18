@@ -170,6 +170,16 @@ describe("fieldsForTag", () => {
     expect(panel.find((f) => f.name === "position")?.kind).toBe("compound");
   });
 
+  it("exposes a bindable layer field on Component (task 486)", () => {
+    // A Component renders as a leaf in the parent tree, so the F5b z-order applies
+    // its layer; the schema just makes it editable. Text-kind so it accepts an
+    // integer literal or a {token}.
+    const fields = fieldsForTag("Component");
+    const layer = fields.find((f) => f.name === "layer");
+    expect(layer).toBeDefined();
+    expect(layer?.kind).toBe("text");
+  });
+
   it("gives Event editable name + handler as plain text fields (thin model)", () => {
     // Events are now edited in the Properties panel (the dedicated events panel is
     // gone): name→handler, both verbatim literal strings, not bindable/compound.

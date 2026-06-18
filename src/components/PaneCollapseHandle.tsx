@@ -25,15 +25,18 @@ export function PaneCollapseHandle({
       {/* The right border line, brightened while the pane is hovered so the edge
           reads as an interactive handle. Purely visual — never eats clicks. */}
       <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-px bg-transparent transition-colors group-hover/pane:bg-primary/40" />
-      {/* The collapse tab: flush to the right edge, vertically centered, revealed
-          on pane hover. Disabled for pointer events until shown so it can't block
-          row clicks while invisible. */}
+      {/* The collapse tab: sits just OUTSIDE the pane's right border (translate-x-full
+          pushes it fully past the edge so it never covers the list or scrollbar),
+          vertically centered, revealed on pane hover. It's still a DOM child of the
+          group/pane root, so hovering the tab keeps the pane hovered — no flicker as
+          you reach for it. Pointer events are off until shown so the invisible tab
+          can't block clicks on whatever sits to the right. */}
       <button
         type="button"
         onClick={onCollapse}
         aria-label={label}
         title={label}
-        className="pointer-events-none absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-l-md border border-r-0 bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-muted hover:text-foreground group-hover/pane:pointer-events-auto group-hover/pane:opacity-100"
+        className="pointer-events-none absolute top-1/2 right-0 z-20 flex size-6 translate-x-full -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-muted hover:text-foreground group-hover/pane:pointer-events-auto group-hover/pane:opacity-100"
       >
         <PanelLeftClose className="size-3.5" />
       </button>

@@ -3,10 +3,12 @@
 Step-by-step walkthroughs of the actions a user takes to accomplish common goals in the GUI editor. Companion to `xgui_ta.md` (which describes the layout and elements). These are written from the user's point of view to keep the editor's flows honest — if a step here feels heavy, the design needs another look.
 
 Conventions used below:
-- **Component list** = leftmost collapsible panel (every component file).
-- **Structure column** = tree (top) + properties (middle) + events (bottom).
-- **Main content** = View/Controller tabs.
-- **Data Model panel** = collapsible JSON panel on the right.
+- **Component list** = leftmost collapsible panel (every component file, in a folder tree).
+- **Structure column** = tree (top) + properties (below). Events are ordinary `<Event>` nodes in the tree — there is no separate events panel.
+- **Main content** = segmented View / Controller / XML toggle (the XML tab is a read-only live view of the serialized layout).
+- **Data Model panel** = always-visible, collapsible JSON panel on the right.
+
+> Shipped-vs-design note: this companion was written during design. The events-as-tree-nodes model, the XML tab, and in-tree element deletion landed in the shipped MVP — the steps below reflect that. See `xgui_ta.md` → "Current state — what shipped" for the full reconciliation.
 
 ---
 
@@ -88,7 +90,7 @@ Conventions used below:
 
 ## 8. Wire up events and handlers
 
-1. **Lifecycle/game events** (`<Event>`): in the **Events** panel (bottom of the structure column), add an entry with an event name (e.g. `Battle:OnCreatureDied`) and a handler function name (e.g. `refresh`). These attach to the root `<View>`.
+1. **Lifecycle/game events** (`<Event>`): in the **tree**, add an `<Event>` node under the root `<View>` (right-click → add `Event`). Select it and set its event name (e.g. `Battle:OnCreatureDied`) and handler function name (e.g. `refresh`) in the Properties panel. Events are tree nodes — there is no separate events panel.
 2. **Element interaction events** (`onMouseClicked`, `onMouseEntered`, etc.): select the element, and set the handler in its Properties panel (the value is a controller function name).
 3. Implement the named handler functions in the Controller tab (workflow 7).
 
@@ -115,6 +117,6 @@ Conventions used below:
 
 These are flows the design doesn't fully answer yet — flagged here so they're not lost:
 
-- **Renaming / deleting a component** — is there a flow, and what happens to references to it from other components?
-- **Deleting or reparenting a tree element** — right-click adds children; removing or moving them isn't described.
+- **Renaming / deleting / moving a component** — deferred for the MVP (the component list has no file-delete, rename, or move). What happens to `<Component src>` and `controller` references when a component is renamed/moved is the open question; see `xgui_ta.md` → create-flow section for why move/rename are deferred.
+- **Deleting a tree element** — *shipped*: every non-root element (including `<Event>` nodes) carries a delete affordance in the tree, with undo/redo. **Reparenting / moving** a tree element is still not described.
 - **Discovering a component's override properties** — with freeform overrides, the user has no in-editor hint of what `bag_slot.xml` accepts. Acceptable for an audience of one; revisit when modders use each other's components.

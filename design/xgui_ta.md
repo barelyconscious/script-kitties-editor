@@ -12,6 +12,21 @@ The purpose is to create a fully functioning MVP GUI editor in the Script Kittie
 
 The GUI editor lives as a new tool in the navrail (the icon signifies this is for editing GUIs) and a whole new page separate from the other existing tools. It is positioned immediately below the workbench tool and above the data tables tool. 
 
+## Current state — what shipped
+
+> **Status: the MVP described in this document is built and merged to `main` (editor-side; the consuming C++ runtime is not yet written — see the runtime note below).** This section is the fast orientation for a fresh session; the rest of the document is the design reasoning behind each decision. Where the shipped behavior refined an earlier design call, the relevant section is annotated (look for **SUPERSEDED** banners).
+
+What a new session should know up front:
+
+- **Three columns** ship as designed: component list (collapsible folder tree) · structure column (tree + properties) · main content. The main content carries a segmented **View / Controller / XML** toggle (the **XML tab is a read-only live view** of the serialized tree, not an editing surface) plus an **always-visible, collapsible Data Model panel** on its right (Monaco JSON). There is **no dedicated events panel** — events are ordinary `<Event>` nodes in the structure tree (see §2 / Structure column).
+- **`layer` ships as a NESTED per-sibling z-order**, not the global-flat/leaves-only model the design originally pinned. An element's `layer` orders it among its siblings and lifts its whole subtree as a group. The global-flat model and its F5a/F5b contract are retained below under **SUPERSEDED** banners as history. The shipped model lives in `src/lib/guiZOrder.ts`.
+- **Disk vs. manifest:** components are **read by on-disk gui-tree path** (the filesystem is the gate, not the manifest — the manifest walk never globs `.xml`). **Both create AND save register the component (and its controller) in `assets.json`** when absent — "register-on-save", not just register-on-create — so existing real components, which were never in the manifest, get catalogued the first time they're saved.
+- **Data Model panel auto-scaffolds** from the layout's `{token}`s: each discovered token defaults to **its own name as a string**, new tokens merge **additively** (existing keys/values are never overwritten or removed), and the per-component model **persists in `localStorage` under the key `xgui.dataModels`** (a `componentPath → modelText` map) so it survives switching components and restarts.
+- **Preview** renders on a **blueprint graph-paper backdrop** that **pans with the view but does not zoom** (cell sizes are screen-fixed). Zoom/pan (wheel-zoom toward cursor, space/middle-mouse pan, a corner toolbar with −/+/Fit/100%) ship; **drag-to-move writes integer pixel offsets only** (`absX`/`absY`, rounded; scale is never touched by a drag). Textures render via the `get_sprite` command (data-URL, module-cached like `Sprite.tsx`).
+- **Structure tree:** events are tree nodes; **every non-root element is deletable** (root `<View>` is not); **undo/redo** history ships (Ctrl/Cmd+Z / redo). **Component list:** folder tree mirroring `gui/`, a `gui/` root row, per-folder hover **"+"** to create; **no file-delete** of components in the MVP (component rename/move/delete are deferred — see the create-flow section).
+
+See the **Implementation map** at the end of this document for the files behind each surface.
+
 ## XML Elements
 
 XML is used to describe the visual layout of the component. The following elements are supported in phase 1:
@@ -699,3 +714,39 @@ These are *not* on the deferred list but surfaced while resolving the three abov
     </Panel>
   </View>
 ```
+
+# Implementation map
+
+Where the shipped editor lives, so a fresh session can jump straight to the code behind any decision above. Paths are relative to the repo root.
+
+## Page + surfaces — `src/pages/xgui/`
+
+- **`Xgui.tsx`** — the page shell: wires the three columns, the View/Controller/XML segmented toggle, and the always-visible Data Model panel; owns the data-model seed/persist round-trip.
+- **`ComponentList.tsx`** — the collapsible folder-tree browser (mirrors `gui/`), `gui/` root row, per-folder hover "+" create, View-vs-widget glyph, unsaved dot. No file-delete. `NewComponentDialog.tsx` is its create dialog; `ComponentPicker.tsx` is the searchable picker used when adding a `<Component>` child.
+- **`StructureTree.tsx`** — the element-hierarchy tree (events are nodes here; non-root rows carry a delete affordance). `guiTreeEdit.ts` is its pure add/remove/reorder logic; `guiTreeStore.tsx` / `structureSplit.ts` host the tree+properties split.
+- **`PropertiesPanel.tsx`** — schema-driven property fields (four-input UDim2 `position`/`size`, palette swatches, freeform `<Component>` overrides). Backing logic: `guiProperties.ts`, `freeformRows.ts`, `guiEvents.ts`.
+- **`GuiPreview.tsx`** / **`GuiPreviewHost.tsx`** / **`GuiPreviewToolbar.tsx`** — the live preview: nested absolutely-positioned DOM, selection/drag/hit-test, the −/+/Fit/100% toolbar. `guiBlueprintGrid.ts` builds the pans-not-zooms backdrop.
+- **`ControllerTab.tsx`** (Lua Monaco) + `controllerScript.ts` (add-controller flow) · **`XmlView.tsx`** (read-only live XML view, covered by `xmlView.test.ts`).
+- **`DataModelPanel.tsx`** (Monaco JSON) + `dataModelState.ts` / `dataModelStore.ts` (localStorage `xgui.dataModels` persistence) + `guiModelScaffold.ts` (auto-scaffold from tokens).
+- **`editorState.tsx`** — the reducer store for the open component: `{ open, selectedNodeId, activeTab, dirty, past[], future[] }` (undo/redo history lives here). `openComponent.ts` / `saveComponent.ts` / `useComponentSave.ts` / `saveFlow.ts` are the open/save pipeline; `switchGuard.ts` / `UnsavedSwitchDialog.tsx` are the warn-on-switch guard; `useEditorKeyboard.ts` the shortcuts.
+- **`useGuiLiveReload.ts`** / `liveReload.ts` / `DiskChangeNotice.tsx` — the `gui-changed` watcher event handling (list refresh, clean-reload, mount-cache invalidation).
+- **`MainContentSkeleton.tsx`** — the empty/first-run placeholder.
+
+## Engine (framework-agnostic, heavily unit-tested) — `src/lib/gui*.ts`
+
+- **`guiNode.ts`** — the `GuiNode` model + lossless XML parse/serialize (the load↔save boundary).
+- **`guiBinding.ts`** / **`guiScope.ts`** / **`guiForEach.ts`** — `{token}` resolution, the forEach scope stack (bare = item, `$.` = root, lexical shadowing), and repetition.
+- **`guiGeometry.ts`** — rel/abs UDim2 → CSS `calc()`, integer drag-delta math, fit/zoom/clamp.
+- **`guiZOrder.ts`** — the **nested per-sibling `layer` z-order** (the shipped model; supersedes global-flat).
+- **`guiSelection.ts`** — `data-node-id` back-ref + nearest-node hit resolution.
+- **`guiComponentMount.ts`** / **`guiComponentCache.ts`** — nested `<Component>` mount (overrides-as-fresh-root), missing-`src` / recursive-`src` placeholders, mount cache.
+- **`guiPalette.ts`** / **`guiPaletteEdit.ts`** — named-color resolution and palette editing.
+- **`guiDataModel.ts`** — data-model shape/merge helpers underpinning the scaffold. `texture` → sprite-name resolution lives in `guiGeometry.ts` (`textureToLoad`), covered by `guiTexture.test.ts`.
+
+## Backend — `src-tauri/src/`
+
+- **`dal/gui.rs`** — the `gui` domain: `get_gui_tree` (recursive `gui/` walk → nested `GuiTree`, cached as one `Arc` keyed `()`), `get_component` (path-based read), `save_component` (register-on-save: inserts manifest entries for `.xml`/controller when absent), `create_component`, `create_folder`. No delete.
+- **`dal/palette.rs`** — the `palette` domain: `get_palette` / `save_palette` over `Data/gui_palette.json` (empty-on-missing, created on first save).
+- **`dal/mod.rs`** — the watcher wiring: the one **recursive** watch on `gui/`, emitting the `gui-changed` (`GUI_CHANGED_EVENT`) Tauri event; the palette cache invalidator row.
+- **`commands/gui.rs`** / **`commands/palette.rs`** — thin command wrappers; registered in **`lib.rs`**'s `invoke_handler!` as `get_gui_tree`, `get_component`, `save_component`, `create_component`, `create_folder`, `get_palette`, `save_palette`.
+- **`model/`** — `GuiTree` / `GuiFolder` / `GuiComponentRef` and the `Palette` (order-preserving `name → color-code` map) types.

@@ -19,6 +19,37 @@ import { serializeGui } from "../../lib/guiNode";
 import type { OpenComponent } from "./editorState";
 
 /**
+ * Echo suppression for the `gui/` filesystem watcher. The watcher fires
+ * `gui-changed` for EVERY write under `gui/`, including the editor's OWN saves —
+ * it can't tell our write from an external edit. That echo can reach the
+ * live-reload listener before {@link useComponentSave} clears the dirty flag,
+ * which used to raise a bogus "changed on disk but you have unsaved edits" notice
+ * on every save.
+ *
+ * We remember the exact XML we last wrote per component path (the bytes are the
+ * authoritative "this is ours" signal — independent of timing and of any
+ * subsequent in-memory edits). The live-reload listener re-reads the changed file
+ * and, if its normalized content matches what we recorded, treats it as our own
+ * echo and ignores it. A module-level map (one short string per opened+saved
+ * component) mirrors the app's other module-level caches.
+ */
+const lastSavedXmlByPath = new Map<string, string>();
+
+/** Record the XML the editor just persisted to `path` (for echo suppression). */
+export function recordSavedComponentXml(path: string, xml: string): void {
+  lastSavedXmlByPath.set(path, xml);
+}
+
+/**
+ * True when `xml` is exactly what the editor last wrote to `path` — i.e. a
+ * `gui-changed` event for `path` carrying this content is our own save echoing
+ * back through the watcher, not an external edit.
+ */
+export function isOwnSaveEcho(path: string, xml: string): boolean {
+  return lastSavedXmlByPath.get(path) === xml;
+}
+
+/**
  * The exact `save_component` argument bundle, derived purely from an open
  * component. Exposed (and exported) so a test can assert the serialize + pairing
  * without spying on `invoke`, and so the React layer shares one shaping path.
@@ -64,5 +95,10 @@ export function buildSaveArgs(open: OpenComponent): SaveComponentArgs {
  */
 export async function saveOpenComponent(open: OpenComponent): Promise<void> {
   const { name, xml, controller } = buildSaveArgs(open);
+  // Record BEFORE the write: the watcher can deliver our own `gui-changed` echo
+  // before this invoke resolves, so the suppression record must already be in
+  // place when the live-reload listener re-reads the file. A failed write leaves
+  // a harmless stale record — disk won't match it, so nothing is suppressed.
+  recordSavedComponentXml(open.path, xml);
   await invoke("save_component", { name, xml, controller });
 }

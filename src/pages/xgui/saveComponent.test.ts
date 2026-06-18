@@ -9,7 +9,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { type GuiNode, parseGui, serializeGui } from "../../lib/guiNode";
 import type { OpenComponent } from "./editorState";
-import { buildSaveArgs, saveOpenComponent } from "./saveComponent";
+import {
+  buildSaveArgs,
+  isOwnSaveEcho,
+  recordSavedComponentXml,
+  saveOpenComponent,
+} from "./saveComponent";
 
 const SAMPLE_XML = `<View controller="bag_controller.lua">
   <Panel id="root" position="1,0,0,5">
@@ -102,5 +107,33 @@ describe("saveOpenComponent", () => {
   it("rejects (propagates the backend error) so the caller can keep dirty set", async () => {
     invokeMock.mockRejectedValueOnce(new Error("disk full"));
     await expect(saveOpenComponent(openComponent())).rejects.toThrow("disk full");
+  });
+
+  it("records the written XML for echo suppression, keyed by component path", async () => {
+    const open = openComponent({ path: "widgets/echo_test.xml" });
+    await saveOpenComponent(open);
+    // The watcher echoes our own write back as a gui-changed event; the recorded
+    // bytes let the live-reload listener recognize and ignore it.
+    expect(isOwnSaveEcho("widgets/echo_test.xml", serializeGui(open.root))).toBe(true);
+    expect(isOwnSaveEcho("widgets/echo_test.xml", "<View/>")).toBe(false);
+    expect(isOwnSaveEcho("widgets/never_saved.xml", serializeGui(open.root))).toBe(false);
+  });
+});
+
+describe("isOwnSaveEcho", () => {
+  it("matches only the exact last-recorded XML for that path", () => {
+    recordSavedComponentXml("a.xml", "<View id=\"a\"/>");
+    recordSavedComponentXml("b.xml", "<View id=\"b\"/>");
+    expect(isOwnSaveEcho("a.xml", "<View id=\"a\"/>")).toBe(true);
+    expect(isOwnSaveEcho("b.xml", "<View id=\"b\"/>")).toBe(true);
+    // Cross-path content must not match — suppression is per component.
+    expect(isOwnSaveEcho("a.xml", "<View id=\"b\"/>")).toBe(false);
+  });
+
+  it("tracks only the most recent write per path", () => {
+    recordSavedComponentXml("c.xml", "<View id=\"v1\"/>");
+    recordSavedComponentXml("c.xml", "<View id=\"v2\"/>");
+    expect(isOwnSaveEcho("c.xml", "<View id=\"v1\"/>")).toBe(false);
+    expect(isOwnSaveEcho("c.xml", "<View id=\"v2\"/>")).toBe(true);
   });
 });

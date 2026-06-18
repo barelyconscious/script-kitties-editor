@@ -1,7 +1,7 @@
-import { ChevronDown, ChevronRight, Plus, SearchIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, PanelLeftClose, Plus, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { PaneCollapseHandle } from "@/components/PaneCollapseHandle";
 import { Sprite } from "@/components/Sprite";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,13 +69,21 @@ export function ObjectList({
 
   return (
     <div
-      className={cn(
-        "group/pane relative flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar",
-        className,
-      )}
+      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
     >
-      {onCollapse && <PaneCollapseHandle onCollapse={onCollapse} label="Collapse object list" />}
       <div className="flex items-center gap-1 px-3 py-2">
+        {onCollapse && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onCollapse}
+            title="Collapse object list"
+            aria-label="Collapse object list"
+            className="shrink-0 text-muted-foreground"
+          >
+            <PanelLeftClose />
+          </Button>
+        )}
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input

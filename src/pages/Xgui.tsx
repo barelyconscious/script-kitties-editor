@@ -444,7 +444,7 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
       {/* ALWAYS-VISIBLE Data Model panel (task 476) — persistent across View,
           Controller, and XML; collapsible to a slim toggle rail. */}
       {modelPanelOpen ? (
-        <div className="flex w-80 shrink-0 flex-col border-border border-l">
+        <div className="flex w-80 shrink-0 flex-col border-black border-l-2">
           <div className="flex shrink-0 items-center justify-between border-b py-1 pr-1.5 pl-3">
             <h2 className="font-medium text-sm">Data Model</h2>
             <Button
@@ -471,7 +471,7 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
               type="button"
               aria-label="Show Data Model panel"
               onClick={() => setModelPanelOpen(true)}
-              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-black border-l-2 bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <PanelLeftOpen className="size-4 shrink-0 rotate-180" />
               <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">

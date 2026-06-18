@@ -143,12 +143,14 @@ impl Dal {
     /// not exist yet** (the F10 Add-script case, where the `<View controller>` attr
     /// is set but no `.lua` was authored).
     ///
-    /// **Why register-on-save (not manifest-gated).** Existing gui component `.xml`
-    /// files are not in `assets.json` (the manifest walk only catalogues
-    /// `.lua`/`.png`/`.json`, never `.xml`), so the old manifest-gated save refused
-    /// every real component. Product intent is that gui files *must* be in
-    /// `assets.json`, so saving now **registers** the `.xml` (and the controller)
-    /// when absent rather than refusing. Registration is **register-if-absent**: an
+    /// **Why register-on-save (not manifest-gated).** An existing gui component
+    /// `.xml` may not yet be in `assets.json` — historically the manifest walk did
+    /// not catalogue `.xml` at all, and even now that a rescan does, a component
+    /// authored since the last rescan isn't registered until one runs. Gating the
+    /// save on prior registration therefore refused real components. Product intent
+    /// is that gui files *must* be in `assets.json`, so saving **registers** the
+    /// `.xml` (and the controller) when absent rather than refusing — immediately,
+    /// without waiting on a full rescan. Registration is **register-if-absent**: an
     /// already-registered entry is never duplicated.
     ///
     /// **Save is still a separate door from create.** Like [`Dal::save_script`]
@@ -169,8 +171,9 @@ impl Dal {
     /// 2. Write the `.xml`. On failure, delete a newly-created controller, then
     ///    propagate.
     /// 3. Insert the `.xml` manifest entry if absent, then the controller entry if
-    ///    absent — adjacent at the end. If either insert fails, remove any entry
-    ///    inserted in this step and delete a newly-created controller, then propagate.
+    ///    absent — each placed in alphabetical position by `insert_manifest_entry`.
+    ///    If either insert fails, remove any entry inserted in this step and delete a
+    ///    newly-created controller, then propagate.
     /// 4. On success, seed the manifest cache and invalidate the gui tree.
     pub fn save_component(
         &self,
@@ -231,10 +234,10 @@ impl Dal {
             return Err(e);
         }
 
-        // Step 3: register absent entries — .xml first, then the controller, kept
-        // adjacent at the end. Already-registered entries are skipped (no duplicate).
-        // On failure, remove any entry inserted in this step and delete a
-        // newly-created controller, then propagate — zero residue.
+        // Step 3: register absent entries — .xml first, then the controller, each
+        // inserted in alphabetical position. Already-registered entries are skipped
+        // (no duplicate). On failure, remove any entry inserted in this step and
+        // delete a newly-created controller, then propagate — zero residue.
         let mut last_update = None;
         if xml_needs_register {
             let xml_filepath = gui_manifest_filepath(&folder_rel, &xml_name);
@@ -312,7 +315,8 @@ impl Dal {
     /// **Multi-write ordering and rollback — the `create_script` discipline, widened
     /// to two files + two manifest inserts.** The invariant: never leave a manifest
     /// entry pointing at no file, and never wedge the name so a retry is impossible.
-    /// Files land first, both manifest inserts last and adjacent (least-rollback-able):
+    /// Files land first, both manifest inserts last (each placed in alphabetical
+    /// position; least-rollback-able):
     /// 1. Write the controller `.lua` (if any). `atomic_write` self-cleans on its own
     ///    failure, so a failure here leaves zero residue — propagate.
     /// 2. Write the `.xml`. On failure, delete the controller from step 1 (best-effort),
@@ -408,8 +412,9 @@ impl Dal {
         }
 
         // Step 3: insert the manifest entries — .xml first, then the controller (if
-        // any), kept adjacent at the end. If either insert fails, roll back: remove
-        // any entry inserted in this step, then delete both files, then propagate.
+        // any), each placed in alphabetical position. If either insert fails, roll
+        // back: remove any entry inserted in this step, then delete both files, then
+        // propagate.
         let updated = match self.insert_manifest_entry(&xml_name, &xml_filepath) {
             Ok(updated) => updated,
             Err(e) => {
@@ -1308,17 +1313,18 @@ mod tests {
         assert!(!gui.join("bag_slot.xml.tmp").exists());
         assert!(!gui.join("bag_slot_controller.lua.tmp").exists());
 
-        // Both manifest entries appended LAST and ADJACENT, .xml before controller,
-        // with backslash filepaths under gui\widgets\.
+        // Both manifest entries inserted in ALPHABETICAL position and ADJACENT, .xml
+        // before controller, with backslash filepaths under gui\widgets\. Both
+        // bag_slot.* sort before the pre-existing item_bandage.png.
         let keys = manifest_keys(&root);
         assert_eq!(
             keys,
             vec![
-                "item_bandage.png".to_string(),
                 "bag_slot.xml".to_string(),
                 "bag_slot_controller.lua".to_string(),
+                "item_bandage.png".to_string(),
             ],
-            "the two new keys must be appended last, adjacent, xml then controller"
+            "the two new keys sort alphabetically (before item_bandage.png), adjacent, xml then controller"
         );
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(root.join("assets.json")).unwrap())
@@ -1377,6 +1383,40 @@ mod tests {
             v["screen.xml"]["filepath"],
             serde_json::json!("gui\\screen.xml")
         );
+    }
+
+    #[test]
+    fn rescan_catalogues_gui_xml_and_keeps_registered_xml_entries() {
+        // The asset-manifest rescan must factor in `.xml`: it discovers gui component
+        // layouts AND keeps already-registered `.xml` entries (rather than dropping
+        // them as "file vanished" — the bug when the walk ignored `.xml`).
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        // An on-disk gui component that is NOT yet in the manifest.
+        std::fs::write(gui.join("bag.xml"), "<View/>").unwrap();
+        // A register-on-saved component already in the manifest, file present on disk.
+        std::fs::write(gui.join("hud.xml"), "<View/>").unwrap();
+        let dal = dal_with_manifest(&root, r#"{ "hud.xml": { "filepath": "gui\\hud.xml" } }"#);
+
+        let update = dal.update_asset_manifest().unwrap();
+
+        let keys = manifest_keys(&root);
+        // Previously-registered xml survives the rescan (not treated as removed)...
+        assert!(
+            keys.contains(&"hud.xml".to_string()),
+            "a registered .xml must survive a rescan, got: {keys:?}"
+        );
+        // ...and the on-disk gui xml that wasn't registered is now catalogued.
+        assert!(
+            keys.contains(&"bag.xml".to_string()),
+            "the rescan must catalogue gui .xml, got: {keys:?}"
+        );
+        assert!(
+            !update.removed.contains(&"hud.xml".to_string()),
+            "no registered .xml entry should be dropped by the rescan"
+        );
+        assert!(update.added.contains(&"bag.xml".to_string()));
     }
 
     #[test]
@@ -1583,12 +1623,14 @@ mod tests {
             "<Panel/>"
         );
         let keys = manifest_keys(&root);
+        // Alphabetical insert: both card.* keys sort BEFORE the pre-existing
+        // item_bandage.png, and card.xml sorts before card_controller.lua.
         assert_eq!(
             keys,
             vec![
-                "item_bandage.png".to_string(),
                 "card.xml".to_string(),
                 "card_controller.lua".to_string(),
+                "item_bandage.png".to_string(),
             ]
         );
     }

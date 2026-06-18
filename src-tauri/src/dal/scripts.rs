@@ -465,9 +465,19 @@ mod tests {
             v.as_object().unwrap().keys().cloned().collect()
         };
 
-        // Exactly one key added, appended at the end, with all prior keys in order.
+        // Exactly one key added, in alphabetical position, with every prior key
+        // keeping its relative order. `new_script.lua` sorts before `zeta.json`
+        // (the first existing key), so it lands at the front.
         assert_eq!(after.len(), before.len() + 1);
-        assert_eq!(&after[..before.len()], &before[..]);
-        assert_eq!(after.last().unwrap(), "new_script.lua");
+        assert!(after.contains(&"new_script.lua".to_string()));
+        // Drop the new key and the rest must equal `before` in the same order.
+        let without_new: Vec<String> = after
+            .iter()
+            .filter(|k| *k != "new_script.lua")
+            .cloned()
+            .collect();
+        assert_eq!(without_new, before);
+        // Alphabetical placement: new key sorts before the first existing key.
+        assert_eq!(after.first().unwrap(), "new_script.lua");
     }
 }

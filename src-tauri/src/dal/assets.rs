@@ -13,7 +13,14 @@ use crate::{
 };
 
 /// File extensions the manifest tracks (lowercased, no leading dot).
-const ASSET_EXTENSIONS: &[&str] = &["lua", "png", "json"];
+///
+/// `xml` is included so the rescan catalogues GUI component layouts
+/// (`gui/**/*.xml`) — without it, the walk would not only miss new components but
+/// actively DROP any `.xml` entry registered on save (the walk is authoritative,
+/// so an unfound key is treated as removed). The editor's register-on-save handles
+/// immediate registration; tracking `.xml` here keeps a full rescan consistent with
+/// it instead of clobbering it.
+const ASSET_EXTENSIONS: &[&str] = &["lua", "png", "json", "xml"];
 
 /// Files that show up in the install tree but must never be catalogued: C++
 /// `std`-module build artifacts that share the `.json` extension but aren't game
@@ -31,11 +38,14 @@ impl Dal {
         Path::new(&self.config().game_install_path).join("assets.json")
     }
 
-    /// Surgically register one new asset in `assets.json`, preserving the exact
-    /// order of every pre-existing entry so the on-disk diff is a single added
-    /// entry. We re-read the raw file into an ordered `serde_json::Value` (the
-    /// crate's `preserve_order` feature keeps Object key order) rather than
-    /// round-tripping the `HashMap`-typed manifest, which would scramble the file.
+    /// Surgically register one new asset in `assets.json`, inserting it in
+    /// **alphabetical position** among the existing keys (rather than appending to
+    /// the end) so a freshly-registered component lands where it sorts in the list.
+    /// Every existing key keeps its relative order, so an already-sorted manifest
+    /// stays sorted and the on-disk diff is a single inserted line. We re-read the
+    /// raw file into an ordered `serde_json::Value` (the crate's `preserve_order`
+    /// feature keeps Object key order) rather than round-tripping the `HashMap`-typed
+    /// manifest, which would scramble the file.
     ///
     /// Returns the updated, ordered `HashMap` so callers can refresh the manifest
     /// cache without a disk re-read. Fails (writing nothing) if `name` is already
@@ -65,9 +75,25 @@ impl Dal {
 
         let mut entry = Map::new();
         entry.insert("filepath".to_string(), Value::String(filepath.to_string()));
-        // Insertion appends to the end with `preserve_order`, keeping the existing
-        // keys exactly where they were.
-        obj.insert(name.to_string(), Value::Object(entry));
+
+        // Place the new key in ALPHABETICAL position: rebuild the object, inserting
+        // the new entry just before the first existing key that sorts after it.
+        // Existing keys keep their relative order, so a sorted manifest stays sorted
+        // (single-line diff) and an unsorted one still slots the new key sensibly.
+        let mut rebuilt = Map::with_capacity(obj.len() + 1);
+        let mut inserted = false;
+        for (k, v) in obj.iter() {
+            if !inserted && name < k.as_str() {
+                rebuilt.insert(name.to_string(), Value::Object(entry.clone()));
+                inserted = true;
+            }
+            rebuilt.insert(k.clone(), v.clone());
+        }
+        if !inserted {
+            // The new key sorts after every existing one — it belongs at the end.
+            rebuilt.insert(name.to_string(), Value::Object(entry));
+        }
+        *obj = rebuilt;
 
         // Match the game's on-disk style: 2-space pretty, no trailing newline.
         let serialized = serde_json::to_string_pretty(&root)
@@ -117,11 +143,12 @@ impl Dal {
     }
 
     /// Rescan the entire game install tree and rebuild `assets.json` so newly
-    /// added sprites, scripts, and data files become resolvable. Ported from the
-    /// game's Electron `assetUpdater` — same extension filter (`.lua`/`.png`/
-    /// `.json`), same ignore rules (Visual Studio `x64` build output and the
-    /// `std.*` module artifacts), and the same "a `Tiles\` path wins over a
-    /// duplicate basename" override.
+    /// added sprites, scripts, data files, and GUI component layouts become
+    /// resolvable. Ported from the game's Electron `assetUpdater`, with the
+    /// extension filter widened to include `.xml` (so GUI components are
+    /// catalogued, not dropped — see [`ASSET_EXTENSIONS`]); same ignore rules
+    /// (Visual Studio `x64` build output and the `std.*` module artifacts), and the
+    /// same "a `Tiles\` path wins over a duplicate basename" override.
     ///
     /// Unlike the original (which rewrote the file in raw filesystem-walk order),
     /// we preserve the order of every pre-existing key and append only the newly

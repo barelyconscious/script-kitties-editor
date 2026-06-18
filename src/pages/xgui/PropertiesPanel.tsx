@@ -158,6 +158,20 @@ export function PropertiesPanel() {
           </FieldRow>
         )}
 
+        {/* <Component> data — the key of a data-model OBJECT to seat as the mounted
+            child's root (auto-populated from the child's token shape). A bare model
+            key; clearing it removes the binding. */}
+        {node.tag === "Component" && (
+          <FieldRow label="data">
+            <Input
+              value={node.attrs.data ?? ""}
+              onChange={(e) => setAttr("data", e.currentTarget.value)}
+              placeholder="data model key"
+              className="h-7 font-mono text-xs"
+            />
+          </FieldRow>
+        )}
+
         {/* The root View has no editable properties here — its id is auto-set on
             create and its controller is wired via the Controller tab. Instead of a
             dead-end note, offer the add-child actions so the panel is a starting

@@ -237,7 +237,12 @@ function specialAttrs(tag: GuiTag): Set<string> {
   // id rows, so a stray `id` attr on one should surface as a freeform row rather
   // than vanish.
   const special = new Set<string>(nodeHasId(tag) ? ["id"] : []);
-  if (tag === "Component") special.add("src");
+  if (tag === "Component") {
+    special.add("src");
+    // `data` (the nested-component data-object binding) has its own dedicated field
+    // in the panel, so keep it out of the freeform override rows.
+    special.add("data");
+  }
   if (tag === "View") {
     // The View shows no fields at all, but its structural attrs are managed
     // elsewhere (id auto-set on create; controller via the Controller tab). Mark

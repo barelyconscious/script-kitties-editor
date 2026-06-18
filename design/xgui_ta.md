@@ -337,6 +337,22 @@ The override boundary is therefore a **value boundary, not a token boundary.** A
 | Pass mode | **pre-resolved concrete values**, never raw tokens re-resolved in the child |
 | Scope stack | a `<Component>` mount **reseats the stack bottom** to the resolved overrides |
 
+**(d) `data="key"` — a structured data OBJECT as the child root (extends (a)–(c), does not contradict them).**
+
+Listing every prop as a separate override attribute is tedious for a component with a real data shape. A `<Component>` may instead carry a **`data` attribute naming an object in the *containing* component's data model** — `<Component src="button" data="buttonProps"/>` — and that object becomes the child's fresh root:
+
+- `data="key"` is resolved as a **whole-value lookup in the parent's current scope** (the same scope overrides resolve in — so it composes with `forEach` item scope and the `$.` root escape; v1 honors a **bare key** only). The looked-up object is seated as the child's root via the *same* "reseat the stack bottom" mechanism as (a) — it is just an explicit base object rather than one assembled from attributes.
+- **Explicit override attributes layer ON TOP**: the child root is `{ ...dataObject, ...resolvedOverrides }`. So `data` supplies the base shape and individual attrs patch single fields. With no `data` this reduces exactly to (a)–(c); with no overrides it is just the named object.
+- A missing/non-object `data` key yields an **empty root** (every child token an unresolved-but-styled miss) — the same visible-miss posture as an unresolved override; no parent data leaks in.
+- The value boundary of (c) is preserved: the object crosses as **data**, never as tokens the child re-resolves against the parent namespace.
+
+**Editor support (auto-population + cascade).** Because the child's token shape is knowable, the editor treats `buttonProps` as derived:
+- Adding `data="buttonProps"` **auto-populates** that key in the containing component's data model from the child's own scaffolded token shape (recursive through nested `data=`; include-cycle-guarded), with placeholder values.
+- The data object is **prune-synced** to the child: re-scaffolding adds new child tokens, keeps the user's edited values, and **drops stale keys** the child no longer binds (unlike the component's *own* tokens, which stay additive). 
+- On **save**, this reconciliation **cascades** to every component that references the saved one — including closed ones (their persisted models are rewritten) and never-opened parents (seeded from an empty baseline) — so a child's shape change propagates without opening each parent.
+
+This is editor convenience built ON the locked boundary, not a new runtime coupling: at render time the child still sees only a fresh root of concrete data.
+
 ### High Level Visual Layout
 
 The editor has three working columns, left to right: the **component list** (collapsible), the **structure column** (tree + properties + events), and the **main content** (tabbed preview/controller, with a collapsible Data Model panel on its right).
@@ -465,7 +481,7 @@ Consequences the editor MUST enforce (this is the new obligation the subfolder r
 A single column immediately right of the component list, split into **three vertically-stacked panels**:
 
 - **Tree** (top) — the element hierarchy of the selected component. Right-click any element to add a child; if the child is a `<Component>`, a **component picker** (a searchable list of the gui-folder components) lets the user choose the source file. Adding a child automatically updates the XML and the preview. A newly-added id-bearing element (`<Panel>`/`<Text>`/`<Component>`) is given an **auto-id** — `Panel1`, `Text2`, … from a single running counter shared across tags — so it's addressable immediately; the user renames it in Properties. `<Event>` (name→handler) and the root `<View>` get none. Any id-bearing element that ends up *without* an id (an imported component, or an id the user cleared) is **flagged with a warning marker in the tree** — it can't be referenced from the controller or bindings until it has one.
-- **Properties** (middle) — reflects the properties of the currently selected element. A computed read-only `id` field sits at the top, derived from the parent hierarchy (e.g. `view.stats.statText`). The editable `id` below it is the element's own local id (pre-filled with the auto-id for a freshly-added element). For `<Component>` elements this is also where `src` and any freeform override properties are set. `texture` uses the sprite selector UI component.
+- **Properties** (middle) — reflects the properties of the currently selected element. A computed read-only `id` field sits at the top, derived from the parent hierarchy (e.g. `view.stats.statText`). The editable `id` below it is the element's own local id (pre-filled with the auto-id for a freshly-added element). For `<Component>` elements this is also where `src`, the `data` data-object key (the nested-component binding), and any freeform override properties are set. `texture` uses the sprite selector UI component.
   - **`position` and `size` each render as four labeled inputs** — scale-x, scale-y, offset-x, offset-y — not a single `"relX,relY,absX,absY"` comma-string. (The serialized XML still uses the comma form.) Each field accepts a literal number *or* a `{token}` binding (see Data binding), so a field showing `{healthRatio}` is bound and one showing `0.5` is literal.
 - **Events** (bottom) — lists of `<Event>` registrations (event name + handler function name), added/removed here. Events apply to the `<View>` (top-level) component.
 

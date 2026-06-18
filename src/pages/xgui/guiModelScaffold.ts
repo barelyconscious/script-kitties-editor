@@ -140,6 +140,16 @@ function isBareKey(key: string): boolean {
 }
 
 /**
+ * The bare component identity for a `src` value: path-stripped (via `srcBasename`)
+ * and with a trailing `.xml` removed, so `"button"`, `"button.xml"`, and
+ * `"widgets/button.xml"` all key on `"button"` — matching how the picker writes
+ * `src` and how the backend (`get_component`) resolves a component.
+ */
+function bareComponentName(src: string | undefined): string {
+  return srcBasename(src).replace(/\.xml$/i, "");
+}
+
+/**
  * Fold the referenced child component's shape into the current scope under a nested
  * `<Component … data="k">`'s key. The child's shape is extracted RECURSIVELY (so a
  * child that itself nests components via `data=` contributes its nested objects
@@ -168,7 +178,9 @@ function recordComponentData(
   }
 
   if (resolve === undefined) return; // no registry yet → present-but-empty
-  const basename = srcBasename(node.attrs[SRC_ATTR]);
+  // Component identity is the BARE basename — the picker writes a bare `src` and the
+  // backend resolves by bare name; strip a hand-authored `.xml` so both forms match.
+  const basename = bareComponentName(node.attrs[SRC_ATTR]);
   if (basename === "" || ancestry.has(basename)) return; // missing src / include cycle
   const childRoot = resolve(basename);
   if (childRoot === undefined) return;

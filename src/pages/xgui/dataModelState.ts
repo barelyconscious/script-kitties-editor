@@ -14,7 +14,7 @@
 
 import { parseDataModel } from "../../lib/guiDataModel";
 import type { GuiNode } from "../../lib/guiNode";
-import { scaffoldModelText } from "./guiModelScaffold";
+import { type ComponentResolver, scaffoldModelText } from "./guiModelScaffold";
 
 /** The Data Model panel's state: the raw text (panel) + the last-good model (preview). */
 export type DataModelState = {
@@ -68,8 +68,10 @@ export function seedDataModel(
   persisted: string | undefined,
   modelText: string,
   root: GuiNode,
+  resolve?: ComponentResolver,
+  selfBasename?: string,
 ): DataModelState {
   const seed = initDataModelState(persisted ?? modelText);
-  const scaffolded = scaffoldModelText(seed.text, root);
+  const scaffolded = scaffoldModelText(seed.text, root, resolve, selfBasename);
   return scaffolded === null ? seed : applyModelEdit(seed, scaffolded);
 }

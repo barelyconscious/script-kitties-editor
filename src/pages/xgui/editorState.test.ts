@@ -187,6 +187,40 @@ describe("editorReducer", () => {
     expect(next.selectedNodeId).toBe("e2");
   });
 
+  it("removeNode deletes a non-event element together with its whole subtree", () => {
+    const grandchild: GuiNode = { nodeId: "gc", tag: "Text", attrs: {}, children: [] };
+    const child: GuiNode = { nodeId: "panel", tag: "Panel", attrs: {}, children: [grandchild] };
+    const sibling: GuiNode = { nodeId: "keep", tag: "Panel", attrs: {}, children: [] };
+    const root: GuiNode = {
+      nodeId: "root",
+      tag: "View",
+      attrs: {},
+      children: [child, sibling],
+    };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(state, { type: "removeNode", nodeId: "panel" });
+    // The whole "panel" subtree (incl. its grandchild) is gone; the sibling stays.
+    expect(next.open?.root.children.map((c) => c.nodeId)).toEqual(["keep"]);
+    expect(next.dirty).toBe(true);
+  });
+
+  it("removeNode clears the selection when a DESCENDANT of the removed node was selected", () => {
+    const grandchild: GuiNode = { nodeId: "gc", tag: "Text", attrs: {}, children: [] };
+    const child: GuiNode = { nodeId: "panel", tag: "Panel", attrs: {}, children: [grandchild] };
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [child] };
+    // Select the grandchild, then delete its ancestor — the selection is orphaned.
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "gc" };
+    const next = editorReducer(state, { type: "removeNode", nodeId: "panel" });
+    expect(next.selectedNodeId).toBeNull();
+  });
+
+  it("removeNode is a no-op (no dirty) when targeting the root <View>", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "root" };
+    // The root is never removable; the reducer returns the same state reference.
+    expect(editorReducer(state, { type: "removeNode", nodeId: "root" })).toBe(state);
+  });
+
   it("removeNode is a no-op (no dirty) when the node is missing", () => {
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }) };

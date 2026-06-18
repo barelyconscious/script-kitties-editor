@@ -43,6 +43,7 @@ import {
 } from "./guiTree";
 import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
+import { OpenErrorDialog } from "./OpenErrorDialog";
 import { buildOpenComponent } from "./openComponent";
 import { decideSwitch, type SwitchChoice } from "./switchGuard";
 import { UnsavedSwitchDialog } from "./UnsavedSwitchDialog";
@@ -94,9 +95,6 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
-
-  // The panel shows either kind of error: a failed tree load or a failed open.
-  const error = treeError ?? openError;
 
   const filtered = useMemo(() => filterTree(tree, query), [tree, query]);
   // When searching, force everything expanded so matches deep in the tree show.
@@ -268,8 +266,11 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {loading ? (
           <p className="px-3 py-8 text-center text-muted-foreground text-sm">Loading components…</p>
-        ) : error ? (
-          <p className="px-3 py-8 text-center text-destructive text-sm">{error}</p>
+        ) : treeError ? (
+          // A failed tree LOAD stays inline — there is no list to show. An open/parse
+          // failure is different: it pops as a modal (see OpenErrorDialog) so the list
+          // stays visible and the user can pick another component.
+          <p className="px-3 py-8 text-center text-destructive text-sm">{treeError}</p>
         ) : (
           <ul>
             {/* The gui/ root carries the same hover-"+" affordance as folder rows,
@@ -322,6 +323,10 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
         saving={savingSwitch}
         onChoose={(choice) => void resolveSwitch(choice)}
       />
+
+      {/* An open/parse failure pops here as a modal — the list behind it stays
+          visible and selectable so a bad-XML component never locks the user in. */}
+      <OpenErrorDialog error={openError} onDismiss={() => setOpenError(null)} />
     </div>
   );
 }

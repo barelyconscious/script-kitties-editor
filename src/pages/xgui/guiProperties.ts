@@ -65,10 +65,10 @@ export type CompoundFields = {
 
 /** The display label for each compound field, in serialized order. */
 export const COMPOUND_FIELD_LABELS: ReadonlyArray<{ key: keyof CompoundFields; label: string }> = [
-  { key: "scaleX", label: "scale-x" },
-  { key: "scaleY", label: "scale-y" },
-  { key: "offsetX", label: "offset-x" },
-  { key: "offsetY", label: "offset-y" },
+  { key: "scaleX", label: "Relative X" },
+  { key: "scaleY", label: "Relative Y" },
+  { key: "offsetX", label: "Absolute X" },
+  { key: "offsetY", label: "Absolute Y" },
 ];
 
 /**
@@ -187,11 +187,11 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "text", label: "text", kind: "text" },
-        { name: "textColor", label: "textColor", kind: "color" },
-        { name: "textAlign", label: "textAlign", kind: "text" },
-        { name: "fontSize", label: "fontSize", kind: "text" },
-        { name: "visible", label: "visible", kind: "boolean" },
-        { name: "layer", label: "layer", kind: "text" },
+        { name: "textColor", label: "Text Color", kind: "color" },
+        { name: "textAlign", label: "Text Align", kind: "text" },
+        { name: "fontSize", label: "Font Size", kind: "text" },
+        { name: "visible", label: "Visible?", kind: "boolean" },
+        { name: "layer", label: "Layer", kind: "text" },
       ];
     case "Component":
       // `src` and `id` are handled specially by the panel; the rest of the

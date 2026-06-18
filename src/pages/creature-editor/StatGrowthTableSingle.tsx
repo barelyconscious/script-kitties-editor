@@ -1,7 +1,12 @@
-import { IntegerInput } from "@/components/IntegerInput";
+import { DecimalInput } from "@/components/DecimalInput";
 import { type Creature, MAX_LEVEL, projectStat } from "@/lib/creature";
 import { CREATURE_STATS, STAT_META } from "@/lib/stats";
 import { cn } from "@/lib/utils";
+
+/** Format a projected stat, trimming float noise to at most 2 decimals. */
+function formatStat(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 
 /**
  * Single-column variant of {@link StatGrowthTable} for NARROW containers — the
@@ -64,7 +69,7 @@ export function StatGrowthTableSingle({
                   </span>
                 </td>
                 <td className="px-2 py-1.5 text-right">
-                  <IntegerInput
+                  <DecimalInput
                     value={base}
                     min={0}
                     onValue={(n) => setBase(stat, n)}
@@ -74,7 +79,7 @@ export function StatGrowthTableSingle({
                   />
                 </td>
                 <td className="px-2 py-1.5 text-right">
-                  <IntegerInput
+                  <DecimalInput
                     value={gain}
                     min={0}
                     onValue={(n) => setGain(stat, n)}
@@ -89,7 +94,7 @@ export function StatGrowthTableSingle({
                     gain > 0 ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
-                  {atMax.toLocaleString()}
+                  {formatStat(atMax)}
                 </td>
               </tr>
             );

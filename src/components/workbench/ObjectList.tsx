@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Plus, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
+import { PaneCollapseHandle } from "@/components/PaneCollapseHandle";
 import { Sprite } from "@/components/Sprite";
 import {
   DropdownMenu,
@@ -25,6 +26,8 @@ export interface ObjectListProps {
    * dropdown of every type; each group's "+" passes its own type.
    */
   onNew: (type?: GameObjectType) => void;
+  /** Collapse the pane (shows the border collapse handle when provided). */
+  onCollapse?: () => void;
   className?: string;
 }
 
@@ -46,6 +49,7 @@ export function ObjectList({
   activeKey,
   onOpen,
   onNew,
+  onCollapse,
   className,
 }: ObjectListProps) {
   const [query, setQuery] = useState("");
@@ -65,8 +69,12 @@ export function ObjectList({
 
   return (
     <div
-      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
+      className={cn(
+        "group/pane relative flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar",
+        className,
+      )}
     >
+      {onCollapse && <PaneCollapseHandle onCollapse={onCollapse} label="Collapse object list" />}
       <div className="flex items-center gap-1 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />

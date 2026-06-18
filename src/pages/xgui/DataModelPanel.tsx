@@ -95,10 +95,15 @@ export function DataModelPanel({ value, onChange }: DataModelPanelProps) {
   }, [value]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-3">
-      <div ref={containerRef} className="min-h-0 flex-1" aria-invalid={!parse.ok} />
+    // No padding — Monaco fills the whole frame edge-to-edge. The parse error
+    // floats as a thin bottom overlay so it never insets or shrinks the editor.
+    <div className="relative h-full min-h-0">
+      <div ref={containerRef} className="absolute inset-0" aria-invalid={!parse.ok} />
       {!parse.ok && (
-        <p className="text-destructive text-xs" role="alert">
+        <p
+          className="absolute inset-x-0 bottom-0 border-destructive/30 border-t bg-destructive/15 px-3 py-1 text-destructive text-xs"
+          role="alert"
+        >
           Invalid JSON: {parse.error}
         </p>
       )}

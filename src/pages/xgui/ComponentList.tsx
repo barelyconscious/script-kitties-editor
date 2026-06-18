@@ -26,6 +26,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { PaneCollapseHandle } from "@/components/PaneCollapseHandle";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -67,10 +68,12 @@ function filterTree(tree: GuiFolder, query: string): GuiFolder {
 export type ComponentListProps = {
   /** Whether the panel is collapsed (hidden); a slim rail is shown in its place. */
   collapsed?: boolean;
+  /** Collapse the pane (shows the border collapse handle when provided). */
+  onCollapse?: () => void;
   className?: string;
 };
 
-export function ComponentList({ collapsed, className }: ComponentListProps) {
+export function ComponentList({ collapsed, onCollapse, className }: ComponentListProps) {
   const { state, dispatch } = useEditorStore();
   const { save, saving: savingSwitch } = useComponentSave();
   // Tree state + the get_gui_tree refetch are shared (lifted to the page) so F13's
@@ -222,8 +225,12 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
 
   return (
     <div
-      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
+      className={cn(
+        "group/pane relative flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar",
+        className,
+      )}
     >
+      {onCollapse && <PaneCollapseHandle onCollapse={onCollapse} label="Collapse component list" />}
       <div className="flex items-center gap-1 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />

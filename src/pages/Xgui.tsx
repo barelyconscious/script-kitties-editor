@@ -81,7 +81,10 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
     <EditorStateProvider>
       <GuiTreeStoreProvider>
         <div className="flex h-full min-h-0">
-          <ComponentList collapsed={componentListCollapsed} />
+          <ComponentList
+            collapsed={componentListCollapsed}
+            onCollapse={() => setPreference("xgui.componentListCollapsed", true)}
+          />
 
           {/* When the list is collapsed, leave a slim labelled rail in its place so
             it's obvious the panel exists and how to bring it back — matching the

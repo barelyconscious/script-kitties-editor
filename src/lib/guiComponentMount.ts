@@ -44,6 +44,16 @@ import type { ScopeStack } from "./guiScope";
 export const SRC_ATTR = "src";
 
 /**
+ * The attribute naming a DATA OBJECT in the PARENT's model to seat as the mounted
+ * child's whole fresh ROOT (e.g. `<Component src="button" data="buttonProps"/>`).
+ * A bare model key (v1) resolved in the parent's current scope; the looked-up
+ * object becomes the child's root, and any explicit override attributes on the same
+ * `<Component>` layer ON TOP of it (see {@link resolveChildRoot}). Structural, so it
+ * is excluded from the flat overrides — it selects the base, it is not itself a prop.
+ */
+export const DATA_ATTR = "data";
+
+/**
  * Attribute names on a `<Component>` that are STRUCTURAL/instance-level, not data
  * overrides handed to the child. These are consumed by the PARENT's render of the
  * `<Component>` element (its own geometry/repetition/identity) and must NOT leak
@@ -60,6 +70,7 @@ export const SRC_ATTR = "src";
  */
 const NON_OVERRIDE_ATTRS = new Set([
   SRC_ATTR,
+  DATA_ATTR,
   "forEach",
   "key",
   "id",
@@ -132,6 +143,50 @@ export function resolveOverrides(
     overrides[name] = resolveStringProp(raw, scope).value;
   }
   return overrides;
+}
+
+/** Whether a value is a plain (non-array, non-null) object usable as a data base. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Resolve the `data="key"` BASE object for a `<Component>`: look the bare key up in
+ * the PARENT's current scope (so it composes with `forEach` item scope and the `$.`
+ * root escape, exactly like any other binding) and return a SHALLOW COPY of the
+ * found object.
+ *
+ * Returns an empty object when there is no `data` attr, or the named key is absent /
+ * resolves to a non-object — a miss leaves the child's `{token}`s unresolved (a
+ * VISIBLE miss inside the child) rather than silently inheriting parent data, the
+ * same boundary posture {@link resolveOverrides} takes for a missing override. The
+ * copy is shallow because the override layer ({@link resolveChildRoot}) only sets
+ * top-level fields; nested objects are shared read-only with the parent model.
+ */
+function resolveDataBase(component: GuiNode, parentScope: ScopeStack): Record<string, unknown> {
+  const raw = component.attrs[DATA_ATTR];
+  if (raw === undefined || raw.trim() === "") return {};
+  const found = parentScope.lookup(raw.trim());
+  return isPlainObject(found) ? { ...found } : {};
+}
+
+/**
+ * Build the mounted child's fresh ROOT model (F6a, extended): the `data="key"` base
+ * object from the parent model with the `<Component>`'s explicit override attributes
+ * LAYERED ON TOP (each pre-resolved in the parent scope, overriding that top-level
+ * field). With no `data` attr this reduces to {@link resolveOverrides} (the original
+ * flat-overrides behavior); with no overrides it is just the base object.
+ *
+ * The child still resolves its `{token}`s as a FRESH ROOT — no parent `$`, no parent
+ * fall-through. `data` selects WHICH parent object seeds that root; overrides patch
+ * individual fields on it. The result is seated by the renderer as
+ * `ScopeStack.root(resolveChildRoot(...))`.
+ */
+export function resolveChildRoot(
+  component: GuiNode,
+  parentScope: ScopeStack,
+): Record<string, unknown> {
+  return { ...resolveDataBase(component, parentScope), ...resolveOverrides(component, parentScope) };
 }
 
 /** Why a `<Component>` renders as a placeholder instead of its mounted subtree. */

@@ -261,3 +261,104 @@ describe("scaffoldModelText — text rewrite only on new tokens", () => {
     expect(JSON.parse(text as string)).toEqual({ rows: [{ label: "label" }] });
   });
 });
+
+describe("extractShape — nested <Component data> objects", () => {
+  // A resolver standing in for the component registry: maps a basename to its tree.
+  const button = tree('<View><Text text="{label}"/><Panel backgroundColor="{tint}"/></View>');
+  const resolve = (name: string) => (name === "button.xml" ? button : undefined);
+
+  it("folds the child component's shape under the data key as an object", () => {
+    const shape = extractShape(
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
+      resolve,
+    );
+    expect(shape.scalars.size).toBe(0);
+    expect([...(shape.objects.get("buttonProps")?.scalars ?? [])].sort()).toEqual(["label", "tint"]);
+    expect(buildModel(shape)).toEqual({ buttonProps: { label: "label", tint: "tint" } });
+  });
+
+  it("records the data key present-but-empty without a resolver", () => {
+    const shape = extractShape(tree('<View><Component src="button.xml" data="buttonProps"/></View>'));
+    expect(shape.objects.has("buttonProps")).toBe(true);
+    expect(buildModel(shape)).toEqual({ buttonProps: {} });
+  });
+
+  it("records present-but-empty when the child src can't be resolved", () => {
+    const shape = extractShape(
+      tree('<View><Component src="ghost.xml" data="props"/></View>'),
+      resolve,
+    );
+    expect(buildModel(shape)).toEqual({ props: {} });
+  });
+
+  it("ignores non-bare data keys in v1 (no $./dotted forms)", () => {
+    const shape = extractShape(
+      tree('<View><Component src="button.xml" data="$.shared"/></View>'),
+      resolve,
+    );
+    expect(shape.objects.size).toBe(0);
+  });
+
+  it("guards include cycles via the ancestry seed", () => {
+    // A → A self-include: seeding ancestry with the component's own basename stops
+    // the recursion folding itself in forever.
+    const selfRef = tree('<View><Component src="a.xml" data="self"/></View>');
+    const resolveSelf = (name: string) => (name === "a.xml" ? selfRef : undefined);
+    const shape = extractShape(selfRef, resolveSelf, new Set(["a.xml"]));
+    expect(buildModel(shape)).toEqual({ self: {} });
+  });
+
+  it("scaffolds the data object into the model text additively", () => {
+    const text = scaffoldModelText(
+      "{}",
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
+      resolve,
+    );
+    expect(JSON.parse(text as string)).toEqual({ buttonProps: { label: "label", tint: "tint" } });
+  });
+
+  it("preserves user-edited values inside the data object on a re-scaffold", () => {
+    const current = JSON.stringify({ buttonProps: { label: "Save" } });
+    const text = scaffoldModelText(
+      current,
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
+      resolve,
+    );
+    // `tint` is added; the user's `label` value is preserved (additive merge).
+    expect(JSON.parse(text as string)).toEqual({ buttonProps: { label: "Save", tint: "tint" } });
+  });
+});
+
+describe("reconcileModel — prune stale keys inside data objects", () => {
+  const button = tree('<View><Text text="{label}"/></View>'); // child now uses only {label}
+  const resolve = (name: string) => (name === "button.xml" ? button : undefined);
+
+  it("drops a data-object key the child no longer uses, keeps live ones", () => {
+    // The model still carries a stale `tint` the child dropped; `label` survives.
+    const current = JSON.stringify({ buttonProps: { label: "Save", tint: "old" } });
+    const text = scaffoldModelText(
+      current,
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
+      resolve,
+    );
+    expect(JSON.parse(text as string)).toEqual({ buttonProps: { label: "Save" } });
+  });
+
+  it("does NOT prune the component's OWN tokens (additive, leftovers kept)", () => {
+    // `stale` is a root token no longer in the tree; it must be left alone.
+    const current = JSON.stringify({ title: "Hi", stale: "x" });
+    const text = scaffoldModelText(current, tree('<View><Text text="{title}"/></View>'));
+    // Nothing to add and own-token pruning is off → no rewrite at all.
+    expect(text).toBeNull();
+  });
+
+  it("returns null when a data object already matches the child shape", () => {
+    const current = JSON.stringify({ buttonProps: { label: "Save" } });
+    const text = scaffoldModelText(
+      current,
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
+      resolve,
+    );
+    expect(text).toBeNull();
+  });
+});

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mountDecision, resolveOverrides, srcBasename } from "./guiComponentMount";
+import {
+  mountDecision,
+  resolveChildRoot,
+  resolveOverrides,
+  srcBasename,
+} from "./guiComponentMount";
 import type { GuiNode } from "./guiNode";
 import { mintNodeId } from "./guiNode";
 import { ScopeStack } from "./guiScope";
@@ -97,6 +102,59 @@ describe("resolveOverrides — child fresh-root model (F6a)", () => {
     // $. inside the child means the child's own root (= overrides), not parent root.
     expect(childScope.lookup("$.qty")).toBe("3");
     expect(childScope.lookup("$.money")).toBeUndefined();
+  });
+
+  it("excludes the `data` attr from the flat overrides", () => {
+    const node = component({ src: "button.xml", data: "buttonProps", label: "Hi" });
+    expect(resolveOverrides(node, ScopeStack.root({ buttonProps: { label: "x" } }))).toEqual({
+      label: "Hi",
+    });
+  });
+});
+
+describe("resolveChildRoot — data base + overrides layered on top", () => {
+  it("seats the named data object as the child's whole root", () => {
+    const node = component({ src: "button.xml", data: "buttonProps" });
+    const parent = ScopeStack.root({ buttonProps: { label: "Save", tint: "{accent}" } });
+    expect(resolveChildRoot(node, parent)).toEqual({ label: "Save", tint: "{accent}" });
+  });
+
+  it("layers explicit override attrs ON TOP of the data base", () => {
+    const node = component({ src: "button.xml", data: "buttonProps", label: "Override" });
+    const parent = ScopeStack.root({ buttonProps: { label: "Base", icon: "star" } });
+    // The override wins for `label`; untouched base fields survive.
+    expect(resolveChildRoot(node, parent)).toEqual({ label: "Override", icon: "star" });
+  });
+
+  it("resolves the data key in the parent's forEach item scope", () => {
+    const node = component({ src: "button.xml", data: "props" });
+    const itemScope = ScopeStack.root({ theme: "dark" }).push({ props: { label: "Item" } });
+    expect(resolveChildRoot(node, itemScope)).toEqual({ label: "Item" });
+  });
+
+  it("resolves a $.-prefixed data key against the parent root", () => {
+    const node = component({ src: "button.xml", data: "$.shared" });
+    const scope = ScopeStack.root({ shared: { label: "Root" } }).push({ label: "item" });
+    expect(resolveChildRoot(node, scope)).toEqual({ label: "Root" });
+  });
+
+  it("yields an empty root when the data key is missing or non-object (visible miss)", () => {
+    const missing = component({ src: "button.xml", data: "absent" });
+    expect(resolveChildRoot(missing, ScopeStack.root({ other: 1 }))).toEqual({});
+    const scalar = component({ src: "button.xml", data: "n" });
+    expect(resolveChildRoot(scalar, ScopeStack.root({ n: 5 }))).toEqual({});
+  });
+
+  it("reduces to the flat overrides when there is no data attr", () => {
+    const node = component({ src: "button.xml", label: "Hi", qty: "3" });
+    expect(resolveChildRoot(node, ScopeStack.root({}))).toEqual({ label: "Hi", qty: "3" });
+  });
+
+  it("does not mutate the parent model object (shallow copy)", () => {
+    const buttonProps = { label: "Base" };
+    const node = component({ src: "button.xml", data: "buttonProps", label: "New" });
+    resolveChildRoot(node, ScopeStack.root({ buttonProps }));
+    expect(buttonProps).toEqual({ label: "Base" });
   });
 });
 

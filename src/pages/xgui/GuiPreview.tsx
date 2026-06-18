@@ -52,7 +52,7 @@ import { type ComponentEntry, useComponent } from "../../lib/guiComponentCache";
 import {
   mountDecision,
   type PlaceholderReason,
-  resolveOverrides,
+  resolveChildRoot,
 } from "../../lib/guiComponentMount";
 import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import {
@@ -408,13 +408,15 @@ function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMount
     return <ComponentPlaceholder reason="missing" src={rawSrc} />;
   }
 
-  // ok: mount the child subtree in a FRESH ROOT scope of pre-resolved overrides.
-  const overrides = resolveOverrides(node, parentScope);
-  const childScope = ScopeStack.root(overrides);
+  // ok: mount the child subtree in a FRESH ROOT scope built from the `data=` base
+  // object (if any) with the explicit overrides layered on top — all pre-resolved
+  // in the parent scope.
+  const childRoot = resolveChildRoot(node, parentScope);
+  const childScope = ScopeStack.root(childRoot);
   // The child mounts as its own little stage: its boxes are positioned/ordered
   // within THIS <Component> box. A nested z-order map ranks the child's own boxes
   // among their siblings, contained by this mount wrapper's stacking context.
-  const childZOrder = computeZOrder(entry.root, overrides);
+  const childZOrder = computeZOrder(entry.root, childRoot);
   return (
     <div
       className="pointer-events-none absolute inset-0"

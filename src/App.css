@@ -71,6 +71,23 @@
   }
 }
 
+/* WebView2/Chromium wheel-trap fix. Tailwind's `truncate` utility is
+   `overflow: hidden; white-space: nowrap; text-overflow: ellipsis`. When the
+   text is wider than its box (i.e. actually truncated), `overflow: hidden` makes
+   the element a horizontally-scrollable container — and on Windows/WebView2 a
+   vertical mouse wheel over such an element is CONSUMED rather than bubbling to
+   the surrounding list's scroll container. The result: hovering a truncated row
+   label freezes scrolling of the whole list (object list, GUI component list,
+   data tables — anywhere a row label truncates).
+
+   `overflow: clip` clips identically (ellipsis included, in modern Chromium) but
+   is explicitly NON-scrollable, so it never traps the wheel. This rule is
+   intentionally UNLAYERED so it wins over Tailwind's layered `.truncate` utility;
+   it overrides only `overflow`, leaving nowrap + ellipsis from the utility. */
+.truncate {
+  overflow: clip;
+}
+
 /* Pack-editor slot insertion flourish: a freshly duplicated slot does a quick
    settle-in jiggle while a diagonal light streak sweeps across it once, so the
    eye is drawn to where the copy landed. Honors reduced-motion. */

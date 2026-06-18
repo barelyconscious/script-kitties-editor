@@ -1420,6 +1420,37 @@ mod tests {
     }
 
     #[test]
+    fn rescan_writes_the_manifest_in_alphabetical_order() {
+        // A rescan must emit the whole manifest alphabetically, so a newly-scanned
+        // file lands where it sorts rather than at the bottom.
+        let root = temp_install();
+        let gui = root.join("gui");
+        std::fs::create_dir_all(&gui).unwrap();
+        std::fs::write(gui.join("zebra.xml"), "<View/>").unwrap();
+        std::fs::write(gui.join("alpha.xml"), "<View/>").unwrap();
+        std::fs::write(gui.join("mid.xml"), "<View/>").unwrap();
+        // Pre-existing manifest in NON-alphabetical order; both files present on disk.
+        let dal = dal_with_manifest(
+            &root,
+            r#"{ "zebra.xml": { "filepath": "gui\\zebra.xml" }, "alpha.xml": { "filepath": "gui\\alpha.xml" } }"#,
+        );
+
+        dal.update_asset_manifest().unwrap();
+
+        let keys = manifest_keys(&root);
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(
+            keys, sorted,
+            "the rescan must write the manifest in alphabetical order, got: {keys:?}"
+        );
+        // The newly-scanned mid.xml is slotted in the middle, not appended last.
+        let mid = keys.iter().position(|k| k == "mid.xml").unwrap();
+        let zebra = keys.iter().position(|k| k == "zebra.xml").unwrap();
+        assert!(mid < zebra, "a newly-scanned file must sort into place, got: {keys:?}");
+    }
+
+    #[test]
     fn create_refuses_basename_collision_across_a_different_folder() {
         let root = temp_install();
         // bag_slot.xml ALREADY exists in widgets/, registered in the manifest.

@@ -150,12 +150,13 @@ impl Dal {
     /// (Visual Studio `x64` build output and the `std.*` module artifacts), and the
     /// same "a `Tiles\` path wins over a duplicate basename" override.
     ///
-    /// Unlike the original (which rewrote the file in raw filesystem-walk order),
-    /// we preserve the order of every pre-existing key and append only the newly
-    /// discovered ones, so a rescan that finds N new files produces an N-line
-    /// diff rather than reshuffling the whole manifest. Entries whose file has
-    /// vanished are dropped (the walk is authoritative). Returns a per-name
-    /// summary of what changed.
+    /// The rebuilt manifest is written in **alphabetical key order** (not the raw
+    /// filesystem-walk order the original used, and not "existing keys then new ones
+    /// appended"): a newly-scanned file lands where it sorts, never at the bottom —
+    /// matching [`Dal::insert_manifest_entry`]'s alphabetical placement. Once sorted,
+    /// subsequent rescans and register-on-save inserts both keep it sorted, so the
+    /// steady-state diff stays minimal. Entries whose file has vanished are dropped
+    /// (the walk is authoritative). Returns a per-name summary of what changed.
     pub fn update_asset_manifest(&self) -> Result<ManifestUpdate, String> {
         let root = PathBuf::from(&self.config().game_install_path);
         let manifest_path = self.manifest_path();
@@ -180,12 +181,14 @@ impl Dal {
             .map(|(name, fp)| (name.as_str(), fp.as_str()))
             .collect();
 
-        let mut out = Map::new();
+        // Accumulate the final entries, then sort by key so the written manifest is
+        // alphabetical (see the doc note). Order of accumulation doesn't matter here.
+        let mut entries: Vec<(String, Value)> = Vec::new();
         let mut updated = Vec::new();
         let mut removed = Vec::new();
 
-        // 1. Existing keys, in their original order. Keep if the file still exists
-        //    (refreshing its path), otherwise record it as removed.
+        // 1. Existing keys: keep if the file still exists (refreshing its path),
+        //    otherwise record it as removed.
         for (key, old_val) in old_obj {
             match collected_paths.get(key.as_str()) {
                 Some(&new_fp) => {
@@ -193,20 +196,25 @@ impl Dal {
                     if old_fp != new_fp {
                         updated.push(key.clone());
                     }
-                    out.insert(key.clone(), asset_entry_value(new_fp));
+                    entries.push((key.clone(), asset_entry_value(new_fp)));
                 }
                 None => removed.push(key.clone()),
             }
         }
 
-        // 2. Newly discovered keys, appended in walk order.
+        // 2. Newly discovered keys.
         let mut added = Vec::new();
         for (name, fp) in &collected {
             if !old_obj.contains_key(name) {
                 added.push(name.clone());
-                out.insert(name.clone(), asset_entry_value(fp));
+                entries.push((name.clone(), asset_entry_value(fp)));
             }
         }
+
+        // Sort the whole manifest alphabetically by key so new files land in place
+        // rather than at the bottom, and the on-disk order is deterministic.
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        let out: Map<String, Value> = entries.into_iter().collect();
 
         let total = out.len();
         // Match the manifest's on-disk style: 2-space pretty, no trailing newline.

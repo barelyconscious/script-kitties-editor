@@ -200,11 +200,6 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
               )}
             </button>
 
-            {addable.length > 0 && (
-              // A visible add affordance on hover/selection mirrors the right-click
-              // menu, so add-child is discoverable without knowing about it.
-              <AddMenu node={node} addable={addable} onAdd={onAdd} />
-            )}
             {removable && (
               // A visible delete affordance on hover mirrors the right-click menu, so
               // deleting an element is discoverable without knowing the context menu.
@@ -216,6 +211,11 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
               >
                 <Trash2 className="size-3" />
               </button>
+            )}
+            {addable.length > 0 && (
+              // A visible add affordance on hover/selection mirrors the right-click
+              // menu, so add-child is discoverable without knowing about it.
+              <AddMenu node={node} addable={addable} onAdd={onAdd} />
             )}
           </div>
         </ContextMenu.Trigger>

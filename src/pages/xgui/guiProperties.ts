@@ -185,11 +185,11 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "texture", label: "texture", kind: "sprite" },
-        { name: "backgroundColor", label: "backgroundColor", kind: "color" },
-        { name: "borderColor", label: "borderColor", kind: "color" },
-        { name: "borderSize", label: "borderSize", kind: "text" },
-        { name: "visible", label: "visible", kind: "boolean" },
-        { name: "layer", label: "layer", kind: "text" },
+        { name: "backgroundColor", label: "Background Color", kind: "color" },
+        { name: "borderColor", label: "Border Color", kind: "color" },
+        { name: "borderSize", label: "Border Size", kind: "text" },
+        { name: "visible", label: "Visible", kind: "boolean" },
+        { name: "layer", label: "Layer", kind: "text" },
       ];
     case "Text":
       return [
@@ -199,7 +199,7 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
         { name: "textColor", label: "Text Color", kind: "color" },
         { name: "textAlign", label: "Text Align", kind: "text" },
         { name: "fontSize", label: "Font Size", kind: "text" },
-        { name: "visible", label: "Visible?", kind: "boolean" },
+        { name: "visible", label: "Visible", kind: "boolean" },
         { name: "layer", label: "Layer", kind: "text" },
       ];
     case "Component":

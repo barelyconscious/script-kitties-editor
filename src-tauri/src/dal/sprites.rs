@@ -18,15 +18,16 @@ impl Dal {
         Ok(result)
     }
 
-    /// List the logical names of every sprite in the manifest (entries whose
-    /// path is under `Sprites/`), sorted. Backs the sprite picker.
+    /// List the logical names of every `.png` sprite in the manifest, sorted.
+    /// Backs the sprite picker. Keyed off the `.png` extension (not a folder) so
+    /// art outside `Sprites/` — notably the GUI textures under `gui/` — is also
+    /// pickable; the project only uses `.png` art, so other image formats are
+    /// intentionally excluded.
     pub fn list_sprites(&self) -> Result<Vec<String>, String> {
         let manifest = self.get_asset_manifest()?;
         let mut names: Vec<String> = manifest
             .iter()
-            .filter(|(_, entry)| {
-                entry.filepath.replace('\\', "/").starts_with("Sprites/")
-            })
+            .filter(|(_, entry)| entry.filepath.to_ascii_lowercase().ends_with(".png"))
             .map(|(name, _)| name.clone())
             .collect();
         names.sort();

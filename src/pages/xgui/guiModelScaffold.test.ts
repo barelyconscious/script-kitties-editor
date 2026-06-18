@@ -362,3 +362,40 @@ describe("reconcileModel — prune stale keys inside data objects", () => {
     expect(text).toBeNull();
   });
 });
+
+describe("reconcileModel — orphaned data objects (data-key rename/removal)", () => {
+  const button = tree('<View><Text text="{label}"/></View>');
+  const resolve = (name: string) => (name === "button" ? button : undefined);
+
+  it("drops a renamed-away data object (old key replaced, new key seeded)", () => {
+    // The tree now binds data="newProps"; the model still carries the old "oldProps".
+    const current = JSON.stringify({ oldProps: { label: "Save" } });
+    const text = scaffoldModelText(
+      current,
+      tree('<View><Component src="button" data="newProps"/></View>'),
+      resolve,
+    );
+    expect(JSON.parse(text as string)).toEqual({ newProps: { label: "label" } });
+  });
+
+  it("drops a data object when the data binding is removed entirely", () => {
+    const current = JSON.stringify({ buttonProps: { label: "Save" } });
+    // No <Component data> anymore → buttonProps is an orphaned object → pruned.
+    const text = scaffoldModelText(current, tree("<View><Text text=\"{title}\"/></View>"));
+    expect(JSON.parse(text as string)).toEqual({ title: "title" });
+  });
+
+  it("keeps a referenced object the user authored for a dotted token", () => {
+    // {stats.hp} records `stats` as a referenced scalar; the user made it an object.
+    // It is referenced, so it must NOT be pruned despite being a plain object.
+    const current = JSON.stringify({ stats: { hp: 10 } });
+    const text = scaffoldModelText(current, tree('<View><Text text="{stats.hp}"/></View>'));
+    expect(text).toBeNull(); // nothing added, nothing pruned
+  });
+
+  it("keeps scalar/array leftovers (own-token additive rule, not objects)", () => {
+    const current = JSON.stringify({ title: "Hi", staleScalar: "x", staleArr: [{ a: "1" }] });
+    const text = scaffoldModelText(current, tree('<View><Text text="{title}"/></View>'));
+    expect(text).toBeNull(); // leftovers are scalar/array, never pruned
+  });
+});

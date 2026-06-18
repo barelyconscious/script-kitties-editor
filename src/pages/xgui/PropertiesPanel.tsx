@@ -160,14 +160,14 @@ export function PropertiesPanel() {
 
         {/* <Component> data — the key of a data-model OBJECT to seat as the mounted
             child's root (auto-populated from the child's token shape). A bare model
-            key; clearing it removes the binding. */}
+            key; clearing it removes the binding. Committed on BLUR (not per
+            keystroke) so a half-typed name never spawns a throwaway model key. */}
         {node.tag === "Component" && (
           <FieldRow label="data">
-            <Input
+            <DataKeyField
+              key={node.nodeId}
               value={node.attrs.data ?? ""}
-              onChange={(e) => setAttr("data", e.currentTarget.value)}
-              placeholder="data model key"
-              className="h-7 font-mono text-xs"
+              onCommit={(v) => setAttr("data", v)}
             />
           </FieldRow>
         )}
@@ -257,6 +257,34 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
       </span>
       {children}
     </div>
+  );
+}
+
+/**
+ * The `<Component>` `data` key input. Edits are LOCAL until BLUR (or Enter), so a
+ * half-typed name like "b"/"bu"/"but" never lands on the node — which would spawn a
+ * throwaway data-model object per keystroke. Mounted with a `key={nodeId}` by the
+ * caller so selecting a different element gives it a fresh value; an external change
+ * to the committed value (undo/redo) re-syncs the draft.
+ */
+function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      placeholder="data model key"
+      className="h-7 font-mono text-xs"
+    />
   );
 }
 

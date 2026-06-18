@@ -573,8 +573,14 @@ function syncDataObject(
  *   - A nested-component `data=` OBJECT is prune-SYNCED to the child's shape (see
  *     {@link syncDataObject}) — it mirrors the component, so stale keys are removed —
  *     wherever it appears: at the root, or inside a `forEach` item.
+ *   - An ORPHANED data object — a root key holding a plain OBJECT that the tree no
+ *     longer references (a `data=` binding renamed or removed) — is dropped, so
+ *     renaming a `data` key REPLACES it in the model rather than leaving the old one
+ *     behind. Only objects are pruned this way: scalar/array leftovers from a removed
+ *     own-token stay (the additive rule), and a referenced key is never touched.
  *
- * Pruning is confined to the data objects; a component's own model is never pruned.
+ * Pruning is confined to data objects (their fields, and orphaned objects); a
+ * component's own scalar/collection model is never pruned.
  */
 export function reconcileModel(current: unknown, shape: ModelShape): { model: unknown; changed: boolean } {
   if (!isPlainObject(current)) {
@@ -614,6 +620,22 @@ export function reconcileModel(current: unknown, shape: ModelShape): { model: un
     });
     if (arrChanged) {
       out[name] = items;
+      changed = true;
+    }
+  }
+  // Drop ORPHANED data objects: a root key holding a plain object that the tree
+  // references nowhere (no token, no `forEach`, no `data=`). That's a former data
+  // object whose binding was renamed/removed — pruning it makes a `data` key rename
+  // REPLACE rather than accumulate. Scalars/arrays are never pruned here (an own
+  // token's leftover stays, per the additive rule); referenced keys stay too.
+  const referenced = new Set<string>([
+    ...shape.scalars,
+    ...shape.objects.keys(),
+    ...shape.collections.keys(),
+  ]);
+  for (const key of Object.keys(out)) {
+    if (!referenced.has(key) && isPlainObject(out[key])) {
+      delete out[key];
       changed = true;
     }
   }

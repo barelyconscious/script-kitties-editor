@@ -212,6 +212,92 @@ describe("structural rules", () => {
   });
 });
 
+describe("GridLayout structural rules", () => {
+  it("accepts a GridLayout with a single Text child under a View", () => {
+    const root = parseGui(
+      `<View><GridLayout dataCollection="items" rows="6" columns="6"><Text id="items" text="{name}"/></GridLayout></View>`,
+    );
+    const grid = root.children[0];
+    expect(grid.tag).toBe("GridLayout");
+    expect(grid.children).toHaveLength(1);
+    expect(grid.children[0].tag).toBe("Text");
+  });
+
+  it("accepts a GridLayout under a Panel", () => {
+    const root = parseGui(
+      `<View><Panel id="p"><GridLayout><Panel id="slots"/></GridLayout></Panel></View>`,
+    );
+    expect(root.children[0].children[0].tag).toBe("GridLayout");
+  });
+
+  it("accepts a Panel and a Component as grid children", () => {
+    expect(() =>
+      parseGui(`<View><GridLayout><Panel id="slots"/></GridLayout></View>`),
+    ).not.toThrow();
+    expect(() =>
+      parseGui(`<View><GridLayout><Component id="slots" src="bag_slot.xml"/></GridLayout></View>`),
+    ).not.toThrow();
+  });
+
+  it("round-trips a GridLayout and its attributes verbatim through serializeGui", () => {
+    const xml = `<View>\n  <GridLayout dataCollection="items" rows="6" columns="6" gutter="5,5">\n    <Text id="items" text="{name}"/>\n  </GridLayout>\n</View>\n`;
+    expect(serializeGui(parseGui(xml))).toBe(xml);
+  });
+
+  it("rejects a GridLayout with more than one child element", () => {
+    expect(() =>
+      parseGui(`<View><GridLayout><Panel id="a"/><Panel id="b"/></GridLayout></View>`),
+    ).toThrow(/at most one child/);
+  });
+
+  it("rejects a non-Panel/Text/Component grid child (here caught by the Event rule)", () => {
+    // An <Event> child is rejected — in practice the Event-only-under-View rule
+    // fires first, but the GridLayout child-tag guard is the same outcome: a grid
+    // may only wrap a Panel/Text/Component. (Every other KNOWN tag — View, Event,
+    // GridLayout — is rejected by its own placement rule before reaching the grid
+    // guard, so the guard is defense-in-depth, asserted clearly in the parser.)
+    expect(() =>
+      parseGui(`<View><GridLayout><Event name="X" handler="h"/></GridLayout></View>`),
+    ).toThrow(GuiParseError);
+  });
+
+  it("rejects a GridLayout under a parent other than Panel/View (e.g. Text)", () => {
+    expect(() =>
+      parseGui(`<View><Text id="t"><GridLayout><Panel id="p"/></GridLayout></Text></View>`),
+    ).toThrow(/child of <Panel> or <View>/);
+  });
+
+  it("rejects a nested GridLayout (a grid cannot contain another grid)", () => {
+    // The inner GridLayout is rejected because its parent is a GridLayout, not
+    // Panel/View — nesting is forbidden two ways.
+    expect(() =>
+      parseGui(`<View><GridLayout><GridLayout><Panel id="p"/></GridLayout></GridLayout></View>`),
+    ).toThrow(/child of <Panel> or <View>/);
+  });
+
+  it("rejects more than one GridLayout among a View's children", () => {
+    expect(() =>
+      parseGui(
+        `<View><GridLayout><Panel id="a"/></GridLayout><GridLayout><Panel id="b"/></GridLayout></View>`,
+      ),
+    ).toThrow(/at most one <GridLayout>/);
+  });
+
+  it("rejects more than one GridLayout among a Panel's children", () => {
+    expect(() =>
+      parseGui(
+        `<View><Panel id="p"><GridLayout><Panel id="a"/></GridLayout><GridLayout><Panel id="b"/></GridLayout></Panel></View>`,
+      ),
+    ).toThrow(/at most one <GridLayout>/);
+  });
+
+  it("accepts a GridLayout as the only child directly under a View (root grid)", () => {
+    expect(() =>
+      parseGui(`<View><GridLayout dataCollection="items"><Panel id="slots"/></GridLayout></View>`),
+    ).not.toThrow();
+  });
+});
+
 describe("parse error handling", () => {
   it("rejects an empty document", () => {
     expect(() => parseGui("   ")).toThrow(/Empty document/);

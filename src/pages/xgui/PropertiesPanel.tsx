@@ -105,6 +105,10 @@ export function PropertiesPanel() {
   // not by a hierarchical id. So hide BOTH the computed read-only id and the editable
   // local id for an Event; every other tag still shows them.
   const hasId = nodeHasId(node.tag);
+  // The parent tag (the node just above the selected one in the path) decides
+  // whether the selected node OWNS its geometry: a child of a <GridLayout> does
+  // not — the grid lays it out — so fieldsForTag drops its position/size rows.
+  const parentTag = path.length >= 2 ? path[path.length - 2].tag : undefined;
 
   return (
     <div className="flex min-h-0 flex-col border-t">
@@ -187,8 +191,9 @@ export function PropertiesPanel() {
             point rather than an empty surface. */}
         {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
 
-        {/* Well-known fields for the tag. */}
-        {fieldsForTag(node.tag).map((field) => (
+        {/* Well-known fields for the tag (position/size suppressed for a grid
+            child — the parent GridLayout owns its geometry). */}
+        {fieldsForTag(node.tag, parentTag).map((field) => (
           <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
         ))}
 
@@ -360,6 +365,11 @@ function FieldControl({
   onSet: (name: string, value: string) => void;
 }) {
   switch (kind) {
+    case "modelKey":
+      // A bare model key (e.g. GridLayout's dataCollection) — commit on blur/Enter
+      // (not per keystroke) so a half-typed key doesn't spawn a throwaway scaffold
+      // entry per character. Reuses the same control as <Component>'s `data` key.
+      return <DataKeyField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
       return <CompoundField name={name} value={value} onSet={onSet} />;
     case "color":

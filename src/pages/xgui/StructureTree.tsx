@@ -33,7 +33,13 @@ import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
 import { nodeHasId } from "./guiProperties";
-import { allowedChildTags, EVENT_PLACEHOLDER_LABEL, makeChildNode, nodeLabel } from "./guiTreeEdit";
+import {
+  allowedChildTags,
+  EVENT_PLACEHOLDER_LABEL,
+  findNode,
+  makeChildNode,
+  nodeLabel,
+} from "./guiTreeEdit";
 
 /** Per-tag accent for the tag chip, so the tree reads at a glance. */
 function tagChipClass(tag: GuiTag): string {
@@ -44,6 +50,8 @@ function tagChipClass(tag: GuiTag): string {
       return "text-amber-400";
     case "Event":
       return "text-sky-400";
+    case "GridLayout":
+      return "text-violet-400";
     default:
       return "text-muted-foreground";
   }
@@ -72,15 +80,23 @@ export function StructureTree() {
       setPickerParentId(parentNodeId);
       return;
     }
-    dispatch({ type: "addChildNode", parentNodeId, child: makeChildNode(tag) });
+    // Pass the parent's tag so a child added UNDER a GridLayout is created without
+    // its own default position/size (the grid owns its child's geometry).
+    const parentTag = findNode(open.root, parentNodeId)?.tag;
+    dispatch({
+      type: "addChildNode",
+      parentNodeId,
+      child: makeChildNode(tag, undefined, parentTag),
+    });
   };
 
   const handlePickComponent = (basename: string) => {
     if (pickerParentId == null) return;
+    const parentTag = findNode(open.root, pickerParentId)?.tag;
     dispatch({
       type: "addChildNode",
       parentNodeId: pickerParentId,
-      child: makeChildNode("Component", basename),
+      child: makeChildNode("Component", basename, parentTag),
     });
     setPickerParentId(null);
   };
@@ -143,7 +159,7 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
   // lights up for imported components or an id the user deliberately cleared — which
   // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
   const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
-  const addable = allowedChildTags(tag);
+  const addable = allowedChildTags(node);
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;

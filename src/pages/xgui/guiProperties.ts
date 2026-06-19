@@ -124,14 +124,17 @@ export function isBoundField(value: string): boolean {
  * panel should render the computed read-only id + the editable local id.
  *
  * `<Panel>`/`<Text>`/`<Component>` do. `<Event>` does NOT (task 471 — events are
- * addressed by `name`/`handler`, not a hierarchical id). The root `<View>` does NOT
- * either: it is the component itself, its `id` is auto-set on create, and the panel
- * shows it no editable properties at all (its `controller` is wired via the
- * Controller tab). Both still carry their `id` on the node — it's just not edited
- * here, and {@link computedId} still reads it to prefix descendants.
+ * addressed by `name`/`handler`, not a hierarchical id). `<GridLayout>` does NOT
+ * either: it is a non-visual control element with no `id` and cannot be referenced
+ * by Lua (the design's req 2) — keeping it id-less also keeps the missing-id
+ * TriangleAlert from firing on it in the tree. The root `<View>` does NOT either:
+ * it is the component itself, its `id` is auto-set on create, and the panel shows
+ * it no editable properties at all (its `controller` is wired via the Controller
+ * tab). Each still carries its `id` on the node where it has one — it's just not
+ * edited here, and {@link computedId} still reads it to prefix descendants.
  */
 export function nodeHasId(tag: GuiTag): boolean {
-  return tag !== "Event" && tag !== "View";
+  return tag !== "Event" && tag !== "View" && tag !== "GridLayout";
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +145,15 @@ export function nodeHasId(tag: GuiTag): boolean {
 export type FieldKind =
   /** A plain text/number input that also accepts a `{token}`. */
   | "text"
+  /**
+   * A bare model KEY that drives the Data Model scaffold (e.g. a GridLayout's
+   * `dataCollection`). Rendered like `text` but committed on BLUR/Enter, not per
+   * keystroke — every prefix of a bare key is itself a valid key, so a
+   * per-keystroke commit would spam the additive scaffold with a throwaway model
+   * entry for each character (the same reason `<Component>`'s `data` commits on
+   * blur).
+   */
+  | "modelKey"
   /** A `position`/`size` value rendered as four labeled inputs. */
   | "compound"
   /** A color value: palette swatch picker + custom code + `{token}`. */
@@ -171,8 +183,23 @@ export type PropertyField = {
  * node carries that is NOT in this schema is still editable as a freeform
  * override row (see {@link freeformAttrs}) — this list just gives the common
  * ones first-class, labeled, correctly-typed inputs.
+ *
+ * `parentTag` lets a child suppress fields its parent OWNS. A child of a
+ * `<GridLayout>` does not own its own `position`/`size` — the grid lays its
+ * repeated child out (the design's req 4) — so those two rows are filtered out
+ * for any node whose parent is a GridLayout. (The {@link makeChildNode} factory
+ * also omits the default geometry when inserting under a grid, so a grid child
+ * carries no `position`/`size` attr to begin with.)
  */
-export function fieldsForTag(tag: GuiTag): PropertyField[] {
+export function fieldsForTag(tag: GuiTag, parentTag?: GuiTag): PropertyField[] {
+  const fields = fieldsForTagInner(tag);
+  if (parentTag === "GridLayout") {
+    return fields.filter((f) => f.name !== "position" && f.name !== "size");
+  }
+  return fields;
+}
+
+function fieldsForTagInner(tag: GuiTag): PropertyField[] {
   switch (tag) {
     case "View":
       // The root View has NO editable properties in the panel. Its `id` is
@@ -218,6 +245,17 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
       return [
         { name: "name", label: "name", kind: "text" },
         { name: "handler", label: "handler", kind: "text" },
+      ];
+    case "GridLayout":
+      // A non-visual control element: no id, no position/size. `dataCollection` is
+      // a bare-key token (like `data` — no `{}`), but at the panel layer it's just
+      // a text field; rows/columns/gutter are plain text. The grid LAYS OUT its
+      // repeated child, so it exposes no geometry of its own (design req 5).
+      return [
+        { name: "dataCollection", label: "dataCollection", kind: "modelKey" },
+        { name: "rows", label: "rows", kind: "text" },
+        { name: "columns", label: "columns", kind: "text" },
+        { name: "gutter", label: "gutter", kind: "text" },
       ];
     default: {
       const _never: never = tag;

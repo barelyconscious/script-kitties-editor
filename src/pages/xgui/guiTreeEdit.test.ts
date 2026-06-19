@@ -84,37 +84,73 @@ describe("nextAutoId — running auto-id for newly-added elements", () => {
   });
 });
 
-describe("allowedChildTags / canAddChild — element rules", () => {
-  it("View accepts Panel, Text, Component, and Event", () => {
-    expect(allowedChildTags("View")).toEqual(["Panel", "Text", "Component", "Event"]);
+describe("allowedChildTags / canAddChild — element rules (children-aware)", () => {
+  it("an empty View accepts Panel, Text, Component, GridLayout, and Event", () => {
+    expect(allowedChildTags(node("v", "View"))).toEqual([
+      "Panel",
+      "Text",
+      "Component",
+      "GridLayout",
+      "Event",
+    ]);
   });
 
-  it("Panel and Text accept boxes but NOT Event (Event is View-only)", () => {
-    expect(allowedChildTags("Panel")).toEqual(["Panel", "Text", "Component"]);
-    expect(allowedChildTags("Text")).toEqual(["Panel", "Text", "Component"]);
-    expect(canAddChild("Panel", "Event")).toBe(false);
-    expect(canAddChild("Text", "Event")).toBe(false);
+  it("an empty Panel accepts boxes plus a GridLayout, but NOT Event (Event is View-only)", () => {
+    const panel = node("p", "Panel");
+    expect(allowedChildTags(panel)).toEqual(["Panel", "Text", "Component", "GridLayout"]);
+    expect(canAddChild(panel, "Event")).toBe(false);
+  });
+
+  it("Text accepts boxes but never a GridLayout (a grid lives only under Panel/View)", () => {
+    const text = node("t", "Text");
+    expect(allowedChildTags(text)).toEqual(["Panel", "Text", "Component"]);
+    expect(canAddChild(text, "GridLayout")).toBe(false);
+    expect(canAddChild(text, "Event")).toBe(false);
   });
 
   it("Component cannot have children", () => {
-    expect(allowedChildTags("Component")).toEqual([]);
-    expect(canAddChild("Component", "Panel")).toBe(false);
+    expect(allowedChildTags(node("c", "Component"))).toEqual([]);
+    expect(canAddChild(node("c", "Component"), "Panel")).toBe(false);
   });
 
   it("Event is a leaf — no children", () => {
-    expect(allowedChildTags("Event")).toEqual([]);
+    expect(allowedChildTags(node("e", "Event"))).toEqual([]);
   });
 
   it("View is never offered as a child of anything (top-level only)", () => {
-    for (const parent of ["View", "Panel", "Text", "Component", "Event"] as GuiTag[]) {
-      expect(allowedChildTags(parent)).not.toContain("View");
+    for (const tag of ["View", "Panel", "Text", "Component", "Event", "GridLayout"] as GuiTag[]) {
+      expect(allowedChildTags(node("x", tag))).not.toContain("View");
     }
   });
 
   it("Event is allowed only under View", () => {
-    expect(canAddChild("View", "Event")).toBe(true);
-    expect(canAddChild("Panel", "Event")).toBe(false);
-    expect(canAddChild("Component", "Event")).toBe(false);
+    expect(canAddChild(node("v", "View"), "Event")).toBe(true);
+    expect(canAddChild(node("p", "Panel"), "Event")).toBe(false);
+    expect(canAddChild(node("c", "Component"), "Event")).toBe(false);
+  });
+
+  it("a Panel/View that ALREADY contains a GridLayout no longer offers GridLayout", () => {
+    const panelWithGrid = node("p", "Panel", [node("g", "GridLayout")]);
+    expect(allowedChildTags(panelWithGrid)).toEqual(["Panel", "Text", "Component"]);
+    expect(canAddChild(panelWithGrid, "GridLayout")).toBe(false);
+
+    const viewWithGrid = node("v", "View", [node("g", "GridLayout")]);
+    expect(allowedChildTags(viewWithGrid)).toEqual(["Panel", "Text", "Component", "Event"]);
+    expect(canAddChild(viewWithGrid, "GridLayout")).toBe(false);
+  });
+
+  it("an EMPTY GridLayout offers its single child tags (Panel, Text, Component)", () => {
+    expect(allowedChildTags(node("g", "GridLayout"))).toEqual(["Panel", "Text", "Component"]);
+  });
+
+  it("a GridLayout that already has a child offers NOTHING (no +)", () => {
+    const gridWithChild = node("g", "GridLayout", [node("p", "Panel")]);
+    expect(allowedChildTags(gridWithChild)).toEqual([]);
+    expect(canAddChild(gridWithChild, "Panel")).toBe(false);
+  });
+
+  it("never offers a nested GridLayout under a GridLayout", () => {
+    expect(allowedChildTags(node("g", "GridLayout"))).not.toContain("GridLayout");
   });
 });
 
@@ -185,6 +221,39 @@ describe("makeChildNode", () => {
 
   it("does NOT auto-set the local id attribute (user chooses it in Properties)", () => {
     expect(makeChildNode("Panel").attrs.id).toBeUndefined();
+  });
+
+  it("GridLayout gets rows=1/columns=1, no id, and no geometry", () => {
+    const n = makeChildNode("GridLayout");
+    expect(n.tag).toBe("GridLayout");
+    expect(n.attrs).toEqual({ rows: "1", columns: "1" });
+    expect(n.attrs.id).toBeUndefined();
+    expect(n.attrs.position).toBeUndefined();
+    expect(n.attrs.size).toBeUndefined();
+    expect(n.children).toEqual([]);
+  });
+
+  it("omits default position/size for a child created UNDER a GridLayout", () => {
+    const panel = makeChildNode("Panel", undefined, "GridLayout");
+    expect(panel.attrs.position).toBeUndefined();
+    expect(panel.attrs.size).toBeUndefined();
+    expect(panel.attrs).toEqual({});
+
+    const text = makeChildNode("Text", undefined, "GridLayout");
+    expect(text.attrs.position).toBeUndefined();
+    expect(text.attrs.size).toBeUndefined();
+    expect(text.attrs).toEqual({ text: "Text" });
+
+    const comp = makeChildNode("Component", "bag_slot", "GridLayout");
+    expect(comp.attrs.position).toBeUndefined();
+    expect(comp.attrs.size).toBeUndefined();
+    expect(comp.attrs).toEqual({ src: "bag_slot" });
+  });
+
+  it("keeps default geometry for a child created under a non-grid parent", () => {
+    const panel = makeChildNode("Panel", undefined, "View");
+    expect(panel.attrs.position).toBe("0,0,0,0");
+    expect(panel.attrs.size).toBeDefined();
   });
 });
 

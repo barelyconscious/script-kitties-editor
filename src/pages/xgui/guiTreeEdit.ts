@@ -46,8 +46,11 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
 }
 
 /**
- * The tags a user can ADD as a child under a parent of the given tag, honoring the
- * phase-1 structural rules:
+ * The tags a user can ADD as a child under the given parent NODE, honoring the
+ * phase-1 structural rules. This is CHILDREN-AWARE — some rules depend not just on
+ * the parent's tag but on what it already contains (a GridLayout holds one child; a
+ * Panel/View holds at most one GridLayout), so it takes the parent node, not just
+ * its tag.
  *
  *  - `<View>` is the TOP-LEVEL element only — it is never added as a child, so it
  *    never appears in any parent's allow-list.
@@ -56,34 +59,51 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
  *  - `<Event>` may appear ONLY as an immediate child of `<View>`, so it is offered
  *    under `View` and nowhere else.
  *  - `<Panel>` / `<Text>` are ordinary visual containers and may be added under
- *    `View`, `Panel`, or `Text`.
+ *    `View`, `Panel`, or `Text`. `<View>`/`<Panel>` may ALSO hold a `<GridLayout>`,
+ *    but only when they don't ALREADY contain one (a grid fills its container, so
+ *    sibling grids are meaningless). `<Text>` may not hold a GridLayout (a grid
+ *    lives only under Panel/View).
+ *  - `<GridLayout>` repeats a SINGLE child of tag Panel/Text/Component — so it
+ *    offers those three ONLY while it is empty, and offers NOTHING once it has its
+ *    one child (no `+`).
  *
- * Returned in a stable, human-sensible order (containers first, then Event) so the
- * context menu reads the same every time.
+ * Returned in a stable, human-sensible order (containers first, then GridLayout,
+ * then Event) so the context menu reads the same every time.
  */
-export function allowedChildTags(parentTag: GuiTag): GuiTag[] {
-  switch (parentTag) {
+export function allowedChildTags(parent: GuiNode): GuiTag[] {
+  const hasGrid = parent.children.some((c) => c.tag === "GridLayout");
+  switch (parent.tag) {
     case "View":
-      // Visual children plus the View-only <Event> and nestable <Component>.
-      return ["Panel", "Text", "Component", "Event"];
+      // Visual children plus the View-only <Event> and nestable <Component>; a
+      // single <GridLayout> when one isn't already present.
+      return hasGrid
+        ? ["Panel", "Text", "Component", "Event"]
+        : ["Panel", "Text", "Component", "GridLayout", "Event"];
     case "Panel":
+      // Visual container: any box-producing child plus a single <GridLayout>.
+      return hasGrid
+        ? ["Panel", "Text", "Component"]
+        : ["Panel", "Text", "Component", "GridLayout"];
     case "Text":
-      // Visual containers: any box-producing child, but NOT a top-level <Event>.
+      // Visual container, but a grid lives only under Panel/View — no GridLayout.
       return ["Panel", "Text", "Component"];
+    case "GridLayout":
+      // A grid repeats ONE child; offer its legal child tags only while empty.
+      return parent.children.length === 0 ? ["Panel", "Text", "Component"] : [];
     case "Component":
     case "Event":
       // <Component> is childless by rule; <Event> is a leaf registration.
       return [];
     default: {
-      const _never: never = parentTag;
+      const _never: never = parent.tag;
       return _never;
     }
   }
 }
 
-/** Whether a child of `childTag` may be added under a parent of `parentTag`. */
-export function canAddChild(parentTag: GuiTag, childTag: GuiTag): boolean {
-  return allowedChildTags(parentTag).includes(childTag);
+/** Whether a child of `childTag` may be added under the given parent NODE. */
+export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
+  return allowedChildTags(parent).includes(childTag);
 }
 
 /**
@@ -97,27 +117,46 @@ export function canAddChild(parentTag: GuiTag, childTag: GuiTag): boolean {
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
  *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
+ *  - `<GridLayout>` gets `rows="1"`/`columns="1"` (the documented defaults);
+ *    `gutter` defaults to "0,0" at render time so it need not be written, and
+ *    `dataCollection` is left empty for the user to fill. A grid is a non-visual
+ *    control element — it gets NO `position`/`size` and NO auto-id.
+ *
+ * When the new node is being inserted UNDER a `<GridLayout>` (`parentTag` is
+ * "GridLayout"), its default `position`/`size` are OMITTED — the grid owns that
+ * child's geometry (design req 4), so a default would only serialize as an ignored
+ * attr. Pass the parent's tag so the factory can drop them at creation time.
  *
  * `id` is left UNSET here — the auto-id (`Panel1`, `Text2`, …) is assigned at
  * INSERTION time by the store's `addChildNode` action (which needs the whole tree
  * to pick a free running number), not minted in this per-node factory. The user
- * then renames it in the Properties panel (F9b). `<Event>` and the root `<View>`
- * get no auto-id (see {@link nextAutoId}).
+ * then renames it in the Properties panel (F9b). `<Event>`, `<GridLayout>`, and the
+ * root `<View>` get no auto-id (see {@link nextAutoId} / {@link nodeHasId}).
  */
-export function makeChildNode(tag: GuiTag, src?: string): GuiNode {
+export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): GuiNode {
   const node: GuiNode = { nodeId: mintNodeId(), tag, attrs: {}, children: [] };
+  // A child laid out by a grid does not own its own geometry — omit defaults.
+  const underGrid = parentTag === "GridLayout";
   switch (tag) {
     case "Panel":
-      node.attrs = { position: "0,0,0,0", size: "0,0,100,100" };
+      node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "0,0,100,100" };
       break;
     case "Text":
-      node.attrs = { position: "0,0,0,0", size: "0,0,100,32", text: "Text" };
+      node.attrs = underGrid
+        ? { text: "Text" }
+        : { position: "0,0,0,0", size: "0,0,100,32", text: "Text" };
       break;
     case "Component":
-      node.attrs = { src: src ?? "", position: "0,0,0,0", size: "0,0,100,100" };
+      node.attrs = underGrid
+        ? { src: src ?? "" }
+        : { src: src ?? "", position: "0,0,0,0", size: "0,0,100,100" };
       break;
     case "Event":
       node.attrs = { name: "", handler: "" };
+      break;
+    case "GridLayout":
+      // Non-visual control element: documented defaults, no geometry, no id.
+      node.attrs = { rows: "1", columns: "1" };
       break;
     case "View":
       // A <View> is never created as a child (it is top-level only); guarded by
@@ -147,8 +186,8 @@ export function makeChildNode(tag: GuiTag, src?: string): GuiNode {
  * explicit `Panel7` pushes the next number past 7.
  *
  * This computes the value only; the store's `addChildNode` decides WHICH tags get
- * one (id-bearing tags — not `<Event>` or the root `<View>`) and assigns it at
- * insertion time, when the whole tree is in hand.
+ * one (id-bearing tags — not `<Event>`, `<GridLayout>`, or the root `<View>`) and
+ * assigns it at insertion time, when the whole tree is in hand.
  */
 export function nextAutoId(root: GuiNode, tag: GuiTag): string {
   let max = 0;

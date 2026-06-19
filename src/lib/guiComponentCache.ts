@@ -10,8 +10,7 @@
  *
  *   - the preview does NOT refetch a child on every keystroke (editing the Data
  *     Model re-renders the parent, but the child trees are stable);
- *   - a child referenced from many places (or many `forEach` instances) is fetched
- *     once and shared.
+ *   - a child referenced from many places is fetched once and shared.
  *
  * Each cache entry settles to one of three states, mirroring `get_component`'s
  * three outcomes — surfaced to the renderer as a small tagged result so the mount

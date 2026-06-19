@@ -9,10 +9,6 @@
  *   F3  binding/token resolution  → resolve attr values before they reach the
  *                                   box (a value transform in front of the
  *                                   render; the render shape is unchanged).
- *   F4  forEach                   → expand a template node into N instances
- *                                   sharing `data-node-id` + a `data-instance-key`
- *                                   (selection already collapses to the template
- *                                   because it only reads `data-node-id`).
  *   F5  layer z-order             → a flatten pass over the same tree assigning
  *                                   EACH box a numeric `z-index` = its rank among
  *                                   its siblings (the intuitive NESTED model:
@@ -44,8 +40,11 @@ import { type CSSProperties, useRef } from "react";
 import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
+  emptyItemScope,
+  flatRootScope,
   type Palette,
   type ResolvedAttrs,
+  type ResolveScope,
   resolveAttrs,
 } from "../../lib/guiBinding";
 import { type ComponentEntry, useComponent } from "../../lib/guiComponentCache";
@@ -54,7 +53,6 @@ import {
   type PlaceholderReason,
   resolveChildRoot,
 } from "../../lib/guiComponentMount";
-import { isForEachTemplate, stampForEach } from "../../lib/guiForEach";
 import {
   computeBoxGeometry,
   dragStartDecision,
@@ -64,14 +62,12 @@ import {
   textureToLoad,
   type ViewTransform,
 } from "../../lib/guiGeometry";
+import { cellGeometry, parseGridDimension, parseGutter } from "../../lib/guiGridGeometry";
+import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
-import { ScopeStack } from "../../lib/guiScope";
 import { isNodeSelected, NODE_ID_ATTR, nearestNodeId } from "../../lib/guiSelection";
 import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
-
-/** The DOM attribute that disambiguates `forEach` instances sharing a node id. */
-export const INSTANCE_KEY_ATTR = "data-instance-key";
 
 /** The DOM attribute marking a `<Component>` mount's missing/recursive placeholder. */
 export const PLACEHOLDER_ATTR = "data-gui-placeholder";
@@ -111,16 +107,16 @@ type GuiBoxProps = {
   node: GuiNode;
   selectedNodeId: string | null;
   /**
-   * The scope stack this box renders in. Bare tokens resolve against its current
-   * item, `$.` against its root. The root render passes a root-only stack; each
-   * `forEach` instance is rendered with the item pushed (see {@link renderChildren}).
+   * The flat scope this box renders in. Bare tokens resolve against the single
+   * model object (see {@link flatRootScope}). The stage passes the root model's
+   * scope; a mounted `<Component>` builds a fresh scope from its overrides.
    */
-  scope: ScopeStack;
+  scope: ResolveScope;
   palette: Palette;
   /**
    * This box's render-reproducible identity path, built from its parent's key + its
-   * own `nodeId`(+`instanceKey`). Used to look the box's sibling-rank `z-index` up
-   * in {@link zOrder} and to derive each child's key.
+   * own `nodeId`. Used to look the box's sibling-rank `z-index` up in
+   * {@link zOrder} and to derive each child's key.
    */
   boxKey: BoxKey;
   /**
@@ -130,13 +126,6 @@ type GuiBoxProps = {
    */
   zOrder: ZOrderMap;
   /**
-   * The `forEach` instance key (`data-instance-key`), present only when this box
-   * is one stamped instance of a template. Omitted for ordinary (once-rendered)
-   * boxes. All instances of a template share `node.nodeId`, so selection still
-   * collapses to the template; this only disambiguates instances in the DOM.
-   */
-  instanceKey?: string;
-  /**
    * The set of `<Component>` `src` basenames on the mount path TO this box (F6b
    * cycle guard). Empty at the stage root; a `<Component>` mount adds its own
    * basename before descending into the child, so a re-encounter of the same src
@@ -144,62 +133,74 @@ type GuiBoxProps = {
    * descent passes the set through unchanged.
    */
   ancestry: ReadonlySet<string>;
+  /**
+   * When this box is a GRID CELL, the geometry the GridLayout assigns it (overriding
+   * the template's own `position`/`size`, which are ignored — design req 4/5). The
+   * raw `position`/`size` comma strings from {@link cellGeometry}. Omitted for an
+   * ordinary box, which reads its geometry from its own attrs.
+   */
+  geometryOverride?: { position: string; size: string };
+  /**
+   * When this box is a `<Component>` GRID CELL, the grid item to seat as the mounted
+   * child's FULL fresh root (replacing `data=`/override resolution — locked decision).
+   * `undefined` means "not a grid Component cell"; an explicit `null`/value is the
+   * cell's item (a `null` item → empty child scope, tokens → ""). Only consulted for
+   * a `<Component>` box.
+   */
+  componentRootOverride?: { item: unknown };
+  /**
+   * GRID CELL only: when true, the box does NOT stamp its `data-node-id`, so a click
+   * or drag on it falls through to the nearest ENCLOSING real box (the GridLayout's
+   * parent) — cells are never individually selectable (locked decision Q4). The grid
+   * wrapper is also `pointer-events-none`; suppressing the id is belt-and-suspenders.
+   */
+  suppressNodeId?: boolean;
 };
 
 /**
- * Expand a node's visual children into the boxes to render, applying `forEach`:
- * a template child is stamped into one box per item (each in its own item scope),
- * a plain child renders once in the inherited scope. Returns the `<GuiBox>`
- * elements so both the stage root and every box use the same expansion rule.
- *
- * `forEach` and the resulting per-instance scope live HERE (in the React shell),
- * driven by the pure {@link stampForEach}/{@link ScopeStack}; `GuiBox` itself
- * stays scope-agnostic beyond reading `scope.asScope()` for attribute resolution.
+ * Render a node's visual children into boxes — each child renders exactly once in
+ * the inherited flat scope. Returns the `<GuiBox>` elements so both the stage root
+ * and every box use the same rule. `GuiBox` is scope-agnostic beyond reading the
+ * passed {@link ResolveScope} for attribute resolution.
  */
 function renderChildren(
   children: GuiNode[],
   selectedNodeId: string | null,
-  scope: ScopeStack,
+  scope: ResolveScope,
   palette: Palette,
   parentKey: BoxKey,
   zOrder: ZOrderMap,
   ancestry: ReadonlySet<string>,
 ) {
   return children
-    .filter((child) => isVisualTag(child.tag))
-    .flatMap((child) => {
-      if (!isForEachTemplate(child)) {
-        // Plain child: render once in the inherited scope.
-        return [
-          <GuiBox
-            key={child.nodeId}
-            node={child}
-            selectedNodeId={selectedNodeId}
-            scope={scope}
-            palette={palette}
-            boxKey={makeBoxKey(parentKey, child.nodeId, undefined)}
-            zOrder={zOrder}
-            ancestry={ancestry}
-          />,
-        ];
-      }
-      // Template child: stamp one instance per item (zero when the collection is
-      // empty/unresolved — the template still exists in the editor tree, just
-      // renders nothing here). Each instance renders with its item pushed.
-      return stampForEach(child, scope).map((instance) => (
-        <GuiBox
-          key={`${child.nodeId}#${instance.instanceKey}`}
-          node={instance.node}
-          selectedNodeId={selectedNodeId}
-          scope={instance.scope}
+    .filter((child) => child.tag === "GridLayout" || isVisualTag(child.tag))
+    .map((child) =>
+      child.tag === "GridLayout" ? (
+        // A GridLayout is NON-VISUAL: it renders no box of its own and expands its
+        // single template child into a fixed rows×columns grid of cells filling the
+        // parent's content box (see {@link GridLayoutExpansion}).
+        <GridLayoutExpansion
+          key={child.nodeId}
+          node={child}
+          scope={scope}
           palette={palette}
-          boxKey={makeBoxKey(parentKey, child.nodeId, instance.instanceKey)}
+          parentKey={parentKey}
           zOrder={zOrder}
-          instanceKey={instance.instanceKey}
           ancestry={ancestry}
         />
-      ));
-    });
+      ) : (
+        <GuiBox
+          key={child.nodeId}
+          node={child}
+          selectedNodeId={selectedNodeId}
+          scope={scope}
+          palette={palette}
+          boxKey={makeBoxKey(parentKey, child.nodeId)}
+          zOrder={zOrder}
+          ancestry={ancestry}
+        />
+      ),
+    );
 }
 
 /**
@@ -219,14 +220,15 @@ function GuiBox({
   palette,
   boxKey,
   zOrder,
-  instanceKey,
   ancestry,
+  geometryOverride,
+  componentRootOverride,
+  suppressNodeId,
 }: GuiBoxProps) {
-  // Resolve the whole attribute bag once against this box's scope (the item scope
-  // for a forEach instance, the inherited scope otherwise): geometry, colors, and
-  // text all read off the resolved values, and `unresolved` drives the
+  // Resolve the whole attribute bag once against this box's flat scope: geometry,
+  // colors, and text all read off the resolved values, and `unresolved` drives the
   // waiting-binding styling. The pure resolver only needs a `ResolveScope`.
-  const resolved = resolveAttrs(node.attrs, scope.asScope(), palette);
+  const resolved = resolveAttrs(node.attrs, scope, palette);
   const { attrs, unresolved } = resolved;
 
   // F: texture-as-background. Load the box's RESOLVED `texture` through the shared
@@ -242,7 +244,11 @@ function GuiBox({
   // `visible="false"` (literal or bound) hides the box; any other value shows it.
   if (attrs.visible?.trim().toLowerCase() === "false") return null;
 
-  const geometry = computeBoxGeometry(attrs.position, attrs.size);
+  // A grid cell's geometry is owned by the GridLayout (the template's own
+  // position/size are ignored — design req 4/5); an ordinary box reads its own attrs.
+  const geometry = geometryOverride
+    ? computeBoxGeometry(geometryOverride.position, geometryOverride.size)
+    : computeBoxGeometry(attrs.position, attrs.size);
   const selected = isNodeSelected(node.nodeId, selectedNodeId);
 
   const backgroundColor = colorCodeToCss(attrs.backgroundColor);
@@ -300,8 +306,7 @@ function GuiBox({
 
   return (
     <div
-      {...{ [NODE_ID_ATTR]: node.nodeId }}
-      {...(instanceKey !== undefined ? { [INSTANCE_KEY_ATTR]: instanceKey } : {})}
+      {...(suppressNodeId ? {} : { [NODE_ID_ATTR]: node.nodeId })}
       data-gui-tag={node.tag}
       data-gui-waiting={waiting ? "" : undefined}
       className={cn(
@@ -320,7 +325,15 @@ function GuiBox({
         // F6b: a <Component> mounts its src child (or a placeholder) IN PLACE of
         // ordinary children. The child is mounted in a FRESH root scope built from
         // this element's pre-resolved overrides (F6a) — never the parent's scope.
-        <ComponentMount node={node} parentScope={scope} palette={palette} ancestry={ancestry} />
+        // As a GRID CELL, the grid item FULLY REPLACES that root (data=/overrides are
+        // ignored — locked decision): `componentRootOverride` carries the item.
+        <ComponentMount
+          node={node}
+          parentScope={scope}
+          palette={palette}
+          ancestry={ancestry}
+          rootOverride={componentRootOverride}
+        />
       ) : (
         renderChildren(node.children, selectedNodeId, scope, palette, boxKey, zOrder, ancestry)
       )}
@@ -357,9 +370,16 @@ function ComponentPlaceholder({ reason, src }: { reason: PlaceholderReason; src:
 
 type ComponentMountProps = {
   node: GuiNode;
-  parentScope: ScopeStack;
+  parentScope: ResolveScope;
   palette: Palette;
   ancestry: ReadonlySet<string>;
+  /**
+   * GRID CELL only: the grid item to seat as the mounted child's FULL fresh root,
+   * bypassing `data=`/override resolution (locked decision). `undefined` → ordinary
+   * mount (F6a child-root from data=/overrides). A present `{ item }` (even a `null`
+   * item) makes the child resolve against `flatRootScope(item)`.
+   */
+  rootOverride?: { item: unknown };
 };
 
 /**
@@ -376,9 +396,9 @@ type ComponentMountProps = {
  *   2. {@link useComponent} fetches+parses the child. While loading, render nothing
  *      (no placeholder flash). On `missing` (absent / broken / unparseable) render
  *      the shared placeholder. On `ok`, mount the child subtree.
- *   3. The child mounts in a FRESH ROOT scope built from the parent-pre-resolved
- *      overrides (F6a): `ScopeStack.root(resolveOverrides(...))`. The parent scope
- *      and its `$` root do NOT cross the boundary — the child sees ONLY its props.
+ *   3. The child mounts in a FRESH scope built from the parent-pre-resolved
+ *      overrides (F6a): `flatRootScope(resolveChildRoot(...))`. The parent scope
+ *      does NOT cross the boundary — the child sees ONLY its props.
  *
  * The mounted child gets its OWN z-order map (its boxes' `layer`s order them among
  * THEIR siblings within this component box's stacking context). This composes
@@ -386,7 +406,13 @@ type ComponentMountProps = {
  * sibling-rank z-index in the parent doc, so the whole mounted subtree is lifted
  * with it as a group; cross-file z-order across the mount boundary is out of scope.
  */
-function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMountProps) {
+function ComponentMount({
+  node,
+  parentScope,
+  palette,
+  ancestry,
+  rootOverride,
+}: ComponentMountProps) {
   // Pure decision first: blank src / cycle are settled with no fetch.
   const decision = mountDecision(node, ancestry);
   // Hooks must run unconditionally, so always call the cache hook — but pass `null`
@@ -408,11 +434,17 @@ function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMount
     return <ComponentPlaceholder reason="missing" src={rawSrc} />;
   }
 
-  // ok: mount the child subtree in a FRESH ROOT scope built from the `data=` base
-  // object (if any) with the explicit overrides layered on top — all pre-resolved
-  // in the parent scope.
-  const childRoot = resolveChildRoot(node, parentScope);
-  const childScope = ScopeStack.root(childRoot);
+  // ok: mount the child subtree in a FRESH ROOT scope. Normally that root is built
+  // from the `data=` base object (if any) with explicit overrides layered on top, all
+  // pre-resolved in the parent scope. As a GRID CELL, the grid item REPLACES that root
+  // wholesale (data=/overrides ignored — locked decision).
+  const childRoot = rootOverride ? rootOverride.item : resolveChildRoot(node, parentScope);
+  // A null grid item (an empty cell) uses emptyItemScope() so the mounted child's
+  // {token}s resolve to "" with no waiting affordance — matching the non-Component
+  // cell path (caveat 5). flatRootScope(null) would MISS every token and paint the
+  // amber waiting state. Everything else resolves against the item as a flat root.
+  const childScope =
+    rootOverride && rootOverride.item === null ? emptyItemScope() : flatRootScope(childRoot);
   // The child mounts as its own little stage: its boxes are positioned/ordered
   // within THIS <Component> box. A nested z-order map ranks the child's own boxes
   // among their siblings, contained by this mount wrapper's stacking context.
@@ -439,6 +471,122 @@ function ComponentMount({ node, parentScope, palette, ancestry }: ComponentMount
   );
 }
 
+/** The attribute naming a GridLayout's iterable collection (a bare ROOT model key). */
+const DATA_COLLECTION_ATTR = "dataCollection";
+
+type GridLayoutExpansionProps = {
+  /** The `<GridLayout>` node — its single child is the cell TEMPLATE. */
+  node: GuiNode;
+  /**
+   * The flat scope the grid resolves `dataCollection` against. Grids cannot nest and
+   * nothing else pushes scope, so this is effectively the ROOT model scope.
+   */
+  scope: ResolveScope;
+  palette: Palette;
+  /** The key of the GridLayout's enclosing parent box (cells live in its content box). */
+  parentKey: BoxKey;
+  zOrder: ZOrderMap;
+  ancestry: ReadonlySet<string>;
+};
+
+/**
+ * Expand a `<GridLayout>` into its fixed rows×columns grid of cells (the renderer
+ * half of the GridLayout feature). The GridLayout itself is NON-VISUAL — it draws no
+ * box and is not selectable in the preview; it fills its parent and lays its single
+ * template child out into a grid (design req 2/5):
+ *
+ *   - `rows`/`columns` parse via {@link parseGridDimension} (default 1; an explicit
+ *     `0` warns and renders nothing — no slots);
+ *   - `dataCollection` resolves as a BARE ROOT KEY against the flat scope;
+ *   - {@link stampGrid} produces EXACTLY rows×columns descriptors (excess collection
+ *     entries dropped; missing → `null` item);
+ *   - each cell renders the template node with geometry from {@link cellGeometry}
+ *     (the template's OWN position/size are ignored), against a flat scope built from
+ *     the cell's item (a `null` item → empty scope, so every `{token}` resolves to "");
+ *   - cells carry NO `data-node-id` and live under a `pointer-events-none` wrapper, so
+ *     a click/drag falls through to the GridLayout's parent box (cells are never
+ *     individually selectable — locked decision Q4);
+ *   - a `<Component>` template uses the item as its FULL data root (data=/overrides
+ *     ignored — locked decision Q3).
+ *
+ * The wrapper is `inset-0` (fills the parent content box) so the cells' relative
+ * geometry resolves against the parent box, exactly as if the grid occupied it.
+ */
+function GridLayoutExpansion({
+  node,
+  scope,
+  palette,
+  parentKey,
+  zOrder,
+  ancestry,
+}: GridLayoutExpansionProps) {
+  // The template is the GridLayout's single child (parse guarantees ≤ 1, of a
+  // Panel/Text/Component tag). A grid with no child yet (mid-authoring) renders nothing.
+  const template = node.children[0];
+
+  const rowsDim = parseGridDimension(node.attrs.rows);
+  const colsDim = parseGridDimension(node.attrs.columns);
+
+  // An explicit `0` rows/columns: warn once and render no slots (locked decision).
+  if (rowsDim.kind === "empty" || colsDim.kind === "empty") {
+    console.warn(
+      `<GridLayout> has ${rowsDim.kind === "empty" ? "rows" : "columns"}="0" — rendering no cells.`,
+    );
+    return null;
+  }
+  if (template === undefined) return null;
+
+  const rows = rowsDim.value;
+  const columns = colsDim.value;
+  const gutter = parseGutter(node.attrs.gutter);
+
+  // `dataCollection` is a bare ROOT key (no `{}`) — look it up directly in the flat
+  // scope (mirrors the `data=` resolution for nested components). A miss / non-array
+  // value yields all-`null` cells (the grid still draws its template chrome).
+  const collectionKey = (node.attrs[DATA_COLLECTION_ATTR] ?? "").trim();
+  const collection = collectionKey === "" ? undefined : scope.lookup(collectionKey);
+
+  const stamps = stampGrid(collection, rows, columns);
+  const isComponentTemplate = template.tag === "Component";
+
+  return (
+    // The grid fills the parent's content box (inset-0) so cell relative geometry
+    // resolves against the parent. `pointer-events-none` makes every cell click/drag
+    // fall through to the parent box — cells are not individually selectable.
+    <div className="pointer-events-none absolute inset-0">
+      {stamps.map((stamp) => {
+        const geometry = cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
+        // Each cell binds the item as a FRESH flat scope. A `null` item (an empty
+        // cell) uses emptyItemScope() so every {token} resolves to "" with
+        // resolved: true — the template chrome renders literally with NO waiting
+        // affordance (caveat 5). flatRootScope(null) would instead MISS every token
+        // and paint the amber waiting state, which an empty cell must not show.
+        const cellScope = stamp.item === null ? emptyItemScope() : flatRootScope(stamp.item);
+        return (
+          <GuiBox
+            // Distinct per-cell React key (the template node id repeats across cells).
+            key={`${template.nodeId}#${stamp.index}`}
+            node={template}
+            // Cells are never selectable: pass null so the template node never reads as
+            // selected, mirroring the mounted-<Component> child handling.
+            selectedNodeId={null}
+            scope={cellScope}
+            palette={palette}
+            // A synthetic per-cell key keeps descent stable; cells aren't in the
+            // zOrder map (the grid subtree isn't flattened), so they paint in DOM order.
+            boxKey={makeBoxKey(parentKey, `${template.nodeId}#${stamp.index}`)}
+            zOrder={zOrder}
+            ancestry={ancestry}
+            geometryOverride={{ position: geometry.position, size: geometry.size }}
+            componentRootOverride={isComponentTemplate ? { item: stamp.item } : undefined}
+            suppressNodeId
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export type GuiPreviewProps = {
   /** The parsed component tree to render. Its root is expected to be `<View>`. */
   root: GuiNode;
@@ -451,8 +599,8 @@ export type GuiPreviewProps = {
   onSelect: (nodeId: string | null) => void;
   /**
    * The data model `{token}` bindings resolve against (the Data Model panel's
-   * parsed JSON). F3 resolves against this FLAT ROOT only; F4 extends to scopes.
-   * Defaults to an empty model — then every `{token}` renders styled-but-literal.
+   * parsed JSON). Resolution is against this single flat model. Defaults to an
+   * empty model — then every `{token}` renders styled-but-literal.
    */
   model?: unknown;
   /**
@@ -510,11 +658,10 @@ export type GuiPreviewProps = {
  * DOM `closest('[data-node-id]')` — the one piece that needs a browser — and
  * the resulting node id is handed to `onSelect`.
  *
- * F4: a root-only {@link ScopeStack} is built from `model` once and threaded
- * down to every box. Descending into a `forEach` subtree pushes the current item
- * onto a derived stack (see {@link renderChildren}/{@link stampForEach}), so bare
- * tokens resolve item-relative and `$.` reaches the root. The box code only ever
- * calls `scope.asScope().lookup`, so the F3 resolver is reused unchanged.
+ * A flat {@link ResolveScope} is built from `model` once (see
+ * {@link flatRootScope}) and threaded down to every box; each box resolves its
+ * bare tokens against that single model. A mounted `<Component>` builds its own
+ * fresh scope from its overrides at the boundary.
  */
 export function GuiPreview({
   root,
@@ -528,17 +675,15 @@ export function GuiPreview({
   isPanGesture,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
-  // A root-only scope stack for the whole tree (F4). Descending into a `forEach`
-  // subtree pushes the current item (see `renderChildren`/`stampForEach`); with
-  // no `forEach` entered, the current item IS the root, so this is a strict
-  // superset of F3's flat-root scope.
-  const scope = ScopeStack.root(model);
+  // A single flat scope for the whole tree: every box resolves its bare tokens
+  // against this one model object.
+  const scope = flatRootScope(model);
   // Nested z-order: compute the `boxKey → z-index` map (each box ranked among its
   // siblings by resolved `layer`, ties → document order) up front, then hand it
-  // down so each box can apply its rank. The flatten mirrors this render's `forEach`
-  // expansion + scope, so the map's keys line up with the boxes rendered below.
-  // Each box's z-index orders it within its parent's stacking context, so a
-  // container's layer lifts its whole subtree as a group.
+  // down so each box can apply its rank. The flatten mirrors this render's tree, so
+  // the map's keys line up with the boxes rendered below. Each box's z-index orders
+  // it within its parent's stacking context, so a container's layer lifts its whole
+  // subtree as a group.
   const zOrder = computeZOrder(root, model);
   // The DOM half of the back-reference: walk outward from the click target to
   // the nearest box carrying a node id. `closest` matches the target itself
@@ -595,9 +740,7 @@ export function GuiPreview({
     // background (id === null) does NOT arm (the trailing `click` clears selection);
     // a press on a box arms the drag, selecting it first unless it is already selected
     // (an up-front select so the box reads as selected for the whole gesture; a plain
-    // click then re-selects as a no-op, a drag moves the now-selected box). A forEach
-    // instance shares the template nodeId, so this resolves to the template — dragging
-    // an instance moves the template, the documented behavior (instances are data-driven).
+    // click then re-selects as a no-op, a drag moves the now-selected box).
     const decision = dragStartDecision(id, selectedNodeId);
     if (!decision.arm || id === null) return;
     if (decision.select) onSelect(id);

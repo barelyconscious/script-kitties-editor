@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { flatRootScope } from "./guiBinding";
 import { parseGui } from "./guiNode";
-import { ScopeStack } from "./guiScope";
 import {
   assignZOrder,
   computeZOrder,
@@ -28,21 +28,16 @@ function parse(xml: string) {
 
 describe("makeBoxKey", () => {
   it("starts a path from the stage with no parent prefix", () => {
-    expect(makeBoxKey("", "n1", undefined)).toBe("n1");
+    expect(makeBoxKey("", "n1")).toBe("n1");
   });
 
   it("appends a nodeId segment under a parent", () => {
-    expect(makeBoxKey("n1", "n2", undefined)).toBe("n1/n2");
-  });
-
-  it("stamps a forEach instance key onto its segment", () => {
-    expect(makeBoxKey("n1", "n2", "3")).toBe("n1/n2#3");
-    expect(makeBoxKey("", "n2", "0")).toBe("n2#0");
+    expect(makeBoxKey("n1", "n2")).toBe("n1/n2");
   });
 });
 
 describe("resolveLayer", () => {
-  const root = ScopeStack.root({ hi: 10, notNumber: "abc" });
+  const root = flatRootScope({ hi: 10, notNumber: "abc" });
 
   it("defaults to 0 when there is no layer attribute", () => {
     const node = { nodeId: "n", tag: "Panel" as const, attrs: {}, children: [] };
@@ -54,7 +49,7 @@ describe("resolveLayer", () => {
     expect(resolveLayer(node, root)).toBe(7);
   });
 
-  it("resolves a bound {token} layer against the scope (layer is bindable)", () => {
+  it("resolves a bound {token} layer against the model (layer is bindable)", () => {
     const node = { nodeId: "n", tag: "Panel" as const, attrs: { layer: "{hi}" }, children: [] };
     expect(resolveLayer(node, root)).toBe(10);
   });
@@ -78,12 +73,6 @@ describe("resolveLayer", () => {
     };
     expect(resolveLayer(node, root)).toBe(DEFAULT_LAYER);
   });
-
-  it("resolves a layer bound to the current forEach item, not the root", () => {
-    const itemScope = ScopeStack.root({ z: 1 }).push({ z: 99 });
-    const node = { nodeId: "n", tag: "Panel" as const, attrs: { layer: "{z}" }, children: [] };
-    expect(resolveLayer(node, itemScope)).toBe(99);
-  });
 });
 
 describe("flattenBoxes — document order + sibling-group structure", () => {
@@ -99,13 +88,13 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
       </View>
     `);
     const boxes = flattenBoxes(root);
-    const aKey = makeBoxKey("", nodeId("a"), undefined);
+    const aKey = makeBoxKey("", nodeId("a"));
     // View is the stage (not a box); Event is non-visual. a, a1, a2, b in order.
     expect(boxes.map((box) => box.boxKey)).toEqual([
       aKey,
-      makeBoxKey(aKey, nodeId("a1"), undefined),
-      makeBoxKey(aKey, nodeId("a2"), undefined),
-      makeBoxKey("", nodeId("b"), undefined),
+      makeBoxKey(aKey, nodeId("a1")),
+      makeBoxKey(aKey, nodeId("a2")),
+      makeBoxKey("", nodeId("b")),
     ]);
   });
 
@@ -120,14 +109,14 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
       </View>
     `);
     const boxes = flattenBoxes(root);
-    const aKey = makeBoxKey("", nodeId("a"), undefined);
+    const aKey = makeBoxKey("", nodeId("a"));
     const byKey = new Map(boxes.map((box) => [box.boxKey, box]));
     // a and b are stage children → parentKey "".
     expect(byKey.get(aKey)?.parentKey).toBe("");
-    expect(byKey.get(makeBoxKey("", nodeId("b"), undefined))?.parentKey).toBe("");
+    expect(byKey.get(makeBoxKey("", nodeId("b")))?.parentKey).toBe("");
     // a1 and a2 are children of a → parentKey === a's key.
-    expect(byKey.get(makeBoxKey(aKey, nodeId("a1"), undefined))?.parentKey).toBe(aKey);
-    expect(byKey.get(makeBoxKey(aKey, nodeId("a2"), undefined))?.parentKey).toBe(aKey);
+    expect(byKey.get(makeBoxKey(aKey, nodeId("a1")))?.parentKey).toBe(aKey);
+    expect(byKey.get(makeBoxKey(aKey, nodeId("a2")))?.parentKey).toBe(aKey);
   });
 
   it("numbers boxes by their position AMONG SIBLINGS (each group restarts at 0)", () => {
@@ -141,14 +130,14 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
       </View>
     `);
     const boxes = flattenBoxes(root);
-    const aKey = makeBoxKey("", nodeId("a"), undefined);
+    const aKey = makeBoxKey("", nodeId("a"));
     const byKey = new Map(boxes.map((box) => [box.boxKey, box]));
     // Stage children: a (0), b (1).
     expect(byKey.get(aKey)?.siblingIndex).toBe(0);
-    expect(byKey.get(makeBoxKey("", nodeId("b"), undefined))?.siblingIndex).toBe(1);
+    expect(byKey.get(makeBoxKey("", nodeId("b")))?.siblingIndex).toBe(1);
     // a's children restart at 0: a1 (0), a2 (1).
-    expect(byKey.get(makeBoxKey(aKey, nodeId("a1"), undefined))?.siblingIndex).toBe(0);
-    expect(byKey.get(makeBoxKey(aKey, nodeId("a2"), undefined))?.siblingIndex).toBe(1);
+    expect(byKey.get(makeBoxKey(aKey, nodeId("a1")))?.siblingIndex).toBe(0);
+    expect(byKey.get(makeBoxKey(aKey, nodeId("a2")))?.siblingIndex).toBe(1);
   });
 
   it("captures the resolved layer per box (default 0)", () => {
@@ -160,32 +149,6 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
     `);
     const boxes = flattenBoxes(root);
     expect(boxes.map((box) => box.resolvedLayer)).toEqual([5, 0]);
-  });
-
-  it("expands a forEach template into one box per item, in order, item-scoped", () => {
-    const { root, nodeId } = parse(`
-      <View>
-        <Panel id="row" forEach="{rows}" layer="{z}"/>
-      </View>
-    `);
-    const boxes = flattenBoxes(root, { rows: [{ z: 3 }, { z: 1 }, { z: 2 }] });
-    expect(boxes).toHaveLength(3);
-    // Each instance keyed positionally, layer resolved from its own item, and each
-    // an adjacent sibling slot (siblingIndex 0,1,2) sharing parentKey "".
-    expect(boxes.map((box) => box.boxKey)).toEqual([
-      makeBoxKey("", nodeId("row"), "0"),
-      makeBoxKey("", nodeId("row"), "1"),
-      makeBoxKey("", nodeId("row"), "2"),
-    ]);
-    expect(boxes.map((box) => box.resolvedLayer)).toEqual([3, 1, 2]);
-    expect(boxes.map((box) => box.siblingIndex)).toEqual([0, 1, 2]);
-    expect(boxes.every((box) => box.parentKey === "")).toBe(true);
-  });
-
-  it("renders zero boxes for an empty/unresolved forEach collection", () => {
-    const { root } = parse(`<View><Panel id="row" forEach="{rows}"/></View>`);
-    expect(flattenBoxes(root, { rows: [] })).toHaveLength(0);
-    expect(flattenBoxes(root, {})).toHaveLength(0);
   });
 });
 
@@ -239,8 +202,8 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
       </View>
     `);
     const map = computeZOrder(root);
-    const lowKey = makeBoxKey("", nodeId("low"), undefined);
-    const highKey = makeBoxKey("", nodeId("high"), undefined);
+    const lowKey = makeBoxKey("", nodeId("low"));
+    const highKey = makeBoxKey("", nodeId("high"));
     // Higher layer → higher rank → paints on top, even though it overlaps `low`.
     expect(map.get(highKey) as number).toBeGreaterThan(map.get(lowKey) as number);
   });
@@ -253,8 +216,8 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
       </View>
     `);
     const map = computeZOrder(root);
-    const firstKey = makeBoxKey("", nodeId("first"), undefined);
-    const secondKey = makeBoxKey("", nodeId("second"), undefined);
+    const firstKey = makeBoxKey("", nodeId("first"));
+    const secondKey = makeBoxKey("", nodeId("second"));
     // Equal (default) layer → later in document order paints above.
     expect(map.get(secondKey) as number).toBeGreaterThan(map.get(firstKey) as number);
   });
@@ -276,10 +239,10 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
     `);
     const map = computeZOrder(root);
 
-    const lowKey = makeBoxKey("", nodeId("groupLow"), undefined);
-    const highKey = makeBoxKey("", nodeId("groupHigh"), undefined);
-    const lowChildKey = makeBoxKey(lowKey, nodeId("lowChild"), undefined);
-    const highChildKey = makeBoxKey(highKey, nodeId("highChild"), undefined);
+    const lowKey = makeBoxKey("", nodeId("groupLow"));
+    const highKey = makeBoxKey("", nodeId("groupHigh"));
+    const lowChildKey = makeBoxKey(lowKey, nodeId("lowChild"));
+    const highChildKey = makeBoxKey(highKey, nodeId("highChild"));
 
     // Container-level: groupHigh ranks above groupLow among the stage's children.
     expect(map.get(highKey) as number).toBeGreaterThan(map.get(lowKey) as number);
@@ -316,11 +279,11 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
     `);
     const map = computeZOrder(root);
 
-    const branchAKey = makeBoxKey("", nodeId("branchA"), undefined);
-    const a1Key = makeBoxKey(branchAKey, nodeId("a1"), undefined);
-    const a2Key = makeBoxKey(a1Key, nodeId("a2"), undefined);
-    const deepHighKey = makeBoxKey(a2Key, nodeId("deepHigh"), undefined);
-    const shallowKey = makeBoxKey("", nodeId("shallow"), undefined);
+    const branchAKey = makeBoxKey("", nodeId("branchA"));
+    const a1Key = makeBoxKey(branchAKey, nodeId("a1"));
+    const a2Key = makeBoxKey(a1Key, nodeId("a2"));
+    const deepHighKey = makeBoxKey(a2Key, nodeId("deepHigh"));
+    const shallowKey = makeBoxKey("", nodeId("shallow"));
 
     // deepHigh is the only child of a2 → rank 0 within its group; its high layer is
     // moot with no siblings. Its subtree is contained within branchA's context.
@@ -339,8 +302,8 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
       </View>
     `);
     const map = computeZOrder(root, { topLayer: 9 });
-    const lowKey = makeBoxKey("", nodeId("low"), undefined);
-    const highKey = makeBoxKey("", nodeId("high"), undefined);
+    const lowKey = makeBoxKey("", nodeId("low"));
+    const highKey = makeBoxKey("", nodeId("high"));
     // The bound layer (9) resolves before ranking → high paints above low.
     expect(map.get(highKey) as number).toBeGreaterThan(map.get(lowKey) as number);
   });
@@ -353,26 +316,9 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
       </View>
     `);
     const map = computeZOrder(root, {}); // no `missing` field
-    const earlyKey = makeBoxKey("", nodeId("early"), undefined);
-    const lateKey = makeBoxKey("", nodeId("late"), undefined);
+    const earlyKey = makeBoxKey("", nodeId("early"));
+    const lateKey = makeBoxKey("", nodeId("late"));
     // `early`'s layer defaults to 0 (== late) → document order decides, late on top.
     expect(map.get(lateKey) as number).toBeGreaterThan(map.get(earlyKey) as number);
-  });
-
-  it("orders forEach-stamped Component-like siblings by their per-item layer", () => {
-    // forEach instances are siblings; each instance's bound layer orders it among
-    // the others (a stand-in for Component leaves whose layer must order siblings).
-    const { root, nodeId } = parse(`
-      <View>
-        <Component id="card" src="card.xml" forEach="{cards}" layer="{z}"/>
-      </View>
-    `);
-    const map = computeZOrder(root, { cards: [{ z: 0 }, { z: 7 }, { z: 3 }] });
-    const k0 = makeBoxKey("", nodeId("card"), "0");
-    const k1 = makeBoxKey("", nodeId("card"), "1");
-    const k2 = makeBoxKey("", nodeId("card"), "2");
-    // Ranked by layer: instance0 (0) < instance2 (3) < instance1 (7).
-    expect(map.get(k0) as number).toBeLessThan(map.get(k2) as number);
-    expect(map.get(k2) as number).toBeLessThan(map.get(k1) as number);
   });
 });

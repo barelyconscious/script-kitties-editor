@@ -18,10 +18,8 @@
  * tree, and deciding whether a given node is the selected one — are pure and
  * live here so they can be tested without a DOM.
  *
- * SCOPE (F2): single selection + nearest-node resolution only. `forEach`
- * instance discrimination (`data-instance-key`, selecting the template) is F4;
- * this module already collapses to the template `nodeId` for free because it
- * only ever reads `data-node-id`.
+ * SCOPE: single selection + nearest-node resolution only — purely `data-node-id`
+ * based.
  *
  * @see design/xgui_ta.md — "The node↔rendered-element mapping" / "Selection model"
  */
@@ -78,12 +76,8 @@ export function findNodeById(root: GuiNode, nodeId: string | null): GuiNode | nu
 
 /**
  * Whether a node is the currently selected one. The single comparison the
- * preview uses to decide which box draws the selection highlight.
- *
- * Kept as a named function (rather than an inline `===`) because the rule grows
- * in F4: a `forEach` instance is selected when its TEMPLATE node id matches the
- * selection, regardless of instance key. Routing every "is this selected?"
- * check through here means that change lands in one place.
+ * preview uses to decide which box draws the selection highlight. Routing every
+ * "is this selected?" check through one named function keeps the rule in one place.
  */
 export function isNodeSelected(nodeId: string, selectedNodeId: string | null): boolean {
   return selectedNodeId !== null && nodeId === selectedNodeId;

@@ -220,10 +220,6 @@ function ViewChildAdder({ viewNodeId }: { viewNodeId: string }) {
 
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground/70 text-xs leading-relaxed">
-        The root <span className="font-mono">View</span> has no properties of its own. Add a child
-        element to start building.
-      </p>
       <div className="flex flex-col gap-1.5">
         <AddChildButton onClick={() => addChild("Panel")}>Add Panel</AddChildButton>
         <AddChildButton onClick={() => addChild("Text")}>Add Text</AddChildButton>

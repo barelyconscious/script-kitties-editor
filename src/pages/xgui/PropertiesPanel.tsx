@@ -22,7 +22,7 @@
  *   "Colors and the palette".
  */
 
-import { Plus, Trash2 } from "lucide-react";
+import { Lock, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
@@ -122,6 +122,24 @@ export function PropertiesPanel() {
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
+        {/* <Component> src — the included component's basename. Pinned to the very
+            top and rendered as an obviously NON-editable, locked field: it is set
+            once via the tree's component picker (when the <Component> is added) and
+            never typed here. */}
+        {node.tag === "Component" && (
+          <FieldRow label="src">
+            <div
+              aria-readonly="true"
+              title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
+              className="flex cursor-not-allowed items-center gap-1.5 rounded border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                {srcBasename(node.attrs.src) || "—"}
+              </span>
+            </div>
+          </FieldRow>
+        )}
+
         {/* Computed read-only hierarchical id + editable local id — hidden for Event
             nodes, which have no id (475). */}
         {hasId && (
@@ -144,18 +162,6 @@ export function PropertiesPanel() {
               />
             </FieldRow>
           </>
-        )}
-
-        {/* <Component> src — read-only basename, set via the tree picker. */}
-        {node.tag === "Component" && (
-          <FieldRow label="src">
-            <div
-              className="truncate rounded border bg-muted/40 px-2 py-1 font-mono text-xs"
-              title={node.attrs.src ?? ""}
-            >
-              {srcBasename(node.attrs.src) || "—"}
-            </div>
-          </FieldRow>
         )}
 
         {/* <Component> data — the key of a data-model OBJECT to seat as the mounted

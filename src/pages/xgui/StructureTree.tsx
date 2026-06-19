@@ -60,7 +60,8 @@ function tagColorClass(tag: GuiTag): string {
     case "View":
       return "text-primary";
     case "Component":
-      return "text-amber-400";
+      // Emerald, not amber — amber now reads exclusively as the missing-id warning.
+      return "text-emerald-400";
     case "Event":
       return "text-sky-400";
     case "GridLayout":
@@ -219,7 +220,10 @@ function TreeRow({
             // a button so keyboard focus + Enter selects it.
             className={cn(
               "group flex w-full items-center py-0.5 pr-2 text-left text-xs transition-colors hover:bg-muted/60",
-              selected && "bg-muted",
+              // A missing-id element tints the whole row a muted warning color (its
+              // type icon is also swapped for a warning glyph below). Selection still
+              // wins so the selected row reads clearly.
+              selected ? "bg-muted" : missingId && "bg-amber-500/10",
             )}
           >
             {/* Lock toggle — pinned to the FAR LEFT gutter (left of the indentation
@@ -273,8 +277,21 @@ function TreeRow({
                 onClick={() => onSelect(node.nodeId)}
                 className="flex min-w-0 flex-1 select-none items-center gap-1.5 text-left"
               >
-                {/* Per-tag type icon, left of the identity label, accent-colored. */}
-                <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
+                {/* Per-tag type icon, left of the identity label, accent-colored —
+                    UNLESS the element is missing its id, in which case the warning
+                    glyph takes the icon slot (the row is tinted to match). */}
+                {missingId ? (
+                  <span
+                    role="img"
+                    title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
+                    aria-label="Missing id"
+                    className="shrink-0 text-amber-500"
+                  >
+                    <TriangleAlert className="size-3" />
+                  </span>
+                ) : (
+                  <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
+                )}
                 <span
                   className={cn(
                     "min-w-0 truncate font-medium font-mono",
@@ -292,19 +309,6 @@ function TreeRow({
                   </span>
                 )}
               </button>
-
-              {missingId && (
-                // Always-visible status flag (not hover-gated): this element has no id,
-                // so it isn't addressable. The title spells out the consequence.
-                <span
-                  role="img"
-                  title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
-                  aria-label="Missing id"
-                  className="shrink-0 text-amber-500"
-                >
-                  <TriangleAlert className="size-3" />
-                </span>
-              )}
 
               {removable && (
                 // A visible delete affordance on hover mirrors the right-click menu, so

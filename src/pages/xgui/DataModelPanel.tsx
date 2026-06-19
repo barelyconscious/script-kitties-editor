@@ -11,9 +11,8 @@
  * JSON gets syntax highlighting and Monaco's own invalid-JSON squiggles on top of
  * the inline parse-error line. It stays editable and controlled: `value` +
  * `onChange` make it a standard controlled input the parent owns, mirroring the
- * Controller (Lua) and XML tabs' Monaco wiring. The forEach scope stack (F4) does
- * not change this panel — it still supplies the root JSON; scoping is applied
- * downstream in the resolver.
+ * Controller (Lua) and XML tabs' Monaco wiring. It supplies the single flat model
+ * JSON; binding resolution is applied downstream in the resolver.
  *
  * @see design/xgui_ta.md — "Data Model panel (right of main content, collapsible)"
  */

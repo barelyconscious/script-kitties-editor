@@ -65,10 +65,10 @@ export type CompoundFields = {
 
 /** The display label for each compound field, in serialized order. */
 export const COMPOUND_FIELD_LABELS: ReadonlyArray<{ key: keyof CompoundFields; label: string }> = [
-  { key: "scaleX", label: "scale-x" },
-  { key: "scaleY", label: "scale-y" },
-  { key: "offsetX", label: "offset-x" },
-  { key: "offsetY", label: "offset-y" },
+  { key: "scaleX", label: "Relative X" },
+  { key: "scaleY", label: "Relative Y" },
+  { key: "offsetX", label: "Absolute X" },
+  { key: "offsetY", label: "Absolute Y" },
 ];
 
 /**
@@ -120,13 +120,21 @@ export function isBoundField(value: string): boolean {
 }
 
 /**
- * Whether a node of `tag` HAS an id — i.e. whether the Properties panel should show
- * the computed read-only id + the editable local id (475). Every visual/structural
- * tag does; `<Event>` does NOT (task 471 — events are addressed by `name`/`handler`,
- * not by a hierarchical id), so the panel hides both id rows for it.
+ * Whether a node of `tag` shows id rows in the Properties panel — i.e. whether the
+ * panel should render the computed read-only id + the editable local id.
+ *
+ * `<Panel>`/`<Text>`/`<Component>` do. `<Event>` does NOT (task 471 — events are
+ * addressed by `name`/`handler`, not a hierarchical id). `<GridLayout>` does NOT
+ * either: it is a non-visual control element with no `id` and cannot be referenced
+ * by Lua (the design's req 2) — keeping it id-less also keeps the missing-id
+ * TriangleAlert from firing on it in the tree. The root `<View>` does NOT either:
+ * it is the component itself, its `id` is auto-set on create, and the panel shows
+ * it no editable properties at all (its `controller` is wired via the Controller
+ * tab). Each still carries its `id` on the node where it has one — it's just not
+ * edited here, and {@link computedId} still reads it to prefix descendants.
  */
 export function nodeHasId(tag: GuiTag): boolean {
-  return tag !== "Event";
+  return tag !== "Event" && tag !== "View" && tag !== "GridLayout";
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +145,15 @@ export function nodeHasId(tag: GuiTag): boolean {
 export type FieldKind =
   /** A plain text/number input that also accepts a `{token}`. */
   | "text"
+  /**
+   * A bare model KEY that drives the Data Model scaffold (e.g. a GridLayout's
+   * `dataCollection`). Rendered like `text` but committed on BLUR/Enter, not per
+   * keystroke — every prefix of a bare key is itself a valid key, so a
+   * per-keystroke commit would spam the additive scaffold with a throwaway model
+   * entry for each character (the same reason `<Component>`'s `data` commits on
+   * blur).
+   */
+  | "modelKey"
   /** A `position`/`size` value rendered as four labeled inputs. */
   | "compound"
   /** A color value: palette swatch picker + custom code + `{token}`. */
@@ -166,32 +183,51 @@ export type PropertyField = {
  * node carries that is NOT in this schema is still editable as a freeform
  * override row (see {@link freeformAttrs}) — this list just gives the common
  * ones first-class, labeled, correctly-typed inputs.
+ *
+ * `parentTag` lets a child suppress fields its parent OWNS. A child of a
+ * `<GridLayout>` does not own its own `position`/`size` — the grid lays its
+ * repeated child out (the design's req 4) — so those two rows are filtered out
+ * for any node whose parent is a GridLayout. (The {@link makeChildNode} factory
+ * also omits the default geometry when inserting under a grid, so a grid child
+ * carries no `position`/`size` attr to begin with.)
  */
-export function fieldsForTag(tag: GuiTag): PropertyField[] {
+export function fieldsForTag(tag: GuiTag, parentTag?: GuiTag): PropertyField[] {
+  const fields = fieldsForTagInner(tag);
+  if (parentTag === "GridLayout") {
+    return fields.filter((f) => f.name !== "position" && f.name !== "size");
+  }
+  return fields;
+}
+
+function fieldsForTagInner(tag: GuiTag): PropertyField[] {
   switch (tag) {
     case "View":
-      return [{ name: "controller", label: "controller", kind: "text" }];
+      // The root View has NO editable properties in the panel. Its `id` is
+      // auto-set on create, and its `controller` is wired through the Controller
+      // tab's "Add script" flow — neither belongs here. Both attrs are preserved
+      // on the node (see specialAttrs) so they don't surface as freeform rows.
+      return [];
     case "Panel":
       return [
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "texture", label: "texture", kind: "sprite" },
-        { name: "backgroundColor", label: "backgroundColor", kind: "color" },
-        { name: "borderColor", label: "borderColor", kind: "color" },
-        { name: "borderSize", label: "borderSize", kind: "text" },
-        { name: "visible", label: "visible", kind: "boolean" },
-        { name: "layer", label: "layer", kind: "text" },
+        { name: "backgroundColor", label: "Background Color", kind: "color" },
+        { name: "borderColor", label: "Border Color", kind: "color" },
+        { name: "borderSize", label: "Border Size", kind: "text" },
+        { name: "visible", label: "Visible", kind: "boolean" },
+        { name: "layer", label: "Layer", kind: "text" },
       ];
     case "Text":
       return [
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "text", label: "text", kind: "text" },
-        { name: "textColor", label: "textColor", kind: "color" },
-        { name: "textAlign", label: "textAlign", kind: "text" },
-        { name: "fontSize", label: "fontSize", kind: "text" },
-        { name: "visible", label: "visible", kind: "boolean" },
-        { name: "layer", label: "layer", kind: "text" },
+        { name: "textColor", label: "Text Color", kind: "color" },
+        { name: "textAlign", label: "Text Align", kind: "text" },
+        { name: "fontSize", label: "Font Size", kind: "text" },
+        { name: "visible", label: "Visible", kind: "boolean" },
+        { name: "layer", label: "Layer", kind: "text" },
       ];
     case "Component":
       // `src` and `id` are handled specially by the panel; the rest of the
@@ -210,6 +246,17 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
         { name: "name", label: "name", kind: "text" },
         { name: "handler", label: "handler", kind: "text" },
       ];
+    case "GridLayout":
+      // A non-visual control element: no id, no position/size. `dataCollection` is
+      // a bare-key token (like `data` — no `{}`), but at the panel layer it's just
+      // a text field; rows/columns/gutter are plain text. The grid LAYS OUT its
+      // repeated child, so it exposes no geometry of its own (design req 5).
+      return [
+        { name: "dataCollection", label: "dataCollection", kind: "modelKey" },
+        { name: "rows", label: "rows", kind: "text" },
+        { name: "columns", label: "columns", kind: "text" },
+        { name: "gutter", label: "gutter", kind: "text" },
+      ];
     default: {
       const _never: never = tag;
       return _never;
@@ -224,10 +271,24 @@ export function fieldsForTag(tag: GuiTag): PropertyField[] {
  * a freeform override.
  */
 function specialAttrs(tag: GuiTag): Set<string> {
-  // `id` is special only for tags that HAVE one (475): an `<Event>` shows no id rows,
-  // so a stray `id` attr on one should surface as a freeform row rather than vanish.
+  // `id` is special only for tags that HAVE an id row (475): an `<Event>` shows no
+  // id rows, so a stray `id` attr on one should surface as a freeform row rather
+  // than vanish.
   const special = new Set<string>(nodeHasId(tag) ? ["id"] : []);
-  if (tag === "Component") special.add("src");
+  if (tag === "Component") {
+    special.add("src");
+    // `data` (the nested-component data-object binding) has its own dedicated field
+    // in the panel, so keep it out of the freeform override rows.
+    special.add("data");
+  }
+  if (tag === "View") {
+    // The View shows no fields at all, but its structural attrs are managed
+    // elsewhere (id auto-set on create; controller via the Controller tab). Mark
+    // them special so they are PRESERVED on the node rather than leaking into the
+    // freeform "other properties" rows.
+    special.add("id");
+    special.add("controller");
+  }
   return special;
 }
 

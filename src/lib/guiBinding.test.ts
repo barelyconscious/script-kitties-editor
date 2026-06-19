@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   colorCodeToCss,
+  emptyItemScope,
   flatRootScope,
   hasToken,
   isWholeToken,
@@ -42,6 +43,51 @@ describe("flatRootScope", () => {
     expect(scope.lookup("count")).toBe(0);
     expect(scope.lookup("open")).toBe(false);
     expect(scope.lookup("label")).toBe("");
+  });
+});
+
+describe("emptyItemScope (null grid cell)", () => {
+  it('resolves EVERY token to "" (a successful resolution, not a miss)', () => {
+    const scope = emptyItemScope();
+    expect(scope.lookup("name")).toBe("");
+    expect(scope.lookup("sprite")).toBe("");
+    expect(scope.lookup("anythingElse")).toBe("");
+  });
+
+  it('makes a null cell\'s {token} attrs resolve to "" with no unresolved entry', () => {
+    // The bug: flatRootScope(null) MISSES every token → attr lands in `unresolved`
+    // → the amber waiting affordance + literal `{name}` text. emptyItemScope() must
+    // instead resolve each token to "" with resolved: true (no waiting state).
+    const rawAttrs = {
+      text: "{name}", // string interpolation → ""
+      texture: "{sprite}", // string interpolation → "" (no sprite load)
+      backgroundColor: "{c}", // color whole-token → "" → colorCodeToCss unset
+      visible: "{v}", // typed whole-token → "" (not "false" → still shows)
+      size: "{w},1,0,0", // compound per-field → ",1,0,0"
+    };
+    const { attrs, unresolved } = resolveAttrs(rawAttrs, emptyItemScope(), {});
+
+    // Nothing is flagged as waiting-for-binding.
+    expect(unresolved.size).toBe(0);
+    // Tokens collapsed to "" rather than leaking their literal `{token}` form.
+    expect(attrs.text).toBe("");
+    expect(attrs.texture).toBe("");
+    expect(attrs.backgroundColor).toBe("");
+    expect(colorCodeToCss(attrs.backgroundColor)).toBeUndefined();
+    expect(attrs.visible).toBe("");
+    expect(attrs.size).toBe(",1,0,0");
+  });
+
+  it("leaves a non-token literal attr untouched so the chrome still paints", () => {
+    // An empty inventory slot's literal backgroundColor must still fill.
+    const { attrs, unresolved } = resolveAttrs(
+      { backgroundColor: "50,50,50,255" },
+      emptyItemScope(),
+      {},
+    );
+    expect(unresolved.size).toBe(0);
+    expect(attrs.backgroundColor).toBe("50,50,50,255");
+    expect(colorCodeToCss(attrs.backgroundColor)).toBe("rgba(50,50,50,1)");
   });
 });
 

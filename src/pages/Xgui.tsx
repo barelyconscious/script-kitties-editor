@@ -34,6 +34,7 @@ import { serializeGui } from "@/lib/guiNode";
 import { setPreference, usePreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
+import { useComponentRegistry } from "./xgui/componentRegistry";
 import { ControllerTab } from "./xgui/ControllerTab";
 import { DataModelPanel } from "./xgui/DataModelPanel";
 import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
@@ -46,7 +47,8 @@ import {
   useEditorStore,
 } from "./xgui/editorState";
 import { GuiPreviewHost } from "./xgui/GuiPreviewHost";
-import { scaffoldModelText } from "./xgui/guiModelScaffold";
+import { cascadeModelWrites } from "./xgui/guiModelCascade";
+import { type ComponentResolver, scaffoldModelText } from "./xgui/guiModelScaffold";
 import { GuiTreeStoreProvider, useGuiTreeStore } from "./xgui/guiTreeStore";
 import { MainContentSkeleton, mainContentMode } from "./xgui/MainContentSkeleton";
 import { PropertiesPanel } from "./xgui/PropertiesPanel";
@@ -81,7 +83,10 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
     <EditorStateProvider>
       <GuiTreeStoreProvider>
         <div className="flex h-full min-h-0">
-          <ComponentList collapsed={componentListCollapsed} />
+          <ComponentList
+            collapsed={componentListCollapsed}
+            onCollapse={() => setPreference("xgui.componentListCollapsed", true)}
+          />
 
           {/* When the list is collapsed, leave a slim labelled rail in its place so
             it's obvious the panel exists and how to bring it back — matching the
@@ -226,6 +231,25 @@ function MainContent({ active }: { active: boolean }) {
   // we never stomp it silently.
   const { live } = useGuiTreeStore();
 
+  // A snapshot of every component's parsed tree: the `resolveComponent` resolver
+  // feeds the open component's `<Component data>` auto-scaffold, and `components`
+  // drives the save-time cascade below.
+  const { resolve: resolveComponent, components } = useComponentRegistry();
+
+  // CASCADE: the registry reloads on every `gui-changed` (a save or an external
+  // edit), so when `components` refreshes, re-reconcile every CLOSED component's
+  // persisted data model against the fresh shapes — prune-syncing each `data=`
+  // object to its child. The OPEN component is skipped (its model is live in the
+  // panel and persisted from there); a component the scaffold leaves unchanged
+  // produces no write. This is how a child's shape change reaches parents that
+  // aren't open, including never-opened ones (seeded from an empty baseline).
+  useEffect(() => {
+    if (components.length === 0) return;
+    for (const w of cascadeModelWrites(components, resolveComponent, getPersistedModel, open?.path)) {
+      setPersistedModel(w.path, w.text);
+    }
+  }, [components, resolveComponent, open?.path]);
+
   // Warn on app close / reload while the open component is dirty — nothing
   // auto-saves, so an intentional reload must confirm before discarding edits.
   // Registered only while dirty so a clean editor never blocks a reload. Mirrors
@@ -337,7 +361,12 @@ function MainContent({ active }: { active: boolean }) {
           // Keyed by path so opening a DIFFERENT component remounts the panes (and
           // resets the lifted Data Model state) cleanly. Within one component, the
           // panes stay mounted across tab flips.
-          <OpenComponentPanes key={open.path} open={open} activeTab={activeTab} />
+          <OpenComponentPanes
+            key={open.path}
+            open={open}
+            activeTab={activeTab}
+            resolveComponent={resolveComponent}
+          />
         ) : (
           // Empty / first-run (F12): no component open — and an empty `gui/` folder
           // reaches here the same way (nothing to pick → nothing open). Show the
@@ -366,7 +395,16 @@ function MainContent({ active }: { active: boolean }) {
  * tabs) so Monaco's editor state and the preview's selection/view survive flipping
  * tabs; only their visibility changes.
  */
-function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTab: EditorTab }) {
+function OpenComponentPanes({
+  open,
+  activeTab,
+  resolveComponent,
+}: {
+  open: OpenComponent;
+  activeTab: EditorTab;
+  /** Resolves a nested `<Component src>` to its tree, for `data=` auto-scaffold. */
+  resolveComponent: ComponentResolver;
+}) {
   // The Data Model state — raw text (panel) + LAST GOOD parsed model (preview) —
   // lifted here so ONE source feeds both. An edit advances the model only when the
   // JSON parses (see `applyModelEdit`), so an invalid keystroke keeps the preview on
@@ -386,7 +424,7 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
   // is filled wholesale; an existing model is preserved and only grown. We seed the
   // state with the scaffolded text so the very first render already resolves bindings.
   const [dataModel, setDataModel] = useState(() =>
-    seedDataModel(getPersistedModel(open.path), open.modelText, open.root),
+    seedDataModel(getPersistedModel(open.path), open.modelText, open.root, resolveComponent, open.name),
   );
 
   // Persist the model text per component path on EVERY change — user keystrokes in
@@ -404,15 +442,17 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
   // change `open.root`) leaves the user's exact JSON untouched, avoiding reformat
   // churn while they type. The merged model flows through `applyModelEdit`, so it
   // still rides the last-good-model path that drives the preview.
-  const rootRef = useRef(open.root);
+  // Also re-runs when `resolveComponent` changes: the component registry loads
+  // asynchronously, so a `<Component data>` object that was present-but-empty at
+  // seed time fills in once the child's tree is available. `scaffoldModelText`
+  // returns `null` when there is nothing new to add (or prune), so a re-run with an
+  // unchanged shape is a no-op and never churns the user's JSON.
   useEffect(() => {
-    if (open.root === rootRef.current) return;
-    rootRef.current = open.root;
     setDataModel((prev) => {
-      const scaffolded = scaffoldModelText(prev.text, open.root);
+      const scaffolded = scaffoldModelText(prev.text, open.root, resolveComponent, open.name);
       return scaffolded === null ? prev : applyModelEdit(prev, scaffolded);
     });
-  }, [open.root]);
+  }, [open.root, open.name, resolveComponent]);
   // Whether the Data Model panel is collapsed (task 476 keeps it collapsible).
   const [modelPanelOpen, setModelPanelOpen] = useState(true);
 
@@ -441,7 +481,7 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
       {/* ALWAYS-VISIBLE Data Model panel (task 476) — persistent across View,
           Controller, and XML; collapsible to a slim toggle rail. */}
       {modelPanelOpen ? (
-        <div className="flex w-80 shrink-0 flex-col border-border border-l">
+        <div className="flex w-80 shrink-0 flex-col border-black border-l-2">
           <div className="flex shrink-0 items-center justify-between border-b py-1 pr-1.5 pl-3">
             <h2 className="font-medium text-sm">Data Model</h2>
             <Button
@@ -468,7 +508,7 @@ function OpenComponentPanes({ open, activeTab }: { open: OpenComponent; activeTa
               type="button"
               aria-label="Show Data Model panel"
               onClick={() => setModelPanelOpen(true)}
-              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-black border-l-2 bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <PanelLeftOpen className="size-4 shrink-0 rotate-180" />
               <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">

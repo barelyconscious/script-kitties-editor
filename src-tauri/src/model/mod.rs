@@ -141,10 +141,15 @@ pub struct Creature {
     // creatures.json entries deserialize and script-less round-trips stay clean.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub rarity: String,
-    pub base_stats: BTreeMap<String, i32>,
+    // Stat values are `serde_json::Number`, not `i32`, so creature stats and
+    // per-level gains can be fractional (e.g. a 0.5 gain). Number preserves the
+    // JSON representation as sent: a whole value stays an integer (`12`), only an
+    // actually-fractional value writes as a float (`12.5`) — so existing
+    // integer-only creature files don't churn to `12.0` on save.
+    pub base_stats: BTreeMap<String, serde_json::Number>,
     pub base_abilities: Vec<String>,
     #[serde(default)]
-    pub stat_gains_per_level: BTreeMap<String, i32>,
+    pub stat_gains_per_level: BTreeMap<String, serde_json::Number>,
     #[serde(default)]
     pub abilities_by_level: Vec<CreatureLevelUp>,
 }

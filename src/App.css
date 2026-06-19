@@ -20,6 +20,24 @@
     @apply font-sans;
   }
 
+  /* This is a desktop IDE, not a web page: the window itself must never scroll
+     or rubber-band. Lock the document to the viewport (the app shell is
+     h-screen and owns its own inner scroll regions) and kill overscroll
+     chaining everywhere, so bottoming out a pane doesn't bounce the navrail,
+     benches, or the whole screen. `overscroll-behavior: none` on every element
+     stops a bottomed-out scroll container from passing the gesture to its
+     ancestors (and the elastic bounce that comes with it). */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  * {
+    overscroll-behavior: none;
+  }
+
   /* Overlay-style scrollbars: thin, rounded, and transparent until the user is
      actively scrolling the container (the `is-scrolling` class is toggled on
      the scrolled element by initAutohideScrollbars) or hovering it. Mirrors
@@ -51,6 +69,23 @@
   ::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
   }
+}
+
+/* WebView2/Chromium wheel-trap fix. Tailwind's `truncate` utility is
+   `overflow: hidden; white-space: nowrap; text-overflow: ellipsis`. When the
+   text is wider than its box (i.e. actually truncated), `overflow: hidden` makes
+   the element a horizontally-scrollable container — and on Windows/WebView2 a
+   vertical mouse wheel over such an element is CONSUMED rather than bubbling to
+   the surrounding list's scroll container. The result: hovering a truncated row
+   label freezes scrolling of the whole list (object list, GUI component list,
+   data tables — anywhere a row label truncates).
+
+   `overflow: clip` clips identically (ellipsis included, in modern Chromium) but
+   is explicitly NON-scrollable, so it never traps the wheel. This rule is
+   intentionally UNLAYERED so it wins over Tailwind's layered `.truncate` utility;
+   it overrides only `overflow`, leaving nowrap + ellipsis from the utility. */
+.truncate {
+  overflow: clip;
 }
 
 /* Pack-editor slot insertion flourish: a freshly duplicated slot does a quick

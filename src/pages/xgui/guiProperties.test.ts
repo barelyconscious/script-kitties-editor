@@ -187,11 +187,51 @@ describe("fieldsForTag", () => {
     expect(fields.map((f) => f.name)).toEqual(["name", "handler"]);
     expect(fields.every((f) => f.kind === "text")).toBe(true);
   });
+
+  it("gives the root View no editable fields", () => {
+    // The View is the component itself: its id is auto-set on create and its
+    // controller is wired via the Controller tab — neither shows in Properties.
+    expect(fieldsForTag("View")).toEqual([]);
+  });
+
+  it("gives GridLayout dataCollection (modelKey) + rows/columns/gutter (text), in order", () => {
+    const fields = fieldsForTag("GridLayout");
+    expect(fields.map((f) => f.name)).toEqual(["dataCollection", "rows", "columns", "gutter"]);
+    // dataCollection is a bare model key — committed on blur (not per keystroke) so a
+    // half-typed name doesn't spam the additive scaffold; rows/columns/gutter are plain text.
+    expect(fields.map((f) => f.kind)).toEqual(["modelKey", "text", "text", "text"]);
+  });
+
+  it("never exposes position/size on a GridLayout (it's a non-visual control)", () => {
+    const names = fieldsForTag("GridLayout").map((f) => f.name);
+    expect(names).not.toContain("position");
+    expect(names).not.toContain("size");
+  });
+
+  it("suppresses position/size for a child whose parent is a GridLayout", () => {
+    // The grid owns its child's geometry (design req 4), so a grid child's panel
+    // shows no position/size rows. Other fields (text, colors, …) remain.
+    const panelUnderGrid = fieldsForTag("Panel", "GridLayout").map((f) => f.name);
+    expect(panelUnderGrid).not.toContain("position");
+    expect(panelUnderGrid).not.toContain("size");
+    expect(panelUnderGrid).toContain("texture");
+
+    const textUnderGrid = fieldsForTag("Text", "GridLayout").map((f) => f.name);
+    expect(textUnderGrid).not.toContain("position");
+    expect(textUnderGrid).not.toContain("size");
+    expect(textUnderGrid).toContain("text");
+  });
+
+  it("keeps position/size for a child under a non-grid parent", () => {
+    const panelUnderView = fieldsForTag("Panel", "View").map((f) => f.name);
+    expect(panelUnderView).toContain("position");
+    expect(panelUnderView).toContain("size");
+  });
 });
 
-describe("nodeHasId — id rows hidden for Event (475)", () => {
-  it("every visual/structural tag has an id", () => {
-    for (const tag of ["View", "Panel", "Text", "Component"] as const) {
+describe("nodeHasId — id rows hidden for Event (475) and View", () => {
+  it("child structural/visual tags have an id", () => {
+    for (const tag of ["Panel", "Text", "Component"] as const) {
       expect(nodeHasId(tag)).toBe(true);
     }
   });
@@ -200,6 +240,18 @@ describe("nodeHasId — id rows hidden for Event (475)", () => {
     // Task 471 — events are addressed by name/handler, not a hierarchical id; the
     // panel hides both the computed id and the editable id row for an Event.
     expect(nodeHasId("Event")).toBe(false);
+  });
+
+  it("the root View has NO id rows (no editable properties at all)", () => {
+    // The View is the component itself; its id is auto-set on create and not edited
+    // in the panel. computedId still reads the attr to prefix descendants.
+    expect(nodeHasId("View")).toBe(false);
+  });
+
+  it("GridLayout has NO id (non-visual control, not Lua-addressable)", () => {
+    // Design req 2 — a GridLayout has no id and cannot be referenced by Lua. Keeping
+    // it id-less also keeps the missing-id TriangleAlert from firing on it.
+    expect(nodeHasId("GridLayout")).toBe(false);
   });
 });
 
@@ -230,6 +282,13 @@ describe("freeformAttrs", () => {
   it("preserves authored order", () => {
     const n = node("Component", { src: "x", zebra: "1", alpha: "2" });
     expect(freeformAttrs(n)).toEqual(["zebra", "alpha"]);
+  });
+
+  it("does not surface the View's id or controller as freeform (managed elsewhere)", () => {
+    // The View shows no fields, but its structural attrs must be preserved on the
+    // node — not leaked into the freeform 'other properties' rows.
+    const n = node("View", { id: "view", controller: "bag_controller.lua" });
+    expect(freeformAttrs(n)).toEqual([]);
   });
 });
 

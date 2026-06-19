@@ -26,11 +26,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invalidateComponents } from "../../lib/guiComponentCache";
+import { serializeGui } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
 import { GUI_CHANGED_EVENT } from "./guiEvents";
 import type { GuiComponentRef } from "./guiTree";
 import { decideLiveReload, onGuiChangedAlways, remapSelection } from "./liveReload";
 import { buildOpenComponent } from "./openComponent";
+import { isOwnSaveEcho } from "./saveComponent";
 
 export type GuiLiveReload = {
   /** Basename of the open component whose disk file changed under unsaved edits,
@@ -61,12 +63,15 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
   const reloadTreeRef = useRef(reloadTree);
   reloadTreeRef.current = reloadTree;
 
-  // Re-read + re-parse the open component from disk and seat it live, preserving
-  // the selection if the selected node still exists after the re-parse. Shared by
-  // the clean-path auto-reload and the dirty-path explicit Reload button.
-  const performReload = useCallback(async () => {
+  // Re-read + re-parse the open component from disk. Returns the rebuilt component
+  // alongside the `open` it was read for (so a caller can detect the open doc
+  // changing mid-read), or `null` when there's nothing to seat — no open doc, a
+  // read error (keep what the user has), an external delete (don't blank the
+  // editor), or externally-saved malformed XML (don't replace a good tree with a
+  // parse error). Shared by the explicit Reload button and the event reconciler.
+  const readOpenFromDisk = useCallback(async () => {
     const open = stateRef.current.open;
-    if (!open) return;
+    if (!open) return null;
     const ref: GuiComponentRef = {
       name: open.name,
       fileName: `${open.name}.xml`,
@@ -81,28 +86,54 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
     try {
       xml = await invoke<string | null>("get_component", { name: open.name });
     } catch {
-      // A failed re-read leaves the editor as-is (the user keeps what they have);
-      // the next change re-attempts. Nothing to stomp on a read error.
-      return;
+      return null;
     }
-    // File vanished (external delete) — leave the open doc; the list refresh shows
-    // it's gone, and we don't blank the editor out from under the user.
-    if (xml == null) return;
-    let component: ReturnType<typeof buildOpenComponent>;
+    if (xml == null) return null;
     try {
-      component = buildOpenComponent(ref, xml);
+      return { component: buildOpenComponent(ref, xml), open };
     } catch {
-      // Externally-saved malformed XML: don't replace a good tree with a parse
-      // error. Leave the editor; the user can re-save the file to fix it.
+      return null;
+    }
+  }, []);
+
+  // Seat a freshly-read component into the store, preserving the selection if the
+  // selected node still exists after the re-parse. Bails if the open doc changed
+  // during the async read (the change no longer applies to what's open now).
+  const seatReload = useCallback(
+    (component: ReturnType<typeof buildOpenComponent>, openPath: string) => {
+      const cur = stateRef.current.open;
+      if (!cur || cur.path !== openPath) return;
+      const selectedNodeId = remapSelection(cur.root, component.root, stateRef.current.selectedNodeId);
+      dispatch({ type: "reloadOpen", component, selectedNodeId });
+    },
+    [dispatch],
+  );
+
+  // The explicit Reload button: force a re-seat from disk, discarding the draft.
+  const performReload = useCallback(async () => {
+    const res = await readOpenFromDisk();
+    if (res) seatReload(res.component, res.open.path);
+  }, [readOpenFromDisk, seatReload]);
+
+  // The event-driven reconcile when the OPEN component's file changed. Distinct
+  // from the button: it must (1) ignore the editor's OWN save echoing back through
+  // the watcher, and (2) never stomp a dirty draft — surface the notice instead.
+  const reconcileOpenChange = useCallback(async () => {
+    const res = await readOpenFromDisk();
+    if (!res) return;
+    const cur = stateRef.current.open;
+    if (!cur || cur.path !== res.open.path) return;
+    // Our OWN save (the watcher can't distinguish it from an external edit). The
+    // normalized disk content matches what we wrote → nothing changed externally.
+    if (isOwnSaveEcho(res.open.path, serializeGui(res.component.root))) return;
+    if (stateRef.current.dirty) {
+      // A genuine external change while the user has unsaved edits — don't stomp;
+      // surface the conflict and let them choose (Reload / Keep).
+      setDiskChangeNotice(cur.name);
       return;
     }
-    const selectedNodeId = remapSelection(
-      open.root,
-      component.root,
-      stateRef.current.selectedNodeId,
-    );
-    dispatch({ type: "reloadOpen", component, selectedNodeId });
-  }, [dispatch]);
+    seatReload(res.component, res.open.path);
+  }, [readOpenFromDisk, seatReload]);
 
   const reloadFromDisk = useCallback(() => {
     setDiskChangeNotice(null);
@@ -128,11 +159,12 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
         { openName: s.open?.name ?? null, openPath: s.open?.path ?? null, dirty: s.dirty },
         changedPath,
       );
-      if (decision === "reload-open") {
-        void performReload();
-      } else if (decision === "notice-dirty") {
-        // Don't stomp the draft — surface the conflict; the user chooses.
-        setDiskChangeNotice(s.open?.name ?? null);
+      // Both "reload-open" and "notice-dirty" mean the OPEN component's file
+      // changed; the reconciler re-reads disk to suppress our own save echo and
+      // then branches on dirtiness (re-seat when clean, notice when dirty). The
+      // dirty flag is re-read there, so passing through one path is correct.
+      if (decision !== "refresh-only") {
+        void reconcileOpenChange();
       }
       // "refresh-only" already handled by the unconditional reloadTree above.
     }).then((fn) => {
@@ -144,7 +176,7 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
       disposed = true;
       unlisten?.();
     };
-  }, [performReload]);
+  }, [reconcileOpenChange]);
 
   // If the open component is closed or switched while a notice is pending, drop
   // the stale notice (it referred to a document that's no longer open).

@@ -17,10 +17,13 @@
  */
 
 /** The element tags supported in phase 1. */
-export type GuiTag = "View" | "Panel" | "Text" | "Component" | "Event";
+export type GuiTag = "View" | "Panel" | "Text" | "Component" | "Event" | "GridLayout";
 
 /** The phase-1 tags, as a runtime set for parse-time validation. */
-const KNOWN_TAGS = new Set<GuiTag>(["View", "Panel", "Text", "Component", "Event"]);
+const KNOWN_TAGS = new Set<GuiTag>(["View", "Panel", "Text", "Component", "Event", "GridLayout"]);
+
+/** The tags a {@link GuiTag GridLayout} may wrap as its single child. */
+const GRID_CHILD_TAGS = new Set<GuiTag>(["Panel", "Text", "Component"]);
 
 /**
  * A single element in a GUI component tree.
@@ -190,7 +193,14 @@ function tokenize(xml: string): Token[] {
  * raw verbatim string. Enforces the phase-1 structural rules:
  * - exactly one top-level element, which MUST be `<View>`;
  * - `<Event>` may appear only as an immediate child of `<View>`;
- * - `<Component>` may not have children.
+ * - `<Component>` may not have children;
+ * - `<GridLayout>` is a non-visual control element that repeats a single child:
+ *   it may appear ONLY as a child of `<Panel>` or `<View>` (so it can never nest
+ *   inside another GridLayout); it may have AT MOST ONE child, whose tag must be
+ *   `<Panel>`, `<Text>`, or `<Component>`; and a `<Panel>`/`<View>` may contain at
+ *   most ONE `<GridLayout>` among its children (a grid fills its container, so
+ *   sibling grids are meaningless). Lenient repair is NOT wanted — invalid
+ *   hand-authored XML throws here, and the tree editor prevents authoring it.
  */
 export function parseGui(xml: string): GuiNode {
   const tokens = tokenize(xml);
@@ -217,6 +227,15 @@ export function parseGui(xml: string): GuiNode {
     }
     if (tag === "Event" && parentTag !== "View") {
       throw new GuiParseError("<Event> may only appear as an immediate child of <View>");
+    }
+    if (tag === "GridLayout") {
+      // A GridLayout fills its container, so it lives ONLY under a Panel or View.
+      // This also forbids nesting a GridLayout inside another GridLayout (a
+      // GridLayout's only legal child is Panel/Text/Component — see below — so a
+      // nested grid is rejected both ways).
+      if (parentTag !== "Panel" && parentTag !== "View") {
+        throw new GuiParseError("<GridLayout> may only appear as a child of <Panel> or <View>");
+      }
     }
 
     const node: GuiNode = {
@@ -253,7 +272,27 @@ export function parseGui(xml: string): GuiNode {
         pos += 1;
         return node;
       }
-      node.children.push(parseElement(tag));
+      const child = parseElement(tag);
+      node.children.push(child);
+
+      if (tag === "GridLayout") {
+        // A GridLayout repeats a SINGLE child, whose tag must be one of
+        // Panel | Text | Component.
+        if (!GRID_CHILD_TAGS.has(child.tag)) {
+          throw new GuiParseError(
+            `<GridLayout> may only contain a <Panel>, <Text>, or <Component> child, found <${child.tag}>`,
+          );
+        }
+        if (node.children.length > 1) {
+          throw new GuiParseError("<GridLayout> may have at most one child element");
+        }
+      } else if ((tag === "Panel" || tag === "View") && child.tag === "GridLayout") {
+        // A Panel/View may contain at most ONE GridLayout among its children
+        // (a grid fills its container, so sibling grids are meaningless).
+        if (node.children.filter((c) => c.tag === "GridLayout").length > 1) {
+          throw new GuiParseError(`<${tag}> may contain at most one <GridLayout> child`);
+        }
+      }
     }
 
     throw new GuiParseError(`Unclosed <${tag}>`);

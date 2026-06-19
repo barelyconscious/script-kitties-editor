@@ -18,12 +18,10 @@
  *
  * The pass (pure, no React/DOM):
  *
- *   1. FLATTEN pass. Walk the tree in DOCUMENT ORDER (depth-first, pre-order),
- *      expanding `forEach` exactly as the renderer does (same {@link stampForEach}
- *      + {@link ScopeStack}, so flatten and render agree on which boxes exist).
+ *   1. FLATTEN pass. Walk the tree in DOCUMENT ORDER (depth-first, pre-order).
  *      For each visual box capture `{ boxKey, parentKey, resolvedLayer,
  *      siblingIndex }`. `resolvedLayer` is the `layer` attribute AFTER
- *      token/literal resolution (layer is bindable — F3), defaulting to `0`.
+ *      token/literal resolution (layer is bindable), defaulting to `0`.
  *      `siblingIndex` is the box's 0-based position AMONG ITS SIBLINGS (the
  *      document-order tiebreaker WITHIN a sibling group).
  *   2. RANK pass. Within EACH sibling group (boxes sharing a `parentKey`),
@@ -45,12 +43,10 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model".
  */
 
-import { resolveTypedProp } from "./guiBinding";
-import { isForEachTemplate, stampForEach } from "./guiForEach";
+import { flatRootScope, type ResolveScope, resolveTypedProp } from "./guiBinding";
 import type { GuiNode } from "./guiNode";
-import { ScopeStack } from "./guiScope";
 
-/** The attribute name carrying a box's paint order among its siblings. Bindable (F3). */
+/** The attribute name carrying a box's paint order among its siblings. Bindable. */
 export const LAYER_ATTR = "layer";
 
 /** The `layer` value used when a box has no `layer` attribute (or it's unresolved). */
@@ -68,39 +64,24 @@ function isVisualTag(tag: GuiNode["tag"]): boolean {
 /**
  * The stable, render-reproducible identity of ONE rendered box.
  *
- * A `nodeId` alone is NOT unique once `forEach` is in play: every instance of a
- * template shares the template's `nodeId` (that is what makes selection collapse to
- * the template). So a box is identified by the PATH of segments from the stage root
- * down to it, where each `forEach` instance contributes its positional instance key.
- * The renderer builds the identical key as it descends, so the z-index map keys line
- * up exactly with the DOM boxes.
+ * A box is identified by the PATH of `nodeId`s from the stage root down to it. The
+ * renderer builds the identical key as it descends, so the z-index map keys line up
+ * exactly with the DOM boxes.
  *
- * Format: segments joined by `/`. A plain (once-rendered) box contributes its
- * `nodeId`; a `forEach` instance contributes `nodeId#instanceKey`. Example:
- * `"n1/n4#2/n7"`.
+ * Format: `nodeId` segments joined by `/`. Example: `"n1/n4/n7"`.
  */
 export type BoxKey = string;
 
-/** The segment a box contributes to its {@link BoxKey} path. */
-function keySegment(nodeId: string, instanceKey: string | undefined): string {
-  return instanceKey === undefined ? nodeId : `${nodeId}#${instanceKey}`;
-}
-
 /**
- * Build the {@link BoxKey} for a box given its parent's key and its own segment.
+ * Build the {@link BoxKey} for a box given its parent's key and its own `nodeId`.
  * The renderer calls this with the same arguments it uses to build its React keys,
  * so the keys it looks up in the z-index map match the ones the flatten produced.
  *
  * `parentKey` is `""` for a direct child of the stage (the `<View>` root is not
  * itself a participating box, so its children start the path).
  */
-export function makeBoxKey(
-  parentKey: BoxKey,
-  nodeId: string,
-  instanceKey: string | undefined,
-): BoxKey {
-  const segment = keySegment(nodeId, instanceKey);
-  return parentKey === "" ? segment : `${parentKey}/${segment}`;
+export function makeBoxKey(parentKey: BoxKey, nodeId: string): BoxKey {
+  return parentKey === "" ? nodeId : `${parentKey}/${nodeId}`;
 }
 
 /**
@@ -132,80 +113,60 @@ export type FlatBox = {
  * `layer` as an integer, but the resolver doesn't reject a fractional literal, and
  * numeric sort handles it correctly either way.
  */
-export function resolveLayer(node: GuiNode, scope: ScopeStack): number {
+export function resolveLayer(node: GuiNode, scope: ResolveScope): number {
   const raw = node.attrs[LAYER_ATTR];
   if (raw === undefined) return DEFAULT_LAYER;
-  const { value, resolved } = resolveTypedProp(raw, scope.asScope());
+  const { value, resolved } = resolveTypedProp(raw, scope);
   if (!resolved) return DEFAULT_LAYER;
   const n = Number(value.trim());
   return Number.isFinite(n) ? n : DEFAULT_LAYER;
 }
 
 /**
- * FLATTEN pass: walk the tree in document order (pre-order DFS), expanding
- * `forEach` exactly as the renderer does, and emit one {@link FlatBox} per visual
- * box. Each box records its `parentKey` (the sibling-group key) and its
- * `siblingIndex` (its position among the boxes sharing that parent).
+ * FLATTEN pass: walk the tree in document order (pre-order DFS) and emit one
+ * {@link FlatBox} per visual box. Each box records its `parentKey` (the
+ * sibling-group key) and its `siblingIndex` (its position among the boxes sharing
+ * that parent).
  *
  * `root` is expected to be the `<View>` stage; its children are the first
  * participating boxes (the stage itself is not a box, so its children's
- * `parentKey` is `""`). The traversal pushes each `forEach` item onto the scope
- * stack as it descends, so a child's `layer` token resolves item-relative —
- * identical to how the renderer resolves the rest of the child's attributes.
+ * `parentKey` is `""`). `layer` tokens resolve against the single flat model —
+ * identical to how the renderer resolves the rest of a box's attributes.
  */
 export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   const boxes: FlatBox[] = [];
-  const scope = ScopeStack.root(model);
+  const scope = flatRootScope(model);
 
   /**
-   * Visit the visual children of `parent` in document order. Each plain child is
-   * one box; each `forEach` template is expanded into its instances (in order),
-   * each in its own item scope. All boxes produced here share `parentKey` and are
-   * numbered by their position in this sibling group. Descends into a box's own
-   * children (their OWN sibling group) after recording it (pre-order).
+   * Visit the visual children of `parent` in document order. Each child is one box;
+   * all boxes produced here share `parentKey` and are numbered by their position in
+   * this sibling group. Descends into a box's own children (their OWN sibling group)
+   * after recording it (pre-order).
    */
-  function visitChildren(children: GuiNode[], parentKey: BoxKey, parentScope: ScopeStack): void {
-    let siblingIndex = 0; // position WITHIN this sibling group (forEach instances count)
+  function visitChildren(children: GuiNode[], parentKey: BoxKey): void {
+    let siblingIndex = 0; // position WITHIN this sibling group
     for (const child of children) {
       if (!isVisualTag(child.tag)) continue; // <Event> et al. — non-visual, no box
-
-      if (!isForEachTemplate(child)) {
-        emit(child, parentKey, parentScope, undefined, siblingIndex);
-        siblingIndex += 1;
-        continue;
-      }
-      // A `forEach` template: one box per stamped instance, each item-scoped, each
-      // its own sibling slot. An empty/unresolved collection yields zero instances —
-      // the template paints nothing here, exactly as the renderer does.
-      for (const instance of stampForEach(child, parentScope)) {
-        emit(child, parentKey, instance.scope, instance.instanceKey, siblingIndex);
-        siblingIndex += 1;
-      }
+      emit(child, parentKey, siblingIndex);
+      siblingIndex += 1;
     }
   }
 
   /** Record one box (with its sibling position) then recurse into its children. */
-  function emit(
-    node: GuiNode,
-    parentKey: BoxKey,
-    boxScope: ScopeStack,
-    instanceKey: string | undefined,
-    siblingIndex: number,
-  ): void {
-    const boxKey = makeBoxKey(parentKey, node.nodeId, instanceKey);
+  function emit(node: GuiNode, parentKey: BoxKey, siblingIndex: number): void {
+    const boxKey = makeBoxKey(parentKey, node.nodeId);
     boxes.push({
       boxKey,
       parentKey,
-      resolvedLayer: resolveLayer(node, boxScope),
+      resolvedLayer: resolveLayer(node, scope),
       siblingIndex,
     });
-    // Descend into this box's children in the SAME item scope (a `forEach` instance
-    // carries its item scope into its subtree). `<Component>` has no children. This
+    // Descend into this box's children. `<Component>` has no children here. This
     // box's key becomes the parentKey of its own children's sibling group.
-    visitChildren(node.children, boxKey, boxScope);
+    visitChildren(node.children, boxKey);
   }
 
-  visitChildren(root.children, "", scope);
+  visitChildren(root.children, "");
   return boxes;
 }
 
@@ -254,9 +215,8 @@ export function assignZOrder(boxes: readonly FlatBox[]): ZOrderMap {
 
 /**
  * The whole nested z-order pass in one call: flatten the tree (document order,
- * `forEach` expanded, `layer` resolved against each box's scope) then assign the
- * per-sibling-group z-order. Returns the `boxKey → zIndex` map the renderer applies
- * to each box.
+ * `layer` resolved against the flat model) then assign the per-sibling-group
+ * z-order. Returns the `boxKey → zIndex` map the renderer applies to each box.
  *
  * This is what `GuiPreview` calls once per render; the two stages are exported
  * separately so each is independently testable.

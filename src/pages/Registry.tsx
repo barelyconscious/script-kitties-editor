@@ -120,10 +120,6 @@ export default function Registry() {
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div>
         <h1 className="font-semibold text-lg">Registry</h1>
-        <p className="max-w-prose text-muted-foreground text-sm">
-          Two kinds of data live here, each saved to its own file: the editor's own dropdown enums,
-          and the GUI color palette the game reads at runtime.
-        </p>
       </div>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">

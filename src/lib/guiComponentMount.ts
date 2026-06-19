@@ -10,12 +10,12 @@
  *
  *   1. The CHILD-DATA-SCOPE rule (locked in F6a, design/xgui_ta.md "Component
  *      child data scope resolved (architect)"). A mounted child resolves its
- *      `{token}`s against its OVERRIDE ATTRIBUTES ONLY, as a FRESH ROOT — no
- *      parent data, no parent `$`. The parent PRE-RESOLVES each override value in
- *      its own scope (forEach item scope included) and hands the child concrete
- *      values. The override boundary is a VALUE boundary, not a token boundary.
- *      {@link resolveOverrides} does that pre-resolution; the renderer seats the
- *      result as a fresh `ScopeStack.root(...)`.
+ *      `{token}`s against its OVERRIDE ATTRIBUTES ONLY, as a FRESH MODEL — no
+ *      parent data. The parent PRE-RESOLVES each override value in its own scope
+ *      and hands the child concrete values. The override boundary is a VALUE
+ *      boundary, not a token boundary. {@link resolveOverrides} does that
+ *      pre-resolution; the renderer seats the result as a fresh
+ *      `flatRootScope(...)`.
  *
  *   2. The CYCLE GUARD (ancestor-set). Nested mount is recursive: A→B→A would
  *      infinite-loop. {@link mountDecision} carries the SET of `src` basenames on
@@ -28,20 +28,29 @@
  * the renderer (parameterized by reason). This module classifies the reason; the
  * placeholder box is drawn in `GuiPreview.tsx`.
  *
- * PURE: no React, no DOM, no Tauri. The override RESOLUTION reuses the F3
- * resolver + F4 scope stack unchanged — the child-root model is built from the
- * SAME `resolveAttr` the renderer already trusts.
+ * PURE: no React, no DOM, no Tauri. The override RESOLUTION reuses the binding
+ * resolver unchanged — the child-root model is built from the SAME
+ * `resolveStringProp`/`lookup` the renderer already trusts.
  *
  * @see design/xgui_ta.md — "Component child data scope resolved (architect)" and
  *   "(3) `<Component src>` resolution … Missing/recursive placeholders".
  */
 
-import { resolveStringProp } from "./guiBinding";
+import { type ResolveScope, resolveStringProp } from "./guiBinding";
 import type { GuiNode } from "./guiNode";
-import type { ScopeStack } from "./guiScope";
 
 /** The attribute naming the child component file (a bare basename, e.g. `bag_slot.xml`). */
 export const SRC_ATTR = "src";
+
+/**
+ * The attribute naming a DATA OBJECT in the PARENT's model to seat as the mounted
+ * child's whole fresh ROOT (e.g. `<Component src="button" data="buttonProps"/>`).
+ * A bare model key (v1) resolved in the parent's current scope; the looked-up
+ * object becomes the child's root, and any explicit override attributes on the same
+ * `<Component>` layer ON TOP of it (see {@link resolveChildRoot}). Structural, so it
+ * is excluded from the flat overrides — it selects the base, it is not itself a prop.
+ */
+export const DATA_ATTR = "data";
 
 /**
  * Attribute names on a `<Component>` that are STRUCTURAL/instance-level, not data
@@ -49,8 +58,7 @@ export const SRC_ATTR = "src";
  * `<Component>` element (its own geometry/repetition/identity) and must NOT leak
  * into the child's fresh root as bindable props.
  *
- * - `src` selects the child file; `forEach`/`key` drive repetition of the
- *   `<Component>` in the parent; `position`/`size`/`layer`/`visible` are the
+ * - `src` selects the child file; `position`/`size`/`layer`/`visible` are the
  *   instance box's own geometry/order/visibility (they live on the `<Component>`,
  *   not the child — see design (3): the placeholder occupies "the component
  *   instance's own position/size").
@@ -60,8 +68,7 @@ export const SRC_ATTR = "src";
  */
 const NON_OVERRIDE_ATTRS = new Set([
   SRC_ATTR,
-  "forEach",
-  "key",
+  DATA_ATTR,
   "id",
   "position",
   "size",
@@ -90,11 +97,9 @@ export function srcBasename(src: string | undefined): string {
  * the concrete `{ name → value }` object that becomes the child's FRESH ROOT model
  * (F6a). This is the linchpin of the locked rule:
  *
- *   - Each override is resolved with the SAME `resolveAttr` the renderer uses, in
- *     the PARENT's current scope (item scope if the `<Component>` is under a
- *     `forEach`, root otherwise) — so `label="{name}"` under a loop becomes
- *     `label = "Bitlynx"` (this biogram's name), and `tint="{$.theme}"` becomes
- *     the parent root's theme. Bare = parent item, `$.` = parent root, per F4.
+ *   - Each override is resolved with the SAME `resolveStringProp` the renderer uses,
+ *     in the PARENT's scope — so `label="{name}"` becomes `label = "Bitlynx"`
+ *     (the parent model's name).
  *   - The result is a VALUE boundary: the child receives DATA, never tokens to
  *     re-resolve. A child `{label}` reads the concrete pre-resolved value.
  *   - An override that did NOT resolve in the parent (a missing parent field) is
@@ -116,22 +121,66 @@ export function srcBasename(src: string | undefined): string {
  * override is DATA, not a styled color prop on this element. A child that consumes
  * an override as a color resolves the palette in ITS OWN scope, where it belongs.
  *
- * STRUCTURAL attrs (`src`, `forEach`, geometry, …) are excluded — they belong to
- * the parent's render of the `<Component>` box, not the child's data.
+ * STRUCTURAL attrs (`src`, geometry, …) are excluded — they belong to the
+ * parent's render of the `<Component>` box, not the child's data.
  */
 export function resolveOverrides(
   component: GuiNode,
-  parentScope: ScopeStack,
+  parentScope: ResolveScope,
 ): Record<string, string> {
   const overrides: Record<string, string> = {};
-  const scope = parentScope.asScope();
   for (const [name, raw] of Object.entries(component.attrs)) {
     if (NON_OVERRIDE_ATTRS.has(name)) continue;
     // String interpolation in the PARENT scope — the value crossing into the child
     // is concrete data; an unresolved token keeps its literal `{token}` form.
-    overrides[name] = resolveStringProp(raw, scope).value;
+    overrides[name] = resolveStringProp(raw, parentScope).value;
   }
   return overrides;
+}
+
+/** Whether a value is a plain (non-array, non-null) object usable as a data base. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Resolve the `data="key"` BASE object for a `<Component>`: look the bare key up in
+ * the PARENT's scope and return a SHALLOW COPY of the found object.
+ *
+ * Returns an empty object when there is no `data` attr, or the named key is absent /
+ * resolves to a non-object — a miss leaves the child's `{token}`s unresolved (a
+ * VISIBLE miss inside the child) rather than silently inheriting parent data, the
+ * same boundary posture {@link resolveOverrides} takes for a missing override. The
+ * copy is shallow because the override layer ({@link resolveChildRoot}) only sets
+ * top-level fields; nested objects are shared read-only with the parent model.
+ */
+function resolveDataBase(component: GuiNode, parentScope: ResolveScope): Record<string, unknown> {
+  const raw = component.attrs[DATA_ATTR];
+  if (raw === undefined || raw.trim() === "") return {};
+  const found = parentScope.lookup(raw.trim());
+  return isPlainObject(found) ? { ...found } : {};
+}
+
+/**
+ * Build the mounted child's fresh ROOT model (F6a, extended): the `data="key"` base
+ * object from the parent model with the `<Component>`'s explicit override attributes
+ * LAYERED ON TOP (each pre-resolved in the parent scope, overriding that top-level
+ * field). With no `data` attr this reduces to {@link resolveOverrides} (the original
+ * flat-overrides behavior); with no overrides it is just the base object.
+ *
+ * The child still resolves its `{token}`s as a FRESH MODEL — no parent fall-through.
+ * `data` selects WHICH parent object seeds that model; overrides patch individual
+ * fields on it. The result is seated by the renderer as
+ * `flatRootScope(resolveChildRoot(...))`.
+ */
+export function resolveChildRoot(
+  component: GuiNode,
+  parentScope: ResolveScope,
+): Record<string, unknown> {
+  return {
+    ...resolveDataBase(component, parentScope),
+    ...resolveOverrides(component, parentScope),
+  };
 }
 
 /** Why a `<Component>` renders as a placeholder instead of its mounted subtree. */

@@ -195,6 +195,7 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
         activeKey={activeKey}
         onOpen={handleOpen}
         onNew={handleNew}
+        onCollapse={() => setPreference("workbench.objectListCollapsed", true)}
         className={cn(objectListCollapsed && "hidden")}
       />
 

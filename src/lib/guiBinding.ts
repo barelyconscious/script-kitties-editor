@@ -28,11 +28,12 @@
  * a binding" affordance. This module's job is to REPORT whether a value resolved;
  * the styling lives in the renderer.
  *
- * SCOPE (F3): resolution is against the FLAT ROOT model only. The `forEach` scope
- * STACK and `$`/item scoping are F4. To keep that extension clean, every resolve
- * entry point takes a {@link ResolveScope} — an opaque lookup of token → value —
- * rather than a bare object. F4 replaces the flat-root scope with a stack-backed
- * scope WITHOUT touching this module's resolution logic: only `lookup` changes.
+ * SCOPE: resolution is against a single FLAT model. There is one scope — bare
+ * tokens resolve against the one model object (see {@link flatRootScope}); there
+ * is no scope stack, no item/root distinction, no nesting. Every resolve entry
+ * point takes a {@link ResolveScope} — an opaque lookup of token → value — rather
+ * than a bare object, so the resolution rules stay independent of how the lookup
+ * is sourced.
  *
  * This module is PURE (no React, no DOM, no palette fetching). Palette fetching
  * is the caller's job (it passes a resolved palette map in); see `guiPalette.ts`
@@ -43,10 +44,9 @@
  */
 
 /**
- * A resolution scope: the lookup a `{token}` resolves against. F3 supplies a flat
- * root model; F4 will supply a stack-backed scope that honors item scopes and the
- * `$` root prefix — but the resolver only ever calls `lookup(token)`, so that
- * extension is invisible here.
+ * A resolution scope: the lookup a `{token}` resolves against — a single flat
+ * model (see {@link flatRootScope}). The resolver only ever calls `lookup(token)`,
+ * so the rules here stay independent of how the lookup is sourced.
  *
  * `lookup` returns the bound value for a token name (the text BETWEEN the braces,
  * e.g. `"health"` for `{health}`), or `undefined` when the token is unbound. The
@@ -59,18 +59,19 @@ export type ResolveScope = {
 /** A resolved palette: a flat `name → "r,g,b,a"` color-code map. */
 export type Palette = Record<string, string>;
 
-/** Own-property check that works regardless of the TS lib target (`Object.hasOwn`). */
+/** Own-property check that works regardless of the TS lib target (`Object.hasOwn` is es2022). */
 function hasOwn(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 /**
- * Build a {@link ResolveScope} over a flat root data model (the F3 contract).
+ * Build a {@link ResolveScope} over a single flat data model.
  *
- * A bare token `{name}` reads `model.name`. Nested paths and `$`/item scoping are
- * NOT handled here — that is F4. A token naming a missing key returns `undefined`
- * (→ unresolved). The model is whatever the Data Model panel's JSON parses to; a
- * non-object model (array/scalar/null) simply has no top-level keys to bind.
+ * A bare token `{name}` reads `model.name` (own-property only). There is no nested
+ * path walking, no item/root scoping — one model, one lookup. A token naming a
+ * missing key returns `undefined` (→ unresolved). The model is whatever the Data
+ * Model panel's JSON parses to; a non-object model (array/scalar/null) simply has
+ * no top-level keys to bind.
  */
 export function flatRootScope(model: unknown): ResolveScope {
   const obj =
@@ -81,6 +82,32 @@ export function flatRootScope(model: unknown): ResolveScope {
     lookup(token: string): unknown {
       // Direct own-property hit only — no path walking, no prototype lookups.
       return hasOwn(obj, token) ? obj[token] : undefined;
+    },
+  };
+}
+
+/**
+ * Build a {@link ResolveScope} for an EMPTY grid cell (a `null` grid item — e.g. an
+ * empty inventory slot).
+ *
+ * Every token resolves to the EMPTY STRING (`""`) rather than `undefined`. That
+ * distinction is the whole point: a `""` is a successful resolution, so
+ * resolveStringProp/resolveTypedProp/resolveColorProp/resolveCompoundProp all
+ * report `resolved: true` and the cell does NOT render the amber waiting-for-binding
+ * affordance. The cell renders the template's LITERAL chrome only, with every
+ * `{token}` collapsing to "" (e.g. `text="{name}"` → "", `texture="{sprite}"` → ""
+ * with no load, `backgroundColor="{c}"` → "" → no fill). Non-token literal attrs
+ * (e.g. a slot's `backgroundColor="50,50,50,255"`) are untouched and still paint.
+ *
+ * Contrast with `flatRootScope(null)`, whose `lookup` returns `undefined` for every
+ * token — that marks each token UNRESOLVED, which is exactly the waiting affordance
+ * an empty cell must NOT show. See design/gridLayout_element_design_prompt.md
+ * (caveat 5): missing cells render template chrome with tokens resolving to "".
+ */
+export function emptyItemScope(): ResolveScope {
+  return {
+    lookup(): unknown {
+      return "";
     },
   };
 }
@@ -329,7 +356,6 @@ const LITERAL_ONLY_PROPS = new Set([
   "id",
   "src",
   "controller",
-  "key",
   "name",
   "handler",
   "onKeyPressed",

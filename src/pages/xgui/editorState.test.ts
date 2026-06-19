@@ -114,9 +114,52 @@ describe("editorReducer", () => {
     const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
     const child: GuiNode = { nodeId: "new", tag: "Panel", attrs: {}, children: [] };
     const next = editorReducer(state, { type: "addChildNode", parentNodeId: "root", child });
-    expect(next.open?.root.children[0]).toBe(child);
+    // The inserted node keeps the child's nodeId (the auto-id only touches attrs).
+    expect(next.open?.root.children[0]?.nodeId).toBe("new");
     expect(next.selectedNodeId).toBe("new");
     expect(next.dirty).toBe(true);
+  });
+
+  it("addChildNode auto-assigns a running id (Panel1, Text2, …) to id-bearing tags", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const s1 = editorReducer(s0, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "p", tag: "Panel", attrs: {}, children: [] },
+    });
+    expect(s1.open?.root.children[0]?.attrs.id).toBe("Panel1");
+    // `id` is written FIRST in attrs so the serialized XML leads with it.
+    expect(Object.keys(s1.open?.root.children[0]?.attrs ?? {})[0]).toBe("id");
+    const s2 = editorReducer(s1, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "t", tag: "Text", attrs: {}, children: [] },
+    });
+    // The running counter is shared across tags: the second added element is …2.
+    expect(s2.open?.root.children[1]?.attrs.id).toBe("Text2");
+  });
+
+  it("addChildNode does NOT auto-id an <Event> (events are name→handler)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(s0, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "e", tag: "Event", attrs: { name: "", handler: "" }, children: [] },
+    });
+    expect(next.open?.root.children[0]?.attrs.id).toBeUndefined();
+  });
+
+  it("addChildNode keeps an explicitly-provided id instead of overwriting it", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(s0, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "p", tag: "Panel", attrs: { id: "healthBar" }, children: [] },
+    });
+    expect(next.open?.root.children[0]?.attrs.id).toBe("healthBar");
   });
 
   it("addChildNode is a no-op (no dirty, no selection move) when the parent is missing", () => {

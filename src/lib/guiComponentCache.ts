@@ -10,8 +10,7 @@
  *
  *   - the preview does NOT refetch a child on every keystroke (editing the Data
  *     Model re-renders the parent, but the child trees are stable);
- *   - a child referenced from many places (or many `forEach` instances) is fetched
- *     once and shared.
+ *   - a child referenced from many places is fetched once and shared.
  *
  * Each cache entry settles to one of three states, mirroring `get_component`'s
  * three outcomes — surfaced to the renderer as a small tagged result so the mount
@@ -110,6 +109,29 @@ function loadComponent(basename: string): Promise<SettledEntry> {
     cache.set(basename, entry);
   }
   return entry;
+}
+
+/**
+ * Fetch + parse one component by basename, returning its parsed tree or `null`
+ * (absent / broken / unparseable — the same single failure bucket). Shares the
+ * module cache + invalidation with the preview's {@link useComponent}, so loading
+ * the whole set for the data-model registry never double-fetches a child the
+ * preview already pulled. A blank basename short-circuits to `null`.
+ */
+export async function loadComponentTree(basename: string): Promise<GuiNode | null> {
+  if (!basename) return null;
+  const entry = await loadComponent(basename);
+  return entry.status === "ok" ? entry.root : null;
+}
+
+/** The module cache's current version — bumped by {@link invalidateComponents}. */
+export function componentsVersion(): number {
+  return version;
+}
+
+/** Subscribe to cache invalidations (re-export of the internal store subscribe). */
+export function subscribeComponents(onChange: () => void): () => void {
+  return subscribe(onChange);
 }
 
 /**

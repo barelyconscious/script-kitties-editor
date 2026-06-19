@@ -2,6 +2,7 @@ import { FileWarning, Loader2 } from "lucide-react";
 import { populationWithDraft } from "@/lib/creature";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { ProgressionChart } from "@/pages/creature-editor/ProgressionChart";
+import { StatGrowthTable } from "@/pages/creature-editor/StatGrowthTable";
 import { useCreatureTab } from "./creatureTab";
 
 /** Coalesce a burst of stat scrubbing into one chart redraw (ms). */
@@ -19,7 +20,7 @@ const CHART_DEBOUNCE_MS = 150;
  * and registers no save target — the editable surface is the Data pane.
  */
 export function CreatureChartPane() {
-  const { state, draft, population, activeStat, setActiveStat } = useCreatureTab();
+  const { state, draft, setDraft, population, activeStat, setActiveStat } = useCreatureTab();
   // Feed the chart a debounced draft so rapid scrubbing (held arrow key, scroll
   // wheel) coalesces into one Recharts redraw; the Data pane stays instant since
   // it reads the live draft directly. (Stat selection stays instant — it's a
@@ -49,17 +50,41 @@ export function CreatureChartPane() {
             <span>This creature could not be found.</span>
           </PaneStatus>
         ) : (
-          <div className="flex flex-col gap-3">
-            <p className="text-muted-foreground text-xs">
-              Projected growth versus the average and max across all creatures — updates live as you
-              edit stats.
-            </p>
-            <ProgressionChart
-              creature={debouncedDraft ?? draft}
-              population={populationWithDraft(population, debouncedDraft ?? draft)}
-              stat={activeStat}
-              onStatChange={setActiveStat}
-            />
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3">
+              <p className="text-muted-foreground text-xs">
+                Projected growth versus the average and max across all creatures — updates live as
+                you edit stats.
+              </p>
+              <ProgressionChart
+                creature={debouncedDraft ?? draft}
+                population={populationWithDraft(population, debouncedDraft ?? draft)}
+                stat={activeStat}
+                onStatChange={setActiveStat}
+              />
+            </div>
+
+            {/* The stat grid lives here, directly under the chart: edit a stat and
+                watch its line move. The table reads the LIVE draft (instant), while
+                the chart above reads the debounced draft. Clicking a row (or
+                focusing a Base/Gain box) plots that stat via the same `setActiveStat`
+                the chart's own select uses, so the two stay linked; the active row
+                highlights. On wide screens the grid splits into two columns. */}
+            <section className="flex flex-col gap-2">
+              <div>
+                <h3 className="font-medium text-sm">Stats &amp; growth</h3>
+                <p className="text-muted-foreground text-xs">
+                  Level-1 base value and the flat amount each stat gains per level. Click a row to
+                  plot that stat above.
+                </p>
+              </div>
+              <StatGrowthTable
+                creature={draft}
+                onChange={setDraft}
+                activeStat={activeStat}
+                onStatSelect={setActiveStat}
+              />
+            </section>
           </div>
         )}
       </div>

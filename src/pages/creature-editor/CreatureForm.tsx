@@ -37,6 +37,7 @@ export function CreatureForm({
   onChange,
   disabled,
   showProgressionChart = true,
+  showStatGrowth = true,
   singleColumnStats = false,
   onStatFocus,
 }: {
@@ -52,6 +53,14 @@ export function CreatureForm({
    * the balance surface.
    */
   showProgressionChart?: boolean;
+  /**
+   * Whether to render the "Stats & growth" grid. Defaults to `true`. The
+   * Workbench's creature DATA pane passes `false`: there the stat grid lives in
+   * the Stats-graph pane (directly under the chart) so editing a stat and watching
+   * its line move happen in one place. The DATA pane keeps only identity, base
+   * abilities, and per-level unlocks.
+   */
+  showStatGrowth?: boolean;
   /**
    * Render the stats & growth grid as ONE full-width table instead of the
    * two-up split. The standalone editor is wide enough for the split; the
@@ -79,21 +88,23 @@ export function CreatureForm({
         </Section>
       )}
 
-      <Section
-        title="Stats & growth"
-        description="Level-1 base value and the flat amount each stat gains per level."
-      >
-        {singleColumnStats ? (
-          <StatGrowthTableSingle
-            creature={creature}
-            onChange={onChange}
-            disabled={disabled}
-            onStatFocus={onStatFocus}
-          />
-        ) : (
-          <StatGrowthTable creature={creature} onChange={onChange} disabled={disabled} />
-        )}
-      </Section>
+      {showStatGrowth && (
+        <Section
+          title="Stats & growth"
+          description="Level-1 base value and the flat amount each stat gains per level."
+        >
+          {singleColumnStats ? (
+            <StatGrowthTableSingle
+              creature={creature}
+              onChange={onChange}
+              disabled={disabled}
+              onStatFocus={onStatFocus}
+            />
+          ) : (
+            <StatGrowthTable creature={creature} onChange={onChange} disabled={disabled} />
+          )}
+        </Section>
+      )}
 
       <Section title="Base abilities" description="Abilities the creature knows from level 1.">
         <AbilityPicker

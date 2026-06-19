@@ -73,7 +73,15 @@ function freeformNames(node: GuiNode): string[] {
   // (We keep this in lockstep with guiProperties.specialAttrs — both exclude the
   // same set so a known/special attr never leaks into the freeform rows.)
   const special = new Set<string>(node.tag === "Event" ? [] : ["id"]);
-  if (node.tag === "Component") special.add("src");
+  if (node.tag === "Component") {
+    special.add("src");
+    // `data` has its own dedicated field (the nested-component data-object binding),
+    // so keep it out of the freeform override rows.
+    special.add("data");
+  }
+  // The View shows no fields; its `controller` is managed by the Controller tab,
+  // so keep it out of the freeform rows (its `id` is already covered above).
+  if (node.tag === "View") special.add("controller");
   return Object.keys(node.attrs).filter((name) => !known.has(name) && !special.has(name));
 }
 

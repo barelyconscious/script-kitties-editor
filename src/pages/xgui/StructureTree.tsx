@@ -25,14 +25,21 @@
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
 
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
-import { allowedChildTags, EVENT_PLACEHOLDER_LABEL, makeChildNode, nodeLabel } from "./guiTreeEdit";
+import { nodeHasId } from "./guiProperties";
+import {
+  allowedChildTags,
+  EVENT_PLACEHOLDER_LABEL,
+  findNode,
+  makeChildNode,
+  nodeLabel,
+} from "./guiTreeEdit";
 
 /** Per-tag accent for the tag chip, so the tree reads at a glance. */
 function tagChipClass(tag: GuiTag): string {
@@ -43,6 +50,8 @@ function tagChipClass(tag: GuiTag): string {
       return "text-amber-400";
     case "Event":
       return "text-sky-400";
+    case "GridLayout":
+      return "text-violet-400";
     default:
       return "text-muted-foreground";
   }
@@ -71,15 +80,23 @@ export function StructureTree() {
       setPickerParentId(parentNodeId);
       return;
     }
-    dispatch({ type: "addChildNode", parentNodeId, child: makeChildNode(tag) });
+    // Pass the parent's tag so a child added UNDER a GridLayout is created without
+    // its own default position/size (the grid owns its child's geometry).
+    const parentTag = findNode(open.root, parentNodeId)?.tag;
+    dispatch({
+      type: "addChildNode",
+      parentNodeId,
+      child: makeChildNode(tag, undefined, parentTag),
+    });
   };
 
   const handlePickComponent = (basename: string) => {
     if (pickerParentId == null) return;
+    const parentTag = findNode(open.root, pickerParentId)?.tag;
     dispatch({
       type: "addChildNode",
       parentNodeId: pickerParentId,
-      child: makeChildNode("Component", basename),
+      child: makeChildNode("Component", basename, parentTag),
     });
     setPickerParentId(null);
   };
@@ -111,6 +128,7 @@ export function StructureTree() {
           if (!o) setPickerParentId(null);
         }}
         onPick={handlePickComponent}
+        excludeName={open.name}
       />
     </div>
   );
@@ -135,7 +153,13 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
   // Events label by name (no `#` prefix); other tags prefix their id with `#`.
   const isEvent = tag === "Event";
   const selected = node.nodeId === selectedNodeId;
-  const addable = allowedChildTags(tag);
+  // Flag an id-bearing element (Panel/Text/Component) that has no `id`: it can't be
+  // referenced from the controller or data bindings, and won't appear in any
+  // descendant's computed id path. Newly-added elements are auto-id'd, so this only
+  // lights up for imported components or an id the user deliberately cleared — which
+  // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
+  const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
+  const addable = allowedChildTags(node);
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
@@ -199,6 +223,19 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
                 </span>
               )}
             </button>
+
+            {missingId && (
+              // Always-visible status flag (not hover-gated): this element has no id,
+              // so it isn't addressable. The title spells out the consequence.
+              <span
+                role="img"
+                title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
+                aria-label="Missing id"
+                className="shrink-0 text-amber-500"
+              >
+                <TriangleAlert className="size-3" />
+              </span>
+            )}
 
             {removable && (
               // A visible delete affordance on hover mirrors the right-click menu, so

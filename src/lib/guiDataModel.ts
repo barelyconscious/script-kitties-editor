@@ -6,8 +6,7 @@
  * `guiBinding.ts`). Parsing is separated from the React panel so it is unit-testable
  * and so the panel stays a thin controlled `<textarea>`.
  *
- * SCOPE (F3): the parsed value is handed to the preview as the FLAT ROOT model.
- * `forEach` item scoping ($/item) is F4 and does not change this parse.
+ * SCOPE: the parsed value is handed to the preview as the single flat model.
  */
 
 /** The outcome of parsing the Data Model panel's raw JSON text. */

@@ -22,10 +22,12 @@ import {
   FileCode2,
   FolderPlus,
   MonitorPlay,
+  PanelLeftClose,
   Plus,
   SearchIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -36,11 +38,11 @@ import {
   type GuiComponentRef,
   type GuiFolder,
   type GuiTreeRow,
-  isValidBasename,
-  toComponentBasename,
 } from "./guiTree";
 import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
+import { NewFolderDialog } from "./NewFolderDialog";
+import { OpenErrorDialog } from "./OpenErrorDialog";
 import { buildOpenComponent } from "./openComponent";
 import { decideSwitch, type SwitchChoice } from "./switchGuard";
 import { UnsavedSwitchDialog } from "./UnsavedSwitchDialog";
@@ -67,10 +69,12 @@ function filterTree(tree: GuiFolder, query: string): GuiFolder {
 export type ComponentListProps = {
   /** Whether the panel is collapsed (hidden); a slim rail is shown in its place. */
   collapsed?: boolean;
+  /** Collapse the pane (shows the border collapse handle when provided). */
+  onCollapse?: () => void;
   className?: string;
 };
 
-export function ComponentList({ collapsed, className }: ComponentListProps) {
+export function ComponentList({ collapsed, onCollapse, className }: ComponentListProps) {
   const { state, dispatch } = useEditorStore();
   const { save, saving: savingSwitch } = useComponentSave();
   // Tree state + the get_gui_tree refetch are shared (lifted to the page) so F13's
@@ -90,9 +94,8 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
-
-  // The panel shows either kind of error: a failed tree load or a failed open.
-  const error = treeError ?? openError;
+  // Whether the New-folder dialog is open (header folder-icon button).
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
 
   const filtered = useMemo(() => filterTree(tree, query), [tree, query]);
   // When searching, force everything expanded so matches deep in the tree show.
@@ -197,21 +200,8 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
     [reload, openComponent],
   );
 
-  // The top-level New-folder action prompts for a name and creates it at the root.
-  const handleNewFolder = useCallback(async () => {
-    const raw = window.prompt("New folder name (under gui/):");
-    if (raw == null) return;
-    const folderName = toComponentBasename(raw);
-    if (!isValidBasename(folderName)) {
-      window.alert("Folder name must be a valid lower_snake_case identifier.");
-      return;
-    }
-    try {
-      await invoke("create_folder", { parentRel: "", name: folderName });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : String(err));
-      return;
-    }
+  // After a folder create: refresh the tree so the new folder shows.
+  const handleFolderCreated = useCallback(() => {
     void reload();
   }, [reload]);
 
@@ -225,6 +215,18 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
     >
       <div className="flex items-center gap-1 px-3 py-2">
+        {onCollapse && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onCollapse}
+            title="Collapse component list"
+            aria-label="Collapse component list"
+            className="shrink-0 text-muted-foreground"
+          >
+            <PanelLeftClose />
+          </Button>
+        )}
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -239,7 +241,7 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
             <button
               type="button"
               aria-label="New folder"
-              onClick={handleNewFolder}
+              onClick={() => setNewFolderOpen(true)}
               className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <FolderPlus className="size-4" />
@@ -252,8 +254,11 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {loading ? (
           <p className="px-3 py-8 text-center text-muted-foreground text-sm">Loading components…</p>
-        ) : error ? (
-          <p className="px-3 py-8 text-center text-destructive text-sm">{error}</p>
+        ) : treeError ? (
+          // A failed tree LOAD stays inline — there is no list to show. An open/parse
+          // failure is different: it pops as a modal (see OpenErrorDialog) so the list
+          // stays visible and the user can pick another component.
+          <p className="px-3 py-8 text-center text-destructive text-sm">{treeError}</p>
         ) : (
           <ul>
             {/* The gui/ root carries the same hover-"+" affordance as folder rows,
@@ -300,12 +305,23 @@ export function ComponentList({ collapsed, className }: ComponentListProps) {
         onCreated={handleCreated}
       />
 
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        tree={tree}
+        onCreated={handleFolderCreated}
+      />
+
       <UnsavedSwitchDialog
         open={pendingSwitch != null}
         componentName={state.open?.name ?? null}
         saving={savingSwitch}
         onChoose={(choice) => void resolveSwitch(choice)}
       />
+
+      {/* An open/parse failure pops here as a modal — the list behind it stays
+          visible and selectable so a bad-XML component never locks the user in. */}
+      <OpenErrorDialog error={openError} onDismiss={() => setOpenError(null)} />
     </div>
   );
 }
@@ -323,7 +339,7 @@ function RootRow({ onAddComponent }: { onAddComponent: () => void }) {
     <li>
       <div className="group flex w-full min-w-0 items-center gap-1 pr-2 pl-2">
         <span className="min-w-0 flex-1 select-none truncate py-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          gui/
+          Scenes
         </span>
         <button
           type="button"

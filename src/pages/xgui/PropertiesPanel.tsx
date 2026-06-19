@@ -22,7 +22,7 @@
  *   "Colors and the palette".
  */
 
-import { Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { colorCodeToCss } from "../../lib/guiBinding";
 import type { GuiNode } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
+import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
 import {
   deriveRows,
@@ -54,7 +55,7 @@ import {
   srcBasename,
   withAttr,
 } from "./guiProperties";
-import { nodePath } from "./guiTreeEdit";
+import { makeChildNode, nodePath } from "./guiTreeEdit";
 
 export function PropertiesPanel() {
   const { state, dispatch } = useEditorStore();
@@ -104,6 +105,10 @@ export function PropertiesPanel() {
   // not by a hierarchical id. So hide BOTH the computed read-only id and the editable
   // local id for an Event; every other tag still shows them.
   const hasId = nodeHasId(node.tag);
+  // The parent tag (the node just above the selected one in the path) decides
+  // whether the selected node OWNS its geometry: a child of a <GridLayout> does
+  // not — the grid lays it out — so fieldsForTag drops its position/size rows.
+  const parentTag = path.length >= 2 ? path[path.length - 2].tag : undefined;
 
   return (
     <div className="flex min-h-0 flex-col border-t">
@@ -121,16 +126,37 @@ export function PropertiesPanel() {
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
+        {/* <Component> src — the included component's basename. Pinned to the very
+            top and rendered as an obviously NON-editable, locked field: it is set
+            once via the tree's component picker (when the <Component> is added) and
+            never typed here. */}
+        {node.tag === "Component" && (
+          <FieldRow label="src">
+            <div
+              aria-readonly="true"
+              title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
+              className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                {srcBasename(node.attrs.src) || "—"}
+              </span>
+            </div>
+          </FieldRow>
+        )}
+
         {/* Computed read-only hierarchical id + editable local id — hidden for Event
             nodes, which have no id (475). */}
         {hasId && (
           <>
             <FieldRow label="computed id">
-              <div
-                className="truncate rounded border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
-                title={computed || "no id set"}
-              >
-                {computed || "—"}
+              <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
+                <span
+                  className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
+                  title={computed || "no id set"}
+                >
+                  {computed || "—"}
+                </span>
+                <CopyIdButton value={computed} />
               </div>
             </FieldRow>
 
@@ -145,20 +171,29 @@ export function PropertiesPanel() {
           </>
         )}
 
-        {/* <Component> src — read-only basename, set via the tree picker. */}
+        {/* <Component> data — the key of a data-model OBJECT to seat as the mounted
+            child's root (auto-populated from the child's token shape). A bare model
+            key; clearing it removes the binding. Committed on BLUR (not per
+            keystroke) so a half-typed name never spawns a throwaway model key. */}
         {node.tag === "Component" && (
-          <FieldRow label="src">
-            <div
-              className="truncate rounded border bg-muted/40 px-2 py-1 font-mono text-xs"
-              title={node.attrs.src ?? ""}
-            >
-              {srcBasename(node.attrs.src) || "—"}
-            </div>
+          <FieldRow label="data">
+            <DataKeyField
+              key={node.nodeId}
+              value={node.attrs.data ?? ""}
+              onCommit={(v) => setAttr("data", v)}
+            />
           </FieldRow>
         )}
 
-        {/* Well-known fields for the tag. */}
-        {fieldsForTag(node.tag).map((field) => (
+        {/* The root View has no editable properties here — its id is auto-set on
+            create and its controller is wired via the Controller tab. Instead of a
+            dead-end note, offer the add-child actions so the panel is a starting
+            point rather than an empty surface. */}
+        {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
+
+        {/* Well-known fields for the tag (position/size suppressed for a grid
+            child — the parent GridLayout owns its geometry). */}
+        {fieldsForTag(node.tag, parentTag).map((field) => (
           <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
         ))}
 
@@ -173,6 +208,61 @@ export function PropertiesPanel() {
   );
 }
 
+/**
+ * The root `<View>` has no editable properties, so its Properties slice instead
+ * offers the add-child actions — Add Panel / Add Text / Add Component — mirroring
+ * the structure tree's add menu. Each dispatches the SAME `addChildNode` action
+ * the tree uses (which appends under the View and selects the new node, so the
+ * panel immediately swings to editing what you just added). Component opens the
+ * shared {@link ComponentPicker} to choose a `src` basename first.
+ */
+function ViewChildAdder({ viewNodeId }: { viewNodeId: string }) {
+  const { state, dispatch } = useEditorStore();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const addChild = (tag: "Panel" | "Text") =>
+    dispatch({ type: "addChildNode", parentNodeId: viewNodeId, child: makeChildNode(tag) });
+
+  const addComponent = (basename: string) => {
+    dispatch({
+      type: "addChildNode",
+      parentNodeId: viewNodeId,
+      child: makeChildNode("Component", basename),
+    });
+    setPickerOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-1.5">
+        <AddChildButton onClick={() => addChild("Panel")}>Add Panel</AddChildButton>
+        <AddChildButton onClick={() => addChild("Text")}>Add Text</AddChildButton>
+        <AddChildButton onClick={() => setPickerOpen(true)}>Add Component…</AddChildButton>
+      </div>
+      <ComponentPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={addComponent}
+        excludeName={state.open?.name}
+      />
+    </div>
+  );
+}
+
+/** A full-width add-child action button for the View properties slice. */
+function AddChildButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-1.5 rounded-md border border-dashed px-2 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:border-solid hover:bg-muted hover:text-foreground"
+    >
+      <Plus className="size-3.5 shrink-0" />
+      {children}
+    </button>
+  );
+}
+
 /** A labeled property row: a small label above its control. */
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -182,6 +272,65 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
       </span>
       {children}
     </div>
+  );
+}
+
+/**
+ * Copy-to-clipboard affordance seated inside the read-only computed-id field.
+ * Flashes a check for a beat after a successful copy; disabled when there is no id.
+ */
+function CopyIdButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard can reject (permissions/insecure context) — silently ignore.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!value}
+      title={value ? "Copy computed id" : "no id set"}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+/**
+ * The `<Component>` `data` key input. Edits are LOCAL until BLUR (or Enter), so a
+ * half-typed name like "b"/"bu"/"but" never lands on the node — which would spawn a
+ * throwaway data-model object per keystroke. Mounted with a `key={nodeId}` by the
+ * caller so selecting a different element gives it a fresh value; an external change
+ * to the committed value (undo/redo) re-syncs the draft.
+ */
+function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      placeholder="data model key"
+      className="h-7 font-mono text-xs"
+    />
   );
 }
 
@@ -216,6 +365,11 @@ function FieldControl({
   onSet: (name: string, value: string) => void;
 }) {
   switch (kind) {
+    case "modelKey":
+      // A bare model key (e.g. GridLayout's dataCollection) — commit on blur/Enter
+      // (not per keystroke) so a half-typed key doesn't spawn a throwaway scaffold
+      // entry per character. Reuses the same control as <Component>'s `data` key.
+      return <DataKeyField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
       return <CompoundField name={name} value={value} onSet={onSet} />;
     case "color":

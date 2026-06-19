@@ -15,6 +15,7 @@ import {
   nodePath,
   removeNode,
   setNodeAttrs,
+  treeNodePrimaryLabel,
 } from "./guiTreeEdit";
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
@@ -182,6 +183,34 @@ describe("nodeLabel — tree row labeling", () => {
   it("gives a non-Event node with no id a null secondary label", () => {
     expect(nodeLabel(nodeWith("Panel", {})).secondary).toBeNull();
     expect(nodeLabel(nodeWith("Text", { id: "  " })).secondary).toBeNull();
+  });
+});
+
+describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
+  it("labels a non-Event node by its trimmed id (replacing the tag name)", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Panel", { id: " Panel1 " }))).toEqual({
+      text: "Panel1",
+      placeholder: false,
+    });
+  });
+
+  it("falls back to the bare tag name when a non-Event node has no id", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({ text: "Panel", placeholder: false });
+    expect(treeNodePrimaryLabel(nodeWith("Text", { id: "  " }))).toEqual({
+      text: "Text",
+      placeholder: false,
+    });
+  });
+
+  it("labels an <Event> by its name, flagging the placeholder when blank", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Event", { name: "Tick" }))).toEqual({
+      text: "Tick",
+      placeholder: false,
+    });
+    expect(treeNodePrimaryLabel(nodeWith("Event", {}))).toEqual({
+      text: EVENT_PLACEHOLDER_LABEL,
+      placeholder: true,
+    });
   });
 });
 

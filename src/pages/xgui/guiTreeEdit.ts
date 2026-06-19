@@ -46,6 +46,29 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
 }
 
 /**
+ * The PRIMARY label a tree row shows — the element's IDENTITY rather than its tag
+ * (the tag is conveyed by the row's per-tag icon + color), so e.g. a `<Panel
+ * id="Panel1">` reads as `Panel1`, not `Panel`:
+ *  - `<Event>` has no id (events are name→handler), so it labels by its `name`,
+ *    falling back to {@link EVENT_PLACEHOLDER_LABEL} (flagged `placeholder`) when blank;
+ *  - every other tag labels by its authored `id` (trimmed) when present, and falls
+ *    back to the bare tag name when it has none — so the row is never empty (an idless
+ *    id-bearing element is additionally flagged by the tree's missing-id warning).
+ *
+ * Pure (no React) so the labeling rule is unit-tested without rendering the tree.
+ */
+export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder: boolean } {
+  if (node.tag === "Event") {
+    const name = node.attrs.name?.trim();
+    return name
+      ? { text: name, placeholder: false }
+      : { text: EVENT_PLACEHOLDER_LABEL, placeholder: true };
+  }
+  const id = node.attrs.id?.trim();
+  return id ? { text: id, placeholder: false } : { text: node.tag, placeholder: false };
+}
+
+/**
  * The tags a user can ADD as a child under the given parent NODE, honoring the
  * phase-1 structural rules. This is CHILDREN-AWARE — some rules depend not just on
  * the parent's tag but on what it already contains (a GridLayout holds one child; a

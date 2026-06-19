@@ -40,6 +40,7 @@ import { DataModelPanel } from "./xgui/DataModelPanel";
 import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
 import { applyModelEdit, seedDataModel } from "./xgui/dataModelState";
 import { getPersistedModel, setPersistedModel } from "./xgui/dataModelStore";
+import { lockedKeysFor, setPersistedLocks } from "./xgui/elementLockStore";
 import {
   EditorStateProvider,
   type EditorTab,
@@ -82,6 +83,7 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
   return (
     <EditorStateProvider>
       <GuiTreeStoreProvider>
+        <LockPersistence />
         <div className="flex h-full min-h-0">
           <ComponentList
             collapsed={componentListCollapsed}
@@ -107,6 +109,26 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
       </GuiTreeStoreProvider>
     </EditorStateProvider>
   );
+}
+
+/**
+ * Persists the open component's locked elements to localStorage whenever the lock
+ * set OR the tree changes (element-lock persistence). Locks are stored as STABLE
+ * structural keys (see {@link import("./xgui/elementLockStore")}), so re-deriving them
+ * from the current tree on every edit keeps the persisted paths fresh as structure
+ * shifts. Seeding back on open/reload happens at those call sites; this only writes.
+ * Renders nothing — it is a side-effect bridge mounted inside the store provider.
+ */
+function LockPersistence() {
+  const { state } = useEditorStore();
+  const path = state.open?.path;
+  const root = state.open?.root;
+  const locked = state.lockedNodeIds;
+  useEffect(() => {
+    if (!path || !root) return;
+    setPersistedLocks(path, lockedKeysFor(root, locked));
+  }, [path, root, locked]);
+  return null;
 }
 
 /**
@@ -170,7 +192,7 @@ function StructureColumn() {
   };
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-background/40">
+    <aside className="flex h-full w-72 shrink-0 flex-col border-r bg-background/40">
       <div className="border-b px-3 py-3.25 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Structure
       </div>

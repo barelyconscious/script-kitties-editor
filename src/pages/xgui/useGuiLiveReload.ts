@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invalidateComponents } from "../../lib/guiComponentCache";
 import { serializeGui } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
+import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
 import { GUI_CHANGED_EVENT } from "./guiEvents";
 import type { GuiComponentRef } from "./guiTree";
 import { decideLiveReload, onGuiChangedAlways, remapSelection } from "./liveReload";
@@ -104,7 +105,10 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
       const cur = stateRef.current.open;
       if (!cur || cur.path !== openPath) return;
       const selectedNodeId = remapSelection(cur.root, component.root, stateRef.current.selectedNodeId);
-      dispatch({ type: "reloadOpen", component, selectedNodeId });
+      // Re-resolve persisted locks against the re-parsed tree (nodeIds were
+      // re-minted), so a live external edit doesn't drop the user's locks.
+      const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
+      dispatch({ type: "reloadOpen", component, selectedNodeId, lockedNodeIds });
     },
     [dispatch],
   );

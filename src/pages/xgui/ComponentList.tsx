@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
+import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
 import {
   flattenTree,
   type GuiComponentRef,
@@ -130,7 +131,11 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
           return;
         }
         const component = buildOpenComponent(ref, xml);
-        dispatch({ type: "open", component });
+        // Restore any locks persisted for this component (resolved from stable
+        // structural keys against the just-parsed tree), so locking survives
+        // reloads/restarts.
+        const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
+        dispatch({ type: "open", component, lockedNodeIds });
       } catch (err) {
         const message =
           err instanceof GuiParseError

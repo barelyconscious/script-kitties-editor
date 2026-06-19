@@ -25,7 +25,21 @@
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
 
-import { ChevronDown, ChevronRight, Lock, Plus, Trash2, TriangleAlert } from "lucide-react";
+import {
+  AppWindow,
+  ChevronDown,
+  ChevronRight,
+  LayoutGrid,
+  Lock,
+  type LucideIcon,
+  MonitorPlay,
+  Plug,
+  Plus,
+  Trash2,
+  TriangleAlert,
+  Type,
+  Zap,
+} from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -33,16 +47,15 @@ import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
 import { nodeHasId } from "./guiProperties";
-import {
-  allowedChildTags,
-  EVENT_PLACEHOLDER_LABEL,
-  findNode,
-  makeChildNode,
-  nodeLabel,
-} from "./guiTreeEdit";
+import { allowedChildTags, findNode, makeChildNode, treeNodePrimaryLabel } from "./guiTreeEdit";
 
-/** Per-tag accent for the tag chip, so the tree reads at a glance. */
-function tagChipClass(tag: GuiTag): string {
+/**
+ * Per-tag accent color, shared by a row's type icon and its identity label so the
+ * element kind reads at a glance. The colored tags (View/Component/Event/Grid) keep
+ * their accent; Panel/Text fall back to plain foreground so their id stays readable
+ * as the primary label.
+ */
+function tagColorClass(tag: GuiTag): string {
   switch (tag) {
     case "View":
       return "text-primary";
@@ -53,9 +66,21 @@ function tagChipClass(tag: GuiTag): string {
     case "GridLayout":
       return "text-violet-400";
     default:
-      return "text-muted-foreground";
+      return "text-foreground";
   }
 }
+
+/** The type icon shown to the left of each row's label, one per element tag. */
+const TAG_ICON: Record<GuiTag, LucideIcon> = {
+  // View is a screen (matching the component list's "View" glyph); a Panel is a
+  // window/region; a Component plugs in an external piece (plug = plug-in).
+  View: MonitorPlay,
+  Panel: AppWindow,
+  Text: Type,
+  Component: Plug,
+  Event: Zap,
+  GridLayout: LayoutGrid,
+};
 
 export function StructureTree() {
   const { state, dispatch } = useEditorStore();
@@ -162,9 +187,12 @@ function TreeRow({
 }: TreeRowProps) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
-  const { tag, secondary } = nodeLabel(node);
-  // Events label by name (no `#` prefix); other tags prefix their id with `#`.
+  const tag = node.tag;
+  // The row's PRIMARY label is the element's identity (id, or event name), replacing
+  // the tag name — the tag is conveyed by the per-tag icon + color instead.
+  const { text: label, placeholder: labelPlaceholder } = treeNodePrimaryLabel(node);
   const isEvent = tag === "Event";
+  const TagIcon = TAG_ICON[tag];
   const selected = node.nodeId === selectedNodeId;
   // Flag an id-bearing element (Panel/Text/Component) that has no `id`: it can't be
   // referenced from the controller or data bindings, and won't appear in any
@@ -190,68 +218,14 @@ function TreeRow({
             // A row is selected by click and right-clicked to add. The whole row is
             // a button so keyboard focus + Enter selects it.
             className={cn(
-              "group flex w-full items-center gap-1 py-0.5 pr-2 text-left text-xs transition-colors hover:bg-muted/60",
+              "group flex w-full items-center py-0.5 pr-2 text-left text-xs transition-colors hover:bg-muted/60",
               selected && "bg-muted",
             )}
-            style={{ paddingLeft: `${0.25 + depth * INDENT_REM}rem` }}
           >
-            {hasChildren ? (
-              <button
-                type="button"
-                aria-label={collapsed ? "Expand" : "Collapse"}
-                onClick={() => setCollapsed((c) => !c)}
-                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-              >
-                {collapsed ? (
-                  <ChevronRight className="size-3" />
-                ) : (
-                  <ChevronDown className="size-3" />
-                )}
-              </button>
-            ) : (
-              <span className="inline-block size-4 shrink-0" />
-            )}
-
-            <button
-              type="button"
-              onClick={() => onSelect(node.nodeId)}
-              className="flex min-w-0 flex-1 select-none items-center gap-1.5 text-left"
-            >
-              <span className={cn("shrink-0 font-medium font-mono", tagChipClass(tag))}>{tag}</span>
-              {secondary && (
-                <span
-                  className={cn(
-                    "min-w-0 truncate text-muted-foreground",
-                    // The placeholder for an unnamed event reads as muted/italic so an
-                    // empty event is clearly a stub waiting for a name.
-                    isEvent &&
-                      secondary === EVENT_PLACEHOLDER_LABEL &&
-                      "text-muted-foreground/60 italic",
-                  )}
-                >
-                  {isEvent ? secondary : `#${secondary}`}
-                </span>
-              )}
-              {tag === "Component" && node.attrs.src && (
-                <span className="min-w-0 truncate text-muted-foreground/70 italic">
-                  {node.attrs.src}
-                </span>
-              )}
-            </button>
-
-            {missingId && (
-              // Always-visible status flag (not hover-gated): this element has no id,
-              // so it isn't addressable. The title spells out the consequence.
-              <span
-                role="img"
-                title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
-                aria-label="Missing id"
-                className="shrink-0 text-amber-500"
-              >
-                <TriangleAlert className="size-3" />
-              </span>
-            )}
-
+            {/* Lock toggle — pinned to the FAR LEFT gutter (left of the indentation
+                and the label), so the locks line up in one column down the tree
+                regardless of depth. Unlocked: a muted icon that appears only on
+                hover. Locked: a solid white icon that persists even when not hovered. */}
             <button
               type="button"
               aria-label={locked ? `Unlock ${tag}` : `Lock ${tag}`}
@@ -263,9 +237,7 @@ function TreeRow({
               }
               onClick={() => onToggleLock(node.nodeId)}
               className={cn(
-                "shrink-0 rounded p-0.5 transition-opacity",
-                // Locked: a solid white icon that persists even when the row isn't
-                // hovered. Unlocked: a muted icon that only appears on hover.
+                "ml-1 flex size-4 shrink-0 items-center justify-center rounded transition-opacity",
                 locked
                   ? "text-foreground opacity-100"
                   : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
@@ -273,23 +245,85 @@ function TreeRow({
             >
               <Lock className="size-3" />
             </button>
-            {removable && (
-              // A visible delete affordance on hover mirrors the right-click menu, so
-              // deleting an element is discoverable without knowing the context menu.
+
+            {/* Indented row content (everything except the far-left lock gutter). */}
+            <div
+              className="flex min-w-0 flex-1 items-center gap-1"
+              style={{ paddingLeft: `${0.25 + depth * INDENT_REM}rem` }}
+            >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  aria-label={collapsed ? "Expand" : "Collapse"}
+                  onClick={() => setCollapsed((c) => !c)}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  {collapsed ? (
+                    <ChevronRight className="size-3" />
+                  ) : (
+                    <ChevronDown className="size-3" />
+                  )}
+                </button>
+              ) : (
+                <span className="inline-block size-4 shrink-0" />
+              )}
+
               <button
                 type="button"
-                aria-label={isEvent ? "Remove event" : `Delete ${tag}`}
-                onClick={() => onRemove(node.nodeId)}
-                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                onClick={() => onSelect(node.nodeId)}
+                className="flex min-w-0 flex-1 select-none items-center gap-1.5 text-left"
               >
-                <Trash2 className="size-3" />
+                {/* Per-tag type icon, left of the identity label, accent-colored. */}
+                <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
+                <span
+                  className={cn(
+                    "min-w-0 truncate font-medium font-mono",
+                    tagColorClass(tag),
+                    // An unnamed event's placeholder reads muted/italic so an empty
+                    // event is clearly a stub waiting for a name.
+                    isEvent && labelPlaceholder && "text-muted-foreground/60 italic",
+                  )}
+                >
+                  {label}
+                </span>
+                {tag === "Component" && node.attrs.src && (
+                  <span className="min-w-0 truncate text-muted-foreground/70 italic">
+                    {node.attrs.src}
+                  </span>
+                )}
               </button>
-            )}
-            {addable.length > 0 && (
-              // A visible add affordance on hover/selection mirrors the right-click
-              // menu, so add-child is discoverable without knowing about it.
-              <AddMenu node={node} addable={addable} onAdd={onAdd} />
-            )}
+
+              {missingId && (
+                // Always-visible status flag (not hover-gated): this element has no id,
+                // so it isn't addressable. The title spells out the consequence.
+                <span
+                  role="img"
+                  title="No id — this element can't be referenced from the controller or data bindings. Give it an id in Properties."
+                  aria-label="Missing id"
+                  className="shrink-0 text-amber-500"
+                >
+                  <TriangleAlert className="size-3" />
+                </span>
+              )}
+
+              {removable && (
+                // A visible delete affordance on hover mirrors the right-click menu, so
+                // deleting an element is discoverable without knowing the context menu.
+                <button
+                  type="button"
+                  aria-label={isEvent ? "Remove event" : `Delete ${tag}`}
+                  onClick={() => onRemove(node.nodeId)}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              )}
+              {addable.length > 0 && (
+                // A visible add affordance on hover/selection mirrors the right-click
+                // menu, so add-child is discoverable without knowing about it.
+                <AddMenu node={node} addable={addable} onAdd={onAdd} />
+              )}
+            </div>
           </div>
         </ContextMenu.Trigger>
         {hasMenu && (

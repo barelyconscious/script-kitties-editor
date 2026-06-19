@@ -193,8 +193,13 @@ export type EditorState = {
  * tab, and the Data Model scratch are NOT undoable (they are view/scratch state).
  */
 export type EditorAction =
-  /** Seat a freshly-parsed component (F8 open-flow). Resets selection/tab/dirty. */
-  | { type: "open"; component: OpenComponent }
+  /**
+   * Seat a freshly-parsed component (F8 open-flow). Resets selection/tab/dirty.
+   * `lockedNodeIds` optionally SEEDS the locked set from persisted structural keys
+   * resolved against the just-parsed tree (element-lock persistence); omitted →
+   * nothing locked.
+   */
+  | { type: "open"; component: OpenComponent; lockedNodeIds?: Set<string> }
   /** Clear the open component (back to the empty state). */
   | { type: "close" }
   /** Set the shared selection (tree click / preview click). */
@@ -315,6 +320,12 @@ export type EditorAction =
       type: "reloadOpen";
       component: OpenComponent;
       selectedNodeId: string | null;
+      /**
+       * Re-seeds the locked set from persisted structural keys resolved against the
+       * re-parsed tree (the re-read re-mints nodeIds, so locks must be re-resolved).
+       * Omitted → nothing locked.
+       */
+      lockedNodeIds?: Set<string>;
     };
 
 const initialState: EditorState = {
@@ -408,8 +419,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         open: action.component,
         selectedNodeId: null,
-        // A different document re-mints nodeIds, so any locks are meaningless.
-        lockedNodeIds: new Set(),
+        // Seed locks from persisted structural keys (resolved by the caller against
+        // the just-parsed tree); empty when nothing was persisted.
+        lockedNodeIds: action.lockedNodeIds ?? new Set(),
         activeTab: "view",
         dirty: false,
         past: [],
@@ -571,9 +583,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Selection is pre-remapped by the caller (the new tree re-mints nodeIds,
         // so the old id is meaningless); `null` when the selected node is gone.
         selectedNodeId: action.selectedNodeId,
-        // The re-read tree re-mints nodeIds, so any locks (keyed by the old ids)
-        // are meaningless — clear them.
-        lockedNodeIds: new Set(),
+        // The re-read tree re-mints nodeIds, so locks are re-resolved by the caller
+        // from persisted structural keys; empty when nothing was persisted.
+        lockedNodeIds: action.lockedNodeIds ?? new Set(),
         // Editor now matches disk — nothing unsaved.
         dirty: false,
         // A live external reload RESETS history — you cannot undo across a disk

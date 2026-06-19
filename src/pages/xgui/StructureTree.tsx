@@ -112,6 +112,7 @@ export function StructureTree() {
           if (!o) setPickerParentId(null);
         }}
         onPick={handlePickComponent}
+        excludeName={open.name}
       />
     </div>
   );

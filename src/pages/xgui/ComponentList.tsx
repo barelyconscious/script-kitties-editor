@@ -38,11 +38,10 @@ import {
   type GuiComponentRef,
   type GuiFolder,
   type GuiTreeRow,
-  isValidBasename,
-  toComponentBasename,
 } from "./guiTree";
 import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
+import { NewFolderDialog } from "./NewFolderDialog";
 import { OpenErrorDialog } from "./OpenErrorDialog";
 import { buildOpenComponent } from "./openComponent";
 import { decideSwitch, type SwitchChoice } from "./switchGuard";
@@ -95,6 +94,8 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
   // The component the user asked to open while the current one is dirty — held
   // until the Save/Discard/Cancel prompt resolves (warn-on-switch, F11).
   const [pendingSwitch, setPendingSwitch] = useState<GuiComponentRef | null>(null);
+  // Whether the New-folder dialog is open (header folder-icon button).
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
 
   const filtered = useMemo(() => filterTree(tree, query), [tree, query]);
   // When searching, force everything expanded so matches deep in the tree show.
@@ -199,21 +200,8 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
     [reload, openComponent],
   );
 
-  // The top-level New-folder action prompts for a name and creates it at the root.
-  const handleNewFolder = useCallback(async () => {
-    const raw = window.prompt("New folder name (under gui/):");
-    if (raw == null) return;
-    const folderName = toComponentBasename(raw);
-    if (!isValidBasename(folderName)) {
-      window.alert("Folder name must be a valid lower_snake_case identifier.");
-      return;
-    }
-    try {
-      await invoke("create_folder", { parentRel: "", name: folderName });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : String(err));
-      return;
-    }
+  // After a folder create: refresh the tree so the new folder shows.
+  const handleFolderCreated = useCallback(() => {
     void reload();
   }, [reload]);
 
@@ -253,7 +241,7 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
             <button
               type="button"
               aria-label="New folder"
-              onClick={handleNewFolder}
+              onClick={() => setNewFolderOpen(true)}
               className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <FolderPlus className="size-4" />
@@ -315,6 +303,13 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
         tree={tree}
         scopedFolder={newFolder}
         onCreated={handleCreated}
+      />
+
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        tree={tree}
+        onCreated={handleFolderCreated}
       />
 
       <UnsavedSwitchDialog

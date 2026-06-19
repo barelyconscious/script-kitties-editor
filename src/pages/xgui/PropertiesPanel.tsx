@@ -203,7 +203,7 @@ export function PropertiesPanel() {
  * shared {@link ComponentPicker} to choose a `src` basename first.
  */
 function ViewChildAdder({ viewNodeId }: { viewNodeId: string }) {
-  const { dispatch } = useEditorStore();
+  const { state, dispatch } = useEditorStore();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const addChild = (tag: "Panel" | "Text") =>
@@ -225,7 +225,12 @@ function ViewChildAdder({ viewNodeId }: { viewNodeId: string }) {
         <AddChildButton onClick={() => addChild("Text")}>Add Text</AddChildButton>
         <AddChildButton onClick={() => setPickerOpen(true)}>Add Component…</AddChildButton>
       </div>
-      <ComponentPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={addComponent} />
+      <ComponentPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={addComponent}
+        excludeName={state.open?.name}
+      />
     </div>
   );
 }

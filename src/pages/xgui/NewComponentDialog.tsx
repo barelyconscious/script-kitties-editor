@@ -71,11 +71,19 @@ export function NewComponentDialog({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Remember the last real scope so the title doesn't flash to "gui/" during the
+  // dialog's close animation: on close the caller sets scopedFolder back to null,
+  // but Radix keeps the content mounted while it animates out, so we keep showing
+  // the scope it was opened with until it's fully gone.
+  const [lastFolderRel, setLastFolderRel] = useState("");
+  useEffect(() => {
+    if (open && scopedFolder != null) setLastFolderRel(scopedFolder);
+  }, [open, scopedFolder]);
 
-  // The destination is fixed for this create. Fall back to the gui/ root if the
-  // dialog is somehow open without a scope (shouldn't happen — callers always set
-  // one), so create_component always has a valid folderRel.
-  const folderRel = scopedFolder ?? "";
+  // The destination is fixed for this create. While open, use the live scope; once
+  // closing (scopedFolder null), fall back to the remembered scope so the label is
+  // stable through the exit animation.
+  const folderRel = scopedFolder ?? lastFolderRel;
 
   // Re-seed every time the dialog opens so a previous attempt's text never leaks.
   useEffect(() => {

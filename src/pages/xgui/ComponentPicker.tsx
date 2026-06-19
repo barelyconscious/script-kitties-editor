@@ -19,13 +19,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { GuiFolder } from "./guiTree";
@@ -41,9 +35,15 @@ export type ComponentPickerProps = {
    * `src`. The dialog closes itself after.
    */
   onPick: (basename: string) => void;
+  /**
+   * The bare basename of the component currently being edited, if any. It is
+   * EXCLUDED from the list so a component can never include itself (a direct
+   * self-reference is unrenderable — the mount engine would recurse infinitely).
+   */
+  excludeName?: string;
 };
 
-export function ComponentPicker({ open, onOpenChange, onPick }: ComponentPickerProps) {
+export function ComponentPicker({ open, onOpenChange, onPick, excludeName }: ComponentPickerProps) {
   const [items, setItems] = useState<ComponentPickItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -59,7 +59,10 @@ export function ComponentPicker({ open, onOpenChange, onPick }: ComponentPickerP
     void (async () => {
       try {
         const tree = await invoke<GuiFolder>("get_gui_tree");
-        if (!cancelled) setItems(componentPickItems(tree));
+        // Drop the open component itself — you can't add a component to its own
+        // layout (basenames are tree-wide unique, so matching by name is exact).
+        if (!cancelled)
+          setItems(componentPickItems(tree).filter((item) => item.name !== excludeName));
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load components.");
       }
@@ -67,7 +70,7 @@ export function ComponentPicker({ open, onOpenChange, onPick }: ComponentPickerP
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, excludeName]);
 
   const filtered = useMemo(() => (items ? filterPickItems(items, query) : []), [items, query]);
 
@@ -81,10 +84,6 @@ export function ComponentPicker({ open, onOpenChange, onPick }: ComponentPickerP
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Choose a component</DialogTitle>
-          <DialogDescription>
-            The bare name is written into <code className="font-mono">src</code>; the folder is just
-            a hint.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="relative">

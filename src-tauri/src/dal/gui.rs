@@ -554,6 +554,12 @@ fn walk_folder(dir: &Path, rel: &str) -> Result<GuiFolder, String> {
             continue;
         };
 
+        // Skip hidden / dot entries (e.g. ".claude", ".git", ".DS_Store") — they hold
+        // tool metadata, never GUI components, and shouldn't clutter the tree.
+        if file_name.starts_with('.') {
+            continue;
+        }
+
         if file_type.is_dir() {
             let child_rel = join_rel(rel, file_name);
             folders.push(walk_folder(&path, &child_rel)?);
@@ -886,6 +892,30 @@ mod tests {
         assert_eq!(slot.name, "bag_slot");
         assert_eq!(slot.path, "profile/cards/bag_slot.xml");
         assert_eq!(slot.kind, GuiComponentKind::Widget);
+    }
+
+    #[test]
+    fn hidden_dot_folders_are_skipped() {
+        let root = temp_install();
+        let gui = root.join("gui");
+        // A tool-metadata folder with an .xml inside that should NOT surface.
+        std::fs::create_dir_all(gui.join(".claude")).unwrap();
+        std::fs::write(gui.join(".claude").join("notes.xml"), "<View/>").unwrap();
+        // A real, visible folder + component alongside it.
+        std::fs::create_dir_all(gui.join("widgets")).unwrap();
+        std::fs::write(gui.join("widgets").join("bag.xml"), "<Panel/>").unwrap();
+
+        let dal = dal_for(&root);
+        let tree = dal.get_gui_tree().unwrap();
+
+        assert!(
+            folder_at(&tree, ".claude").is_none(),
+            "hidden dot folders must not appear in the tree"
+        );
+        assert!(
+            folder_at(&tree, "widgets").is_some(),
+            "visible folders still appear"
+        );
     }
 
     #[test]

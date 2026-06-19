@@ -1,40 +1,41 @@
 /**
  * guiModelScaffold — auto-build the Data Model JSON from a component's `{token}`
- * references (task 482), SCOPE-AWARE and ADDITIVE.
+ * references (task 482), ADDITIVE.
  *
  * The Data Model panel is a per-session scratch input the preview resolves
  * bindings against. Rather than make the user hand-author it from scratch, this
- * module walks the open {@link GuiNode} tree, collects every `{token}` reference
- * (respecting `forEach` item scoping), and produces a JSON value that gives every
- * referenced token a sensible placeholder — so opening a component pre-fills a
- * model whose every binding resolves, and adding a new token grows the model
- * without touching what the user already edited.
+ * module walks the open {@link GuiNode} tree, collects every `{token}` reference,
+ * and produces a JSON value that gives every referenced token a sensible
+ * placeholder — so opening a component pre-fills a model whose every binding
+ * resolves, and adding a new token grows the model without touching what the user
+ * already edited.
+ *
+ * Tokens resolve against a SINGLE FLAT model — a bare `{token}` is a field of the
+ * one model object. There is no scope stack, no `$.` root escape, and no general
+ * nesting: the only nesting is the ONE level a `<GridLayout dataCollection="k">`
+ * introduces — root key `k` is an ARRAY whose item objects carry the grid's child
+ * template tokens (the GridLayout replacement for the removed forEach scaffold).
+ * Grids cannot nest (design caveat: GridLayouts cannot be nested), so the item shape
+ * is at most one level below root (root → item).
  *
  * THREE pure stages, each independently testable:
  *
- *   1. EXTRACT (`extractShape`) — walk the tree into a nested {@link ModelShape}:
- *      a set of scalar field names + a map of collection-name → child item-shape,
- *      recursive. Scoping mirrors the resolver (`guiScope.ts`/`guiForEach.ts`):
- *        - a bare `{token}` is a field of the CURRENT scope;
- *        - `{$.x}` / `{$}` reaches the ROOT scope at any nesting depth;
- *        - `forEach="{coll}"` resolves `coll` in the CURRENT scope (a collection
- *          there) and opens a CHILD item-scope for that node's subtree; nested
- *          `forEach` nests; `key` is item-scoped.
+ *   1. EXTRACT (`extractShape`) — walk the tree into a {@link ModelShape}: the set
+ *      of scalar field names + a map of nested-`<Component data>` object shapes.
  *      Tokens are read from the same attribute kinds the resolver binds: `text`
  *      and `texture` (interpolation — every embedded `{name}`), whole-value typed
  *      props (colors, `visible`, `fontSize`, `borderSize`, `textAlign`, `layer`),
- *      each of the four `position`/`size` fields, `forEach`, and `key`.
+ *      and each of the four `position`/`size` fields.
  *
  *   2. BUILD (`buildModel`) — turn a shape into a JSON value: each scalar field →
  *      a string equal to the token NAME (no braces), e.g. `{health}` →
- *      `"health": "health"`; each collection → an array with ONE sample item
- *      object built from its item-shape (so `forEach` renders one instance).
+ *      `"health": "health"`; each nested `<Component data>` object → an object
+ *      built from the referenced child component's own shape.
  *
  *   3. MERGE (`mergeModel`) — additively fold a freshly-built scaffold into the
- *      user's CURRENT model: add missing root keys; add missing fields to the
- *      sample object(s) inside an existing collection array; NEVER overwrite an
- *      existing value, NEVER delete (removed tokens leave harmless leftovers), and
- *      leave a key alone when its existing type conflicts with the scaffold.
+ *      user's CURRENT model: add missing root keys; NEVER overwrite an existing
+ *      value, NEVER delete (removed tokens leave harmless leftovers), and leave a
+ *      key alone when its existing type conflicts with the scaffold.
  *
  * The wiring (`scaffoldModelText`) composes all three over raw text: it returns a
  * new text ONLY when the merge added something, so a no-op change never reformats
@@ -43,7 +44,7 @@
  * This module is PURE (no React, no DOM). It reuses the token-detection helpers in
  * `guiBinding.ts` rather than re-inventing brace parsing.
  *
- * @see design/xgui_ta.md — "Data binding", "Repetition and control flow (forEach)".
+ * @see design/xgui_ta.md — "Data binding".
  */
 
 import { isWholeToken } from "../../lib/guiBinding";
@@ -61,26 +62,31 @@ import type { GuiNode } from "../../lib/guiNode";
 export type ComponentResolver = (basename: string) => GuiNode | undefined;
 
 /**
- * A nested model shape: the scalar field names bound in a scope, plus the
- * collections (`forEach` bindings) opened in that scope, each mapped to its child
- * item-shape (recursive). The ROOT shape describes the top-level model; each
- * collection's shape describes one sample item.
+ * A model shape: the scalar field names bound, plus the nested-component data
+ * objects injected (recursive). The ROOT shape describes the top-level model.
  *
  * Mutable during extraction (the walker accretes into it); callers treat the
  * result as read-only.
  */
 export type ModelShape = {
-  /** Bare scalar field names bound in this scope (no braces, no `$.` prefix). */
+  /** Bare scalar field names bound in this shape (no braces). */
   scalars: Set<string>;
-  /** `collectionName` → the item-shape opened by a `forEach` in this scope. */
-  collections: Map<string, ModelShape>;
   /**
-   * `dataKey` → the OBJECT shape a nested `<Component … data="dataKey">` injects in
-   * this scope. The shape is the referenced child component's own scaffolded shape,
-   * so the parent model gets `dataKey: { …child fields… }` auto-populated from the
-   * component (the v1 binding is a bare key in the current scope).
+   * `dataKey` → the OBJECT shape a nested `<Component … data="dataKey">` injects.
+   * The shape is the referenced child component's own scaffolded shape, so the
+   * parent model gets `dataKey: { …child fields… }` auto-populated from the
+   * component (the v1 binding is a bare key).
    */
   objects: Map<string, ModelShape>;
+  /**
+   * `collectionKey` → the ITEM shape a `<GridLayout dataCollection="collectionKey">`
+   * implies. The shape is the grid's single child TEMPLATE subtree's tokens (item
+   * scope), so the model gets `collectionKey: [{ …item fields… }]` — a one-element
+   * sample array auto-populated from the template. Always lives in the ROOT shape:
+   * `dataCollection` is root-scoped and grids cannot nest, so item shapes never
+   * contain collections of their own (an item is at most one level below root).
+   */
+  collections: Map<string, ModelShape>;
 };
 
 /** Matches a whole-value `{token}` and captures the inner token text. */
@@ -88,20 +94,14 @@ const WHOLE_TOKEN = /^\{([^{}]+)\}$/;
 /** Matches each embedded `{token}` for interpolated string extraction. */
 const EMBEDDED_TOKEN = /\{([^{}]+)\}/g;
 
-/** The `$` root-escape prefix — mirrors `guiScope.ts`. */
-const ROOT_PREFIX = "$";
-
 /** String-typed attributes — interpolation (every embedded token), not whole-value. */
 const STRING_PROPS = new Set(["text", "texture"]);
 /** Compound attributes — each of the four comma-separated fields may be a token. */
 const COMPOUND_PROPS = new Set(["position", "size"]);
-/** The `forEach` template attribute — opens a child item scope. */
-const FOR_EACH_ATTR = "forEach";
 /**
  * Attributes whose value is NEVER a binding (structural / identity / wiring). These
- * are skipped during extraction — mirrors `guiBinding.LITERAL_ONLY_PROPS`, but
- * WITHOUT `key`, which IS scaffolded (it is an item-scoped data field), and without
- * the compound/string/forEach names handled by their own branches.
+ * are skipped during extraction — mirrors `guiBinding.LITERAL_ONLY_PROPS`, without
+ * the compound/string names handled by their own branches.
  */
 const LITERAL_ONLY_PROPS = new Set([
   "id",
@@ -122,8 +122,8 @@ const LITERAL_ONLY_PROPS = new Set([
 
 /**
  * Own-property check that works regardless of the TS lib target. `Object.hasOwn`
- * is es2022; the project's lib target predates it (see `guiBinding.ts`/`guiScope.ts`),
- * so we use the prototype-method form, matching those modules.
+ * is es2022; the project's lib target predates it (see `guiBinding.ts`), so we use
+ * the prototype-method form, matching that module.
  */
 function hasOwn(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -131,7 +131,7 @@ function hasOwn(obj: object, key: string): boolean {
 
 /** A fresh, empty shape. */
 function emptyShape(): ModelShape {
-  return { scalars: new Set(), collections: new Map(), objects: new Map() };
+  return { scalars: new Set(), objects: new Map(), collections: new Map() };
 }
 
 /** A simple bare model key (the only `data=` form supported in v1 — no `.`/`$`). */
@@ -150,18 +150,18 @@ function bareComponentName(src: string | undefined): string {
 }
 
 /**
- * Fold the referenced child component's shape into the current scope under a nested
+ * Fold the referenced child component's shape into the shape under a nested
  * `<Component … data="k">`'s key. The child's shape is extracted RECURSIVELY (so a
  * child that itself nests components via `data=` contributes its nested objects
  * too), guarded by the ancestor set against include cycles. A missing/cyclic/
  * unresolvable child still registers the key as a present-but-empty object, so the
  * model surfaces the binding rather than dropping it silently.
  *
- * v1 only honors a BARE data key in the CURRENT scope; `$.`/dotted forms are left
- * for the author (mirroring the conservative spirit of `recordToken`).
+ * v1 only honors a BARE data key; dotted forms are left for the author (mirroring
+ * the conservative spirit of `recordToken`).
  */
 function recordComponentData(
-  stack: ModelShape[],
+  scope: ModelShape,
   node: GuiNode,
   resolve: ComponentResolver | undefined,
   ancestry: ReadonlySet<string>,
@@ -170,7 +170,6 @@ function recordComponentData(
   const dataKey = node.attrs[DATA_ATTR]?.trim();
   if (dataKey === undefined || !isBareKey(dataKey)) return;
 
-  const scope = stack[stack.length - 1];
   let objShape = scope.objects.get(dataKey);
   if (objShape === undefined) {
     objShape = emptyShape();
@@ -190,7 +189,7 @@ function recordComponentData(
   mergeShapeInto(objShape, childShape);
 }
 
-/** Accrete `source`'s fields into `target` (scalars ∪, objects/collections merged). */
+/** Accrete `source`'s fields into `target` (scalars ∪, objects + collections merged). */
 function mergeShapeInto(target: ModelShape, source: ModelShape): void {
   for (const s of source.scalars) target.scalars.add(s);
   for (const [name, sub] of source.objects) {
@@ -206,42 +205,20 @@ function mergeShapeInto(target: ModelShape, source: ModelShape): void {
 }
 
 /**
- * Record a token reference into the shape stack. `token` is the inner text of a
- * `{...}` (no braces). Scoping mirrors the resolver:
+ * Record a token reference into the shape. `token` is the inner text of a `{...}`
+ * (no braces); it resolves against the single flat model, so it is a named field of
+ * `scope`.
  *
- *   - `$` / `$.path` → the ROOT scope (stack bottom), regardless of depth. A bare
- *     `$` (the root object itself) is not a named field, so it records nothing.
- *   - any other `name` / `name.path` → the CURRENT scope (stack top).
- *
- * A DOTTED path (`stats.hp`, `$.theme.accent`) records a NESTED object: the head
- * segment is a scalar field whose value the resolver walks into, so the scaffold
- * must make it an object, not a string. We model that by promoting the head into
- * the scope's collections-as-nesting? No — a dotted path is an object field, not a
- * `forEach` array. We record only the HEAD segment as a scalar placeholder; deeper
- * segments would need an object value the builder can't infer a shape for cheaply.
- * Recording the head keeps the key present (the binding resolves to a string, which
- * stringifies fine for interpolation) without inventing nested structure the author
- * may not want — the user refines dotted bindings by hand. This matches the
- * conservative, additive spirit: present-but-simple beats absent or over-built.
+ * A DOTTED path (`stats.hp`) records only the HEAD segment as a scalar placeholder;
+ * deeper segments would need an object value the builder can't infer a shape for
+ * cheaply. Recording the head keeps the key present (the binding resolves to a
+ * string, which stringifies fine for interpolation) without inventing nested
+ * structure the author may not want — the user refines dotted bindings by hand.
+ * This matches the conservative, additive spirit: present-but-simple beats absent
+ * or over-built.
  */
-function recordToken(stack: ModelShape[], token: string): void {
-  const trimmed = token.trim();
-  if (trimmed === "") return;
-
-  let scope: ModelShape;
-  let path: string;
-  if (trimmed === ROOT_PREFIX) {
-    // `{$}` denotes the whole root object — not a named field; nothing to record.
-    return;
-  }
-  if (trimmed.startsWith(`${ROOT_PREFIX}.`)) {
-    scope = stack[0];
-    path = trimmed.slice(ROOT_PREFIX.length + 1);
-  } else {
-    scope = stack[stack.length - 1];
-    path = trimmed;
-  }
-
+function recordToken(scope: ModelShape, token: string): void {
+  const path = token.trim();
   if (path === "") return;
   // Record only the head segment of a (possibly dotted) path as a scalar field —
   // see the doc comment above for why deeper segments are left to the user.
@@ -250,26 +227,26 @@ function recordToken(stack: ModelShape[], token: string): void {
 }
 
 /**
- * Record a whole-value attribute (`backgroundColor="{barColor}"`, `key="{id}"`,
- * etc.): if the raw value is a single `{token}`, record it; otherwise it is a
- * literal and contributes nothing.
+ * Record a whole-value attribute (`backgroundColor="{barColor}"`, etc.): if the raw
+ * value is a single `{token}`, record it; otherwise it is a literal and contributes
+ * nothing.
  */
-function recordWholeValue(stack: ModelShape[], raw: string): void {
+function recordWholeValue(scope: ModelShape, raw: string): void {
   const trimmed = raw.trim();
   if (!isWholeToken(trimmed)) return;
   const match = WHOLE_TOKEN.exec(trimmed);
-  if (match) recordToken(stack, match[1]);
+  if (match) recordToken(scope, match[1]);
 }
 
 /**
  * Record an interpolated string attribute (`text`, `texture`): every embedded
- * `{token}` is a binding, so each is recorded into the appropriate scope.
+ * `{token}` is a binding, so each is recorded into the shape.
  */
-function recordInterpolated(stack: ModelShape[], raw: string): void {
+function recordInterpolated(scope: ModelShape, raw: string): void {
   EMBEDDED_TOKEN.lastIndex = 0;
   let match: RegExpExecArray | null = EMBEDDED_TOKEN.exec(raw);
   while (match !== null) {
-    recordToken(stack, match[1]);
+    recordToken(scope, match[1]);
     match = EMBEDDED_TOKEN.exec(raw);
   }
 }
@@ -278,107 +255,126 @@ function recordInterpolated(stack: ModelShape[], raw: string): void {
  * Record a compound attribute (`position`, `size`): each comma-separated field is
  * independently a whole-value `{token}` or a literal.
  */
-function recordCompound(stack: ModelShape[], raw: string): void {
+function recordCompound(scope: ModelShape, raw: string): void {
   for (const field of raw.split(",")) {
-    recordWholeValue(stack, field);
+    recordWholeValue(scope, field);
   }
 }
 
+/** The attribute naming a `<GridLayout>`'s iterable collection (a bare ROOT model key). */
+const DATA_COLLECTION_ATTR = "dataCollection";
+
 /**
- * Walk one node's attributes (EXCEPT `forEach`, handled by the caller so it can
- * open the child scope) and record every token into the current shape stack.
+ * Fold a grid template `<Component src="x">`'s OWN shape directly into the item shape.
+ * Unlike a nested `<Component data="k">` (which folds the child under sub-key `k` via
+ * {@link recordComponentData}), a GridLayout's `<Component>` child uses the ITEM as its
+ * full data root (locked decision: data=/overrides are ignored under a grid) — so the
+ * component's fields land flat IN the item, not under a key. A missing/cyclic/
+ * unresolvable component contributes nothing (the item is still seeded by other cells'
+ * fields or stays empty). Recursion is guarded by the ancestor set against include
+ * cycles, mirroring {@link recordComponentData}.
  */
-function recordNodeAttrs(stack: ModelShape[], attrs: Record<string, string>): void {
-  for (const [name, raw] of Object.entries(attrs)) {
-    if (name === FOR_EACH_ATTR) continue; // the caller opens the child scope
-    if (LITERAL_ONLY_PROPS.has(name)) continue;
-    if (STRING_PROPS.has(name)) {
-      recordInterpolated(stack, raw);
-    } else if (COMPOUND_PROPS.has(name)) {
-      recordCompound(stack, raw);
-    } else {
-      // Whole-value typed/color props, plus `key` (item-scoped data field).
-      recordWholeValue(stack, raw);
-    }
-  }
+function recordGridComponentTemplate(
+  itemShape: ModelShape,
+  template: GuiNode,
+  resolve: ComponentResolver | undefined,
+  ancestry: ReadonlySet<string>,
+): void {
+  if (resolve === undefined) return; // no registry yet → item gets no component fields
+  const basename = bareComponentName(template.attrs[SRC_ATTR]);
+  if (basename === "" || ancestry.has(basename)) return; // missing src / include cycle
+  const childRoot = resolve(basename);
+  if (childRoot === undefined) return;
+  const childShape = extractShape(childRoot, resolve, new Set([...ancestry, basename]));
+  mergeShapeInto(itemShape, childShape);
 }
 
 /**
- * The collection-name a `forEach="{coll}"` opens, resolved in the scope it sits in
- * — bare → current scope, `$.x` → root — or `null` when the value is not a usable
- * whole-value token (a literal, an interpolated form, or a dotted path the scaffold
- * doesn't nest). Returns the scope the collection belongs to alongside its name so
- * the child item-shape is registered on the RIGHT scope.
+ * Record a `<GridLayout dataCollection="k">`'s implied ROOT collection. `k` is a bare
+ * root key (no `{}`) naming an ARRAY whose item objects carry the grid's single child
+ * template's tokens (item scope). The GridLayout's OWN attrs (rows/columns/gutter/
+ * dataCollection) are structural, not bindings, so they contribute nothing.
+ *
+ * The grid always holds exactly one template child (parse guarantees ≤ 1). A bare
+ * Panel/Text template's subtree is walked into the item shape; a `<Component>`
+ * template folds its component's own shape flat into the item (the item is the
+ * component's data root). A grid with no `dataCollection` or no child yet (mid-
+ * authoring) records nothing.
  */
-function resolveForEachTarget(
-  stack: ModelShape[],
-  raw: string,
-): { scope: ModelShape; name: string } | null {
-  const trimmed = raw.trim();
-  if (!isWholeToken(trimmed)) return null;
-  const token = WHOLE_TOKEN.exec(trimmed)?.[1]?.trim();
-  if (token === undefined || token === "" || token === ROOT_PREFIX) return null;
-
-  let scope: ModelShape;
-  let path: string;
-  if (token.startsWith(`${ROOT_PREFIX}.`)) {
-    scope = stack[0];
-    path = token.slice(ROOT_PREFIX.length + 1);
-  } else {
-    scope = stack[stack.length - 1];
-    path = token;
-  }
-  // A dotted collection path (`{a.b}`) would need a nested object holding an array;
-  // the scaffold stays flat and records only single-segment collections. A dotted
-  // forEach still renders (zero instances) and the user can author the nesting.
-  if (path === "" || path.includes(".")) return null;
-  return { scope, name: path };
-}
-
-/**
- * Walk a node (and its subtree) accreting tokens into `stack`. A `forEach` node
- * opens a CHILD item-scope: its own non-`forEach` attrs are recorded in that child
- * scope (the template's bindings are item-scoped), and its children descend under
- * it. A plain node records in the current scope and descends without pushing.
- */
-function walkNode(
-  stack: ModelShape[],
+function recordGridCollection(
+  rootScope: ModelShape,
   node: GuiNode,
   resolve: ComponentResolver | undefined,
   ancestry: ReadonlySet<string>,
 ): void {
-  const forEachRaw = node.attrs[FOR_EACH_ATTR];
-  const target =
-    forEachRaw !== undefined && forEachRaw.trim() !== ""
-      ? resolveForEachTarget(stack, forEachRaw)
-      : null;
+  const key = node.attrs[DATA_COLLECTION_ATTR]?.trim();
+  if (key === undefined || !isBareKey(key)) return;
 
-  if (target) {
-    // Open (or reuse) the child item-shape for this collection, then record this
-    // node's OWN attrs and its subtree inside that child scope — the template's
-    // bare tokens and its `key` are fields of the collection's item.
-    let child = target.scope.collections.get(target.name);
-    if (child === undefined) {
-      child = emptyShape();
-      target.scope.collections.set(target.name, child);
-    }
-    const childStack = [...stack, child];
-    recordNodeAttrs(childStack, node.attrs);
-    recordComponentData(childStack, node, resolve, ancestry);
-    for (const c of node.children) walkNode(childStack, c, resolve, ancestry);
-    return;
+  let itemShape = rootScope.collections.get(key);
+  if (itemShape === undefined) {
+    itemShape = emptyShape();
+    rootScope.collections.set(key, itemShape);
   }
 
-  // Plain node: record in the current scope, descend without pushing.
-  recordNodeAttrs(stack, node.attrs);
-  recordComponentData(stack, node, resolve, ancestry);
-  for (const c of node.children) walkNode(stack, c, resolve, ancestry);
+  const template = node.children[0];
+  if (template === undefined) return; // grid not yet given a child
+
+  if (template.tag === "Component") {
+    // The item IS the component's data root: fold the component's own fields flat.
+    // The template's own attrs are still ignored by the renderer (geometry is grid-
+    // owned), and a grid <Component> uses the item wholesale, so we record only the
+    // referenced component's shape — not the template node's attrs.
+    recordGridComponentTemplate(itemShape, template, resolve, ancestry);
+    return;
+  }
+  // A bare Panel/Text template: walk its whole subtree's tokens into the item shape.
+  walkNode(itemShape, template, resolve, ancestry);
+}
+
+/** Walk one node's attributes and record every token into the shape. */
+function recordNodeAttrs(scope: ModelShape, attrs: Record<string, string>): void {
+  for (const [name, raw] of Object.entries(attrs)) {
+    if (LITERAL_ONLY_PROPS.has(name)) continue;
+    if (STRING_PROPS.has(name)) {
+      recordInterpolated(scope, raw);
+    } else if (COMPOUND_PROPS.has(name)) {
+      recordCompound(scope, raw);
+    } else {
+      // Whole-value typed/color props.
+      recordWholeValue(scope, raw);
+    }
+  }
 }
 
 /**
- * Extract the scope-aware {@link ModelShape} from a GUI tree: the root scalars,
- * collection item-shapes, and nested-component data objects every `{token}` /
- * `<Component data>` in the tree implies, honoring `forEach` scoping. Pure — does
+ * Walk a node (and its subtree) accreting tokens into `scope`. Every node records
+ * its attrs in the single flat shape and descends into its children.
+ */
+function walkNode(
+  scope: ModelShape,
+  node: GuiNode,
+  resolve: ComponentResolver | undefined,
+  ancestry: ReadonlySet<string>,
+): void {
+  // A `<GridLayout>` introduces a ROOT collection rather than contributing to the
+  // current flat scope: its attrs are structural (no bindings) and its template
+  // child's tokens belong to the ITEM shape, not this scope. So divert wholesale
+  // here and do NOT descend the GridLayout normally. (Grids cannot nest, so a grid
+  // template never itself contains another grid — but if malformed XML nested one,
+  // recordGridCollection's walk of the template would still divert it into another
+  // root collection, keeping every collection root-scoped.)
+  if (node.tag === "GridLayout") {
+    recordGridCollection(scope, node, resolve, ancestry);
+    return;
+  }
+  recordNodeAttrs(scope, node.attrs);
+  recordComponentData(scope, node, resolve, ancestry);
+  for (const c of node.children) walkNode(scope, c, resolve, ancestry);
+}
+
+/**
+ * Extract the {@link ModelShape} from a GUI tree: the scalars and nested-component
+ * data objects every `{token}` / `<Component data>` in the tree implies. Pure — does
  * not touch any model.
  *
  * `resolve` (optional) loads a nested `<Component src>`'s tree so its shape can be
@@ -393,15 +389,17 @@ export function extractShape(
   ancestry: ReadonlySet<string> = new Set(),
 ): ModelShape {
   const rootShape = emptyShape();
-  walkNode([rootShape], root, resolve, ancestry);
+  walkNode(rootShape, root, resolve, ancestry);
   return rootShape;
 }
 
 /**
  * Build a JSON value from a shape: each scalar field → a string equal to the token
- * name (its placeholder), each collection → a single-element array holding ONE
- * sample item object built from the collection's item-shape. Field insertion order
- * is scalars-first then collections, matching extraction order for stable output.
+ * name (its placeholder), each nested `<Component data>` object → an object built
+ * from the child's shape, each `<GridLayout dataCollection>` → a one-element ARRAY
+ * holding a single sample item built from the item shape. Field insertion order is
+ * scalars-first, then objects, then collections — matching extraction order for
+ * stable output.
  */
 export function buildModel(shape: ModelShape): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -412,6 +410,8 @@ export function buildModel(shape: ModelShape): Record<string, unknown> {
   for (const [name, objShape] of shape.objects) {
     out[name] = buildModel(objShape);
   }
+  // `<GridLayout dataCollection>` collections: a one-element sample array (the
+  // default seed) built from the item shape.
   for (const [name, itemShape] of shape.collections) {
     out[name] = [buildModel(itemShape)];
   }
@@ -429,14 +429,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  *
  *   - A scaffold key MISSING from the target is added (its built value).
  *   - A scaffold key PRESENT in the target is preserved as-is UNLESS both sides are
- *     mergeable in the same way:
- *       · both plain objects → recurse;
- *       · both arrays whose first element is a plain object → merge the scaffold's
- *         sample item into the target's FIRST item (the sample), leaving any extra
- *         user items untouched. This is how new `forEach` item-fields reach an
- *         existing collection without disturbing user-authored sample data.
- *   - Any TYPE CONFLICT (scaffold wants an object/array but the user put a scalar,
- *     or vice versa) leaves the user's value ALONE — defensive, never overwrite.
+ *     plain objects, in which case the merge recurses to add missing nested fields.
+ *   - Any TYPE CONFLICT (scaffold wants an object but the user put a scalar, or vice
+ *     versa) leaves the user's value ALONE — defensive, never overwrite.
  *
  * `added` is set true whenever a key or nested field is introduced, so the caller
  * can skip re-serializing when nothing changed.
@@ -459,25 +454,6 @@ function mergeInto(
     // Both plain objects → recurse to add missing nested fields.
     if (isPlainObject(existing) && isPlainObject(scaffoldValue)) {
       out[key] = mergeInto(existing, scaffoldValue, report);
-      continue;
-    }
-
-    // Both arrays-of-object → merge the sample item into the user's first item.
-    if (Array.isArray(existing) && Array.isArray(scaffoldValue)) {
-      const sample = scaffoldValue[0];
-      const userFirst = existing[0];
-      if (isPlainObject(sample) && isPlainObject(userFirst)) {
-        const mergedFirst = mergeInto(userFirst, sample, report);
-        if (mergedFirst !== userFirst) {
-          const nextArr = existing.slice();
-          nextArr[0] = mergedFirst;
-          out[key] = nextArr;
-        }
-      } else if (isPlainObject(sample) && existing.length === 0) {
-        // User emptied the array — seed the sample so the collection renders one.
-        out[key] = [sample];
-        report.added = true;
-      }
     }
 
     // Type conflict or matching scalar — never overwrite the user's value.
@@ -541,19 +517,13 @@ function syncDataObject(
     out[name] = r.value;
     if (r.changed || !hasOwn(current, name)) changed = true;
   }
-  for (const [name, sub] of shape.collections) {
-    const existing = current[name];
-    if (Array.isArray(existing)) {
-      // Preserve the user's items; prune-sync each one's fields to the item-shape.
-      out[name] = existing.map((item) => {
-        const r = syncDataObject(item, sub);
-        if (r.changed) changed = true;
-        return r.value;
-      });
-    } else {
-      out[name] = [buildModel(sub)];
-      changed = true;
-    }
+  // A data-object component may itself contain a GridLayout → a collection within the
+  // synced object. Reconcile each per element (additive into existing items, seed one
+  // when absent), so the data object mirrors the component including its grids.
+  for (const [name, itemShape] of shape.collections) {
+    const r = reconcileCollectionArray(current[name], itemShape);
+    out[name] = r.value;
+    if (r.changed || !hasOwn(current, name)) changed = true;
   }
 
   // PRUNE: any key on `current` the shape no longer has is stale — drop it.
@@ -564,35 +534,56 @@ function syncDataObject(
 }
 
 /**
- * Reconcile the user's current model against `shape`, returning the next model and
- * whether anything changed. TWO different rules apply, by ownership:
+ * Reconcile a `<GridLayout dataCollection>` ARRAY against its item shape. The array
+ * is OWNED by the user (they may have authored several items); reconciliation is
+ * additive PER ELEMENT — each existing item object is reconciled against the item
+ * shape exactly as a root object is ({@link reconcileObject}: additive own scalars,
+ * prune-sync nested data objects, drop orphaned data objects). New item fields thus
+ * land in EVERY existing element; the user's per-item values are never overwritten.
  *
- *   - The component's OWN tokens (root scalars + `forEach` collections) merge
- *     ADDITIVELY — add what's missing, never overwrite, never prune (a removed token
- *     leaves a harmless leftover). This is {@link mergeModel}'s long-standing behavior.
- *   - A nested-component `data=` OBJECT is prune-SYNCED to the child's shape (see
- *     {@link syncDataObject}) — it mirrors the component, so stale keys are removed —
- *     wherever it appears: at the root, or inside a `forEach` item.
- *   - An ORPHANED data object — a root key holding a plain OBJECT that the tree no
- *     longer references (a `data=` binding renamed or removed) — is dropped, so
- *     renaming a `data` key REPLACES it in the model rather than leaving the old one
- *     behind. Only objects are pruned this way: scalar/array leftovers from a removed
- *     own-token stay (the additive rule), and a referenced key is never touched.
- *
- * Pruning is confined to data objects (their fields, and orphaned objects); a
- * component's own scalar/collection model is never pruned.
+ * An ABSENT or EMPTY array is seeded with ONE sample item (the default). A non-array
+ * `current` (the user replaced the collection with a scalar/object) is rebuilt to the
+ * one-item seed — the key is owned by the grid binding, so a type the shape disagrees
+ * with is corrected. A non-object array ELEMENT (a primitive item, which the spec
+ * explicitly allows for collections of non-objects) is left ALONE — there are no
+ * fields to merge into it.
  */
-export function reconcileModel(current: unknown, shape: ModelShape): { model: unknown; changed: boolean } {
-  if (!isPlainObject(current)) {
-    // No top-level object to reconcile against — leave the user's value alone.
-    return { model: current, changed: false };
+function reconcileCollectionArray(
+  current: unknown,
+  itemShape: ModelShape,
+): { value: unknown[]; changed: boolean } {
+  if (!Array.isArray(current) || current.length === 0) {
+    // Absent / empty / wrong-type → seed exactly one sample item.
+    return { value: [buildModel(itemShape)], changed: true };
   }
+  let changed = false;
+  const out = current.map((element) => {
+    if (!isPlainObject(element)) return element; // primitive item — nothing to merge
+    const r = reconcileObject(element, itemShape);
+    if (r.changed) changed = true;
+    return r.model;
+  });
+  return { value: out, changed };
+}
+
+/**
+ * Reconcile one plain object against a shape — the shared body for the ROOT model and
+ * each grid ITEM. Applies the ownership split: additive own scalars (via
+ * {@link mergeModel}), prune-sync nested `<Component data>` objects (via
+ * {@link syncDataObject}), per-element collection reconcile (via
+ * {@link reconcileCollectionArray}), and dropping ORPHANED data objects/collections
+ * (a renamed/removed `data=`/`dataCollection` key). Scalars are never pruned.
+ */
+function reconcileObject(
+  current: Record<string, unknown>,
+  shape: ModelShape,
+): { model: Record<string, unknown>; changed: boolean } {
   const { model: mergedRaw, added } = mergeModel(current, shape);
   const merged = isPlainObject(mergedRaw) ? mergedRaw : current;
   const out: Record<string, unknown> = { ...merged };
   let changed = added;
 
-  // Root-level data objects: prune-sync to the child shape.
+  // Data objects: prune-sync to the child shape.
   for (const [name, sub] of shape.objects) {
     const r = syncDataObject(out[name], sub);
     if (r.changed) {
@@ -600,34 +591,19 @@ export function reconcileModel(current: unknown, shape: ModelShape): { model: un
       changed = true;
     }
   }
-  // Data objects living inside the component's own `forEach` items.
+  // Collections: reconcile the array per element (additive own fields into each).
   for (const [name, itemShape] of shape.collections) {
-    if (itemShape.objects.size === 0) continue;
-    const arr = out[name];
-    if (!Array.isArray(arr)) continue;
-    let arrChanged = false;
-    const items = arr.map((item) => {
-      if (!isPlainObject(item)) return item;
-      const copy = { ...item };
-      for (const [objName, objShape] of itemShape.objects) {
-        const r = syncDataObject(copy[objName], objShape);
-        if (r.changed) {
-          copy[objName] = r.value;
-          arrChanged = true;
-        }
-      }
-      return copy;
-    });
-    if (arrChanged) {
-      out[name] = items;
+    const r = reconcileCollectionArray(out[name], itemShape);
+    if (r.changed) {
+      out[name] = r.value;
       changed = true;
     }
   }
-  // Drop ORPHANED data objects: a root key holding a plain object that the tree
-  // references nowhere (no token, no `forEach`, no `data=`). That's a former data
-  // object whose binding was renamed/removed — pruning it makes a `data` key rename
-  // REPLACE rather than accumulate. Scalars/arrays are never pruned here (an own
-  // token's leftover stays, per the additive rule); referenced keys stay too.
+  // Drop ORPHANED data objects: a key holding a plain object the tree references
+  // nowhere (a `data=` binding renamed or removed). Pruning makes a `data` key rename
+  // REPLACE rather than accumulate. Scalars and arrays are never pruned here (an own
+  // token's scalar leftover stays per the additive rule; a renamed-away collection
+  // ARRAY is a harmless leftover, mirroring scalar treatment); referenced keys stay.
   const referenced = new Set<string>([
     ...shape.scalars,
     ...shape.objects.keys(),
@@ -640,6 +616,38 @@ export function reconcileModel(current: unknown, shape: ModelShape): { model: un
     }
   }
   return { model: changed ? out : current, changed };
+}
+
+/**
+ * Reconcile the user's current model against `shape`, returning the next model and
+ * whether anything changed. Ownership rules (applied by {@link reconcileObject} at the
+ * root and within each grid item):
+ *
+ *   - The component's OWN tokens (scalars) merge ADDITIVELY — add what's missing,
+ *     never overwrite, never prune (a removed token leaves a harmless leftover). This
+ *     is {@link mergeModel}'s long-standing behavior.
+ *   - A nested-component `data=` OBJECT is prune-SYNCED to the child's shape (see
+ *     {@link syncDataObject}) — it mirrors the component, so stale keys are removed.
+ *   - A `<GridLayout dataCollection>` ARRAY is reconciled PER ELEMENT (see
+ *     {@link reconcileCollectionArray}): new item fields land in EVERY user item;
+ *     an absent/empty array is seeded with one sample item. The array itself, like a
+ *     scalar leftover, is never pruned when its binding is removed.
+ *   - An ORPHANED data object — a key holding a plain OBJECT the tree no longer
+ *     references — is dropped, so renaming a `data` key REPLACES it rather than leaving
+ *     the old one behind. Only objects are pruned this way; scalar/array leftovers stay.
+ *
+ * Pruning is confined to data objects (their fields, and orphaned objects); a
+ * component's own scalar model and grid arrays are never pruned.
+ */
+export function reconcileModel(
+  current: unknown,
+  shape: ModelShape,
+): { model: unknown; changed: boolean } {
+  if (!isPlainObject(current)) {
+    // No top-level object to reconcile against — leave the user's value alone.
+    return { model: current, changed: false };
+  }
+  return reconcileObject(current, shape);
 }
 
 /**

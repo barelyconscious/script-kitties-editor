@@ -22,7 +22,7 @@
  *   "Colors and the palette".
  */
 
-import { Check, Copy, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,10 @@ export function PropertiesPanel() {
 
   const path = selectedId ? nodePath(open.root, selectedId) : null;
   const node = path ? path[path.length - 1] : null;
+  // A LOCKED node is read-only here: every control is disabled and the writeback
+  // setters no-op, so nothing about it can be edited until it is unlocked from the
+  // structure tree (or via the unlock button surfaced in the banner below).
+  const locked = node != null && state.lockedNodeIds.has(node.nodeId);
 
   if (!node || !path) {
     return (
@@ -81,6 +85,7 @@ export function PropertiesPanel() {
   // field into a single undo step (task 470); the field's blur commits a boundary
   // (see `onBlur` below) so leaving it opens a fresh step.
   const setAttr = (name: string, value: string) => {
+    if (locked) return; // read-only while locked (defense; controls are disabled too)
     dispatch({
       type: "setNodeAttrs",
       nodeId: node.nodeId,
@@ -92,6 +97,7 @@ export function PropertiesPanel() {
   // expressed as a single set-or-clear). Keyed per node (the specific attr can
   // change across a rename) so a rename burst still coalesces sensibly.
   const setAttrs = (attrs: Record<string, string>) => {
+    if (locked) return; // read-only while locked (defense; controls are disabled too)
     dispatch({
       type: "setNodeAttrs",
       nodeId: node.nodeId,
@@ -112,20 +118,45 @@ export function PropertiesPanel() {
 
   return (
     <div className="flex min-h-0 flex-col border-t">
-      <div className="px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        Properties · <span className="font-mono text-foreground">{node.tag}</span>
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          Properties · <span className="font-mono text-foreground">{node.tag}</span>
+        </span>
+        {locked && (
+          // Surface the unlock action right where the read-only state is felt, so the
+          // user isn't forced back to the tree to re-enable editing.
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "toggleLock", nodeId: node.nodeId })}
+            title="Unlock this element to edit its properties"
+            className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Lock className="size-3 text-foreground" /> Locked
+          </button>
+        )}
       </div>
 
       {/* Commit-on-blur boundary (task 470): when focus leaves any property field,
           close the current coalescing run so the next field's edits open a fresh
           undo step — mirrors useHistoryState's commit-on-blur. onBlur bubbles from
           the inner inputs (React's onBlur is the focusout event), so one handler
-          here covers every control below. */}
+          here covers every control below.
+
+          LOCK (task: element lock): a locked node renders the SAME fields, but the
+          whole field region is wrapped in a disabled <fieldset> so every native
+          control (input/select/button) inside is non-interactive — the visual,
+          accessible read-only state. The setters also no-op as defense. The
+          fieldset is reset to lay out like a plain block (no border/margin) and
+          dims while locked. */}
       {/** biome-ignore lint/a11y/noStaticElementInteractions: blur boundary on a container of focusable inputs; no interactive role needed */}
       <div
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
+       <fieldset
+         disabled={locked}
+         className={cn("m-0 min-w-0 border-0 p-0", locked && "opacity-60")}
+       >
         {/* <Component> src — the included component's basename. Pinned to the very
             top and rendered as an obviously NON-editable, locked field: it is set
             once via the tree's component picker (when the <Component> is added) and
@@ -203,6 +234,7 @@ export function PropertiesPanel() {
             node's in-progress rows across. Same-node external changes (undo/redo)
             are handled inside via reconcileRows. */}
         <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
+       </fieldset>
       </div>
     </div>
   );

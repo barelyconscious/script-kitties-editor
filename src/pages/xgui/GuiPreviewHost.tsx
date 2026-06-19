@@ -317,6 +317,7 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
         onDragMove={handleDragMove}
         view={view}
         isPanGesture={(e) => e.button === 1 || (e.button === 0 && spaceHeld.current)}
+        isLocked={(nodeId) => state.lockedNodeIds.has(nodeId)}
       />
       <GuiPreviewToolbar
         scale={view.scale}

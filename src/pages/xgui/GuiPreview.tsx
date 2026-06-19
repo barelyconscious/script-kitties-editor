@@ -649,6 +649,14 @@ export type GuiPreviewProps = {
    * never treat a stage pointerdown as a pan (ordinary select/element-drag only).
    */
   isPanGesture?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
+  /**
+   * Element-lock predicate (task: element lock): returns `true` for a `nodeId` the
+   * user has locked. A locked box cannot be selected OR dragged from the preview —
+   * a press/click that resolves to a locked box is ignored (selection unchanged),
+   * so the only way to act on it is to unlock it from the structure tree first.
+   * Omit to treat every box as unlocked.
+   */
+  isLocked?: (nodeId: string) => boolean;
 };
 
 /**
@@ -673,6 +681,7 @@ export function GuiPreview({
   onDragMove,
   view = IDENTITY_VIEW,
   isPanGesture,
+  isLocked,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
   // A single flat scope for the whole tree: every box resolves its bare tokens
@@ -705,8 +714,12 @@ export function GuiPreview({
     }
     const target = event.target as Element;
     const box = target.closest(`[${NODE_ID_ATTR}]`);
-    const id = box?.getAttribute(NODE_ID_ATTR);
-    onSelect(nearestNodeId([id]));
+    const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
+    // A click that resolves to a LOCKED box is ignored — the box can't be selected,
+    // so the current selection is left untouched (only an unlock from the tree can
+    // make it selectable). A background click (id === null) still clears selection.
+    if (id !== null && isLocked?.(id)) return;
+    onSelect(id);
   };
 
   // F7 drag-to-move (475): a drag begins on POINTERDOWN over ANY box — pressing on a
@@ -735,6 +748,11 @@ export function GuiPreview({
     const target = event.target as Element;
     const box = target.closest(`[${NODE_ID_ATTR}]`);
     const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
+    // A LOCKED box can't be selected or dragged: yield the gesture entirely (no
+    // arm, no select, no click suppression) so it behaves as if the box were inert.
+    // The trailing `click` falls through to `handleClick`, which also no-ops on a
+    // locked box, leaving the existing selection intact.
+    if (id !== null && isLocked?.(id)) return;
     // 475: pressing on ANY box selects it AND arms a drag in the same gesture — no
     // prior click-to-select. The pure decision settles both: a press on empty stage
     // background (id === null) does NOT arm (the trailing `click` clears selection);

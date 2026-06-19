@@ -25,7 +25,7 @@
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
 
-import { ChevronDown, ChevronRight, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Lock, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -116,9 +116,11 @@ export function StructureTree() {
           node={open.root}
           depth={0}
           selectedNodeId={selectedNodeId}
+          lockedNodeIds={state.lockedNodeIds}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
           onRemove={handleRemove}
+          onToggleLock={(nodeId) => dispatch({ type: "toggleLock", nodeId })}
         />
       </ul>
 
@@ -141,12 +143,23 @@ type TreeRowProps = {
   node: GuiNode;
   depth: number;
   selectedNodeId: string | null;
+  lockedNodeIds: Set<string>;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onRemove: (nodeId: string) => void;
+  onToggleLock: (nodeId: string) => void;
 };
 
-function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: TreeRowProps) {
+function TreeRow({
+  node,
+  depth,
+  selectedNodeId,
+  lockedNodeIds,
+  onSelect,
+  onAdd,
+  onRemove,
+  onToggleLock,
+}: TreeRowProps) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
   const { tag, secondary } = nodeLabel(node);
@@ -163,9 +176,11 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
+  const locked = lockedNodeIds.has(node.nodeId);
   // The row carries a context menu when there's anything to do on it: add a child
-  // (containers) or delete it (any non-root element).
-  const hasMenu = addable.length > 0 || removable;
+  // (containers), lock it, or delete it (any non-root element). Lock is offered on
+  // every row, so the menu is always present.
+  const hasMenu = true;
 
   return (
     <li>
@@ -237,6 +252,27 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
               </span>
             )}
 
+            <button
+              type="button"
+              aria-label={locked ? `Unlock ${tag}` : `Lock ${tag}`}
+              aria-pressed={locked}
+              title={
+                locked
+                  ? "Locked — can't be selected in the preview or edited. Click to unlock."
+                  : "Lock — prevent selection in the preview and edits in Properties."
+              }
+              onClick={() => onToggleLock(node.nodeId)}
+              className={cn(
+                "shrink-0 rounded p-0.5 transition-opacity",
+                // Locked: a solid white icon that persists even when the row isn't
+                // hovered. Unlocked: a muted icon that only appears on hover.
+                locked
+                  ? "text-foreground opacity-100"
+                  : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
+              )}
+            >
+              <Lock className="size-3" />
+            </button>
             {removable && (
               // A visible delete affordance on hover mirrors the right-click menu, so
               // deleting an element is discoverable without knowing the context menu.
@@ -278,6 +314,12 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
                   ))}
                 </>
               )}
+              <ContextMenu.Item
+                onSelect={() => onToggleLock(node.nodeId)}
+                className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+              >
+                <Lock className="size-3" /> {locked ? "Unlock" : "Lock"}
+              </ContextMenu.Item>
               {removable && (
                 <ContextMenu.Item
                   onSelect={() => onRemove(node.nodeId)}
@@ -299,9 +341,11 @@ function TreeRow({ node, depth, selectedNodeId, onSelect, onAdd, onRemove }: Tre
               node={child}
               depth={depth + 1}
               selectedNodeId={selectedNodeId}
+              lockedNodeIds={lockedNodeIds}
               onSelect={onSelect}
               onAdd={onAdd}
               onRemove={onRemove}
+              onToggleLock={onToggleLock}
             />
           ))}
         </ul>

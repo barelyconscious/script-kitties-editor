@@ -339,7 +339,7 @@ function RootRow({ onAddComponent }: { onAddComponent: () => void }) {
     <li>
       <div className="group flex w-full min-w-0 items-center gap-1 pr-2 pl-2">
         <span className="min-w-0 flex-1 select-none truncate py-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          gui/
+          Scenes
         </span>
         <button
           type="button"

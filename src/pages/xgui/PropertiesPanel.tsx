@@ -22,7 +22,7 @@
  *   "Colors and the palette".
  */
 
-import { Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
@@ -145,11 +145,14 @@ export function PropertiesPanel() {
         {hasId && (
           <>
             <FieldRow label="computed id">
-              <div
-                className="truncate rounded-md border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
-                title={computed || "no id set"}
-              >
-                {computed || "—"}
+              <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
+                <span
+                  className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
+                  title={computed || "no id set"}
+                >
+                  {computed || "—"}
+                </span>
+                <CopyIdButton value={computed} />
               </div>
             </FieldRow>
 
@@ -264,6 +267,37 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
       </span>
       {children}
     </div>
+  );
+}
+
+/**
+ * Copy-to-clipboard affordance seated inside the read-only computed-id field.
+ * Flashes a check for a beat after a successful copy; disabled when there is no id.
+ */
+function CopyIdButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard can reject (permissions/insecure context) — silently ignore.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!value}
+      title={value ? "Copy computed id" : "no id set"}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
   );
 }
 

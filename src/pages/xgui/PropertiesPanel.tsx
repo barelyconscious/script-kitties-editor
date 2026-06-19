@@ -131,7 +131,7 @@ export function PropertiesPanel() {
             <div
               aria-readonly="true"
               title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
-              className="flex cursor-not-allowed items-center gap-1.5 rounded border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
+              className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
             >
               <span className="min-w-0 flex-1 truncate font-mono text-xs">
                 {srcBasename(node.attrs.src) || "—"}
@@ -146,7 +146,7 @@ export function PropertiesPanel() {
           <>
             <FieldRow label="computed id">
               <div
-                className="truncate rounded border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
+                className="truncate rounded-md border border-dashed bg-muted/40 px-2 py-1 font-mono text-muted-foreground text-xs"
                 title={computed || "no id set"}
               >
                 {computed || "—"}

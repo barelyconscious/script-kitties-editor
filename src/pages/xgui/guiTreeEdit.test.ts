@@ -103,9 +103,12 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(panel, "Event")).toBe(false);
   });
 
-  it("Text accepts boxes but never a GridLayout (a grid lives only under Panel/View)", () => {
+  it("Text is a leaf — no children (nesting under a Text is a runtime parse error)", () => {
     const text = node("t", "Text");
-    expect(allowedChildTags(text)).toEqual(["Panel", "Text", "Component"]);
+    expect(allowedChildTags(text)).toEqual([]);
+    expect(canAddChild(text, "Panel")).toBe(false);
+    expect(canAddChild(text, "Text")).toBe(false);
+    expect(canAddChild(text, "Component")).toBe(false);
     expect(canAddChild(text, "GridLayout")).toBe(false);
     expect(canAddChild(text, "Event")).toBe(false);
   });

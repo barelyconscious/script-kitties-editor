@@ -79,13 +79,14 @@ export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder
  *    never appears in any parent's allow-list.
  *  - `<Component>` cannot have children (design: "Components cannot have
  *    children"), so its allow-list is empty.
+ *  - `<Text>` is a LEAF — it carries text content and cannot hold children (nesting
+ *    under it is a runtime parse error), so its allow-list is empty too.
  *  - `<Event>` may appear ONLY as an immediate child of `<View>`, so it is offered
  *    under `View` and nowhere else.
- *  - `<Panel>` / `<Text>` are ordinary visual containers and may be added under
- *    `View`, `Panel`, or `Text`. `<View>`/`<Panel>` may ALSO hold a `<GridLayout>`,
- *    but only when they don't ALREADY contain one (a grid fills its container, so
- *    sibling grids are meaningless). `<Text>` may not hold a GridLayout (a grid
- *    lives only under Panel/View).
+ *  - `<Panel>` is an ordinary visual container: it may hold `<Panel>`/`<Text>`/
+ *    `<Component>` and a single `<GridLayout>` (only when it doesn't ALREADY contain
+ *    one — a grid fills its container, so sibling grids are meaningless). `<View>`
+ *    holds the same plus the View-only `<Event>`.
  *  - `<GridLayout>` repeats a SINGLE child of tag Panel/Text/Component — so it
  *    offers those three ONLY while it is empty, and offers NOTHING once it has its
  *    one child (no `+`).
@@ -108,8 +109,9 @@ export function allowedChildTags(parent: GuiNode): GuiTag[] {
         ? ["Panel", "Text", "Component"]
         : ["Panel", "Text", "Component", "GridLayout"];
     case "Text":
-      // Visual container, but a grid lives only under Panel/View — no GridLayout.
-      return ["Panel", "Text", "Component"];
+      // A <Text> is a LEAF: it carries text content and cannot hold child elements
+      // (nesting children under a <Text> is a parse error in the runtime). Empty.
+      return [];
     case "GridLayout":
       // A grid repeats ONE child; offer its legal child tags only while empty.
       return parent.children.length === 0 ? ["Panel", "Text", "Component"] : [];

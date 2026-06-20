@@ -197,6 +197,10 @@ function TreeRow({
   onToggleVisibility,
 }: TreeRowProps) {
   const [collapsed, setCollapsed] = useState(false);
+  // Whether this row's right-click menu is open. Right-clicking drops the hover
+  // highlight, so we hold a highlight on the row for as long as its menu is open —
+  // keeping the user anchored to WHICH element they're acting on.
+  const [menuOpen, setMenuOpen] = useState(false);
   const hasChildren = node.children.length > 0;
   const tag = node.tag;
   // The row's PRIMARY label is the element's identity (id, or event name), replacing
@@ -215,6 +219,10 @@ function TreeRow({
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
+  // Lock / hide are offered on every NON-root element. The root `<View>` is excluded:
+  // locking it ("lock everything") or hiding it ("blank the preview") carry no useful
+  // meaning, and dropping its icons lets the whole tree reclaim the left gutter.
+  const canToggle = depth > 0;
   const locked = lockedNodeIds.has(node.nodeId);
   const hidden = hiddenNodeIds.has(node.nodeId);
   // The row carries a context menu when there's anything to do on it: add a child
@@ -224,67 +232,27 @@ function TreeRow({
 
   return (
     <li>
-      <ContextMenu.Root>
+      <ContextMenu.Root onOpenChange={setMenuOpen}>
         <ContextMenu.Trigger asChild>
           <div
             // A row is selected by click and right-clicked to add. The whole row is
             // a button so keyboard focus + Enter selects it.
             className={cn(
-              "group flex w-full items-center py-0.5 pr-2 text-left text-[13px] transition-colors hover:bg-muted/60",
+              "group flex w-full items-center py-0.5 pr-2 pl-1 text-left text-[13px] transition-colors hover:bg-muted/60",
               // A missing-id element tints the whole row a muted warning color (its
               // type icon is also swapped for a warning glyph below). Selection still
-              // wins so the selected row reads clearly.
-              selected ? "bg-muted" : missingId && "bg-amber-500/10",
+              // wins so the selected row reads clearly; an open right-click menu holds
+              // the hover tint so the acted-on row stays visibly anchored.
+              selected
+                ? "bg-muted"
+                : menuOpen
+                  ? "bg-muted/60"
+                  : missingId && "bg-amber-500/10",
             )}
           >
-            {/* Lock toggle — pinned to the FAR LEFT gutter (left of the indentation
-                and the label), so the locks line up in one column down the tree
-                regardless of depth. Unlocked: a muted icon that appears only on
-                hover. Locked: a solid white icon that persists even when not hovered. */}
-            <button
-              type="button"
-              aria-label={locked ? `Unlock ${tag}` : `Lock ${tag}`}
-              aria-pressed={locked}
-              title={
-                locked
-                  ? "Locked — can't be selected in the preview or edited. Click to unlock."
-                  : "Lock — prevent selection in the preview and edits in Properties."
-              }
-              onClick={() => onToggleLock(node.nodeId)}
-              className={cn(
-                "ml-1 flex size-4 shrink-0 items-center justify-center rounded transition-opacity",
-                locked
-                  ? "text-foreground opacity-100"
-                  : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
-              )}
-            >
-              <Lock className="size-3" />
-            </button>
-
-            {/* Visibility toggle — sits in the gutter just right of the lock. Visible:
-                a muted eye that appears only on hover. Hidden: a persistent slashed eye
-                (EyeOff). Hiding an element drops it AND its subtree from the preview. */}
-            <button
-              type="button"
-              aria-label={hidden ? `Show ${tag} in preview` : `Hide ${tag} from preview`}
-              aria-pressed={hidden}
-              title={
-                hidden
-                  ? "Hidden from the preview (with its children). Click to show."
-                  : "Hide this element (and its children) from the preview."
-              }
-              onClick={() => onToggleVisibility(node.nodeId)}
-              className={cn(
-                "flex size-4 shrink-0 items-center justify-center rounded transition-opacity",
-                hidden
-                  ? "text-foreground opacity-100"
-                  : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
-              )}
-            >
-              {hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-            </button>
-
-            {/* Indented row content (everything except the far-left lock/eye gutter). */}
+            {/* Indented row content. Lock/eye no longer occupy a far-left gutter; they
+                live in the right-hand affordance group (below) so the tree reclaims the
+                horizontal space, and the root `<View>` carries neither. */}
             <div
               className="flex min-w-0 flex-1 items-center gap-1"
               style={{ paddingLeft: `${0.25 + depth * INDENT_REM}rem` }}
@@ -337,23 +305,54 @@ function TreeRow({
                 >
                   {label}
                 </span>
-                {tag === "Component" && node.attrs.src && (
-                  <span className="min-w-0 truncate text-muted-foreground/70 italic">
-                    {node.attrs.src}
-                  </span>
-                )}
               </button>
 
-              {removable && (
-                // A visible delete affordance on hover mirrors the right-click menu, so
-                // deleting an element is discoverable without knowing the context menu.
+              {canToggle && (
+                // Lock toggle — a right-side affordance. Unlocked: muted, hover-only.
+                // Locked: a solid icon that persists even when not hovered, so lock state
+                // reads at a glance without a dedicated left column.
                 <button
                   type="button"
-                  aria-label={isEvent ? "Remove event" : `Delete ${tag}`}
-                  onClick={() => onRemove(node.nodeId)}
-                  className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                  aria-label={locked ? `Unlock ${tag}` : `Lock ${tag}`}
+                  aria-pressed={locked}
+                  title={
+                    locked
+                      ? "Locked — can't be selected in the preview or edited. Click to unlock."
+                      : "Lock — prevent selection in the preview and edits in Properties."
+                  }
+                  onClick={() => onToggleLock(node.nodeId)}
+                  className={cn(
+                    "shrink-0 rounded p-0.5 transition-opacity",
+                    locked
+                      ? "text-foreground opacity-100"
+                      : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
+                  )}
                 >
-                  <Trash2 className="size-3" />
+                  <Lock className="size-3" />
+                </button>
+              )}
+              {canToggle && (
+                // Visibility toggle — sits beside the lock. Visible: muted, hover-only.
+                // Hidden: a persistent slashed eye (EyeOff). Hiding drops the element AND
+                // its subtree from the preview.
+                <button
+                  type="button"
+                  aria-label={hidden ? `Show ${tag} in preview` : `Hide ${tag} from preview`}
+                  aria-pressed={hidden}
+                  title={
+                    hidden
+                      ? "Hidden from the preview (with its children). Click to show."
+                      : "Hide this element (and its children) from the preview."
+                  }
+                  onClick={() => onToggleVisibility(node.nodeId)}
+                  className={cn(
+                    "shrink-0 rounded p-0.5 transition-opacity",
+                    hidden
+                      ? "text-foreground opacity-100"
+                      : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
+                  )}
+                >
+                  {hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
                 </button>
               )}
               {addable.length > 0 && (
@@ -367,6 +366,26 @@ function TreeRow({
         {hasMenu && (
           <ContextMenu.Portal>
             <ContextMenu.Content className="z-50 min-w-40 overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground text-xs shadow-md ring-1 ring-foreground/10">
+              {/* Header naming the element the menu acts on. Right-clicking doesn't
+                  hold the row's hover highlight, so this keeps the user anchored to
+                  WHICH element they opened the menu on. */}
+              <ContextMenu.Label className="flex items-center gap-1.5 px-2 py-1">
+                {missingId ? (
+                  <TriangleAlert className="size-3 shrink-0 text-amber-500" />
+                ) : (
+                  <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
+                )}
+                <span
+                  className={cn(
+                    "min-w-0 truncate font-medium font-mono",
+                    tagColorClass(tag),
+                    isEvent && labelPlaceholder && "text-muted-foreground/60 italic",
+                  )}
+                >
+                  {label}
+                </span>
+              </ContextMenu.Label>
+              <ContextMenu.Separator className="my-1 h-px bg-border" />
               {addable.length > 0 && (
                 <>
                   <ContextMenu.Label className="px-2 py-1 text-muted-foreground">
@@ -384,21 +403,30 @@ function TreeRow({
                       )}
                     </ContextMenu.Item>
                   ))}
+                  {/* Separate the Add group from the element-level actions below
+                      (lock/hide/delete) so they don't read as one undifferentiated list. */}
+                  {(canToggle || removable) && (
+                    <ContextMenu.Separator className="my-1 h-px bg-border" />
+                  )}
                 </>
               )}
-              <ContextMenu.Item
-                onSelect={() => onToggleLock(node.nodeId)}
-                className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
-              >
-                <Lock className="size-3" /> {locked ? "Unlock" : "Lock"}
-              </ContextMenu.Item>
-              <ContextMenu.Item
-                onSelect={() => onToggleVisibility(node.nodeId)}
-                className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
-              >
-                {hidden ? <Eye className="size-3" /> : <EyeOff className="size-3" />}{" "}
-                {hidden ? "Show in preview" : "Hide from preview"}
-              </ContextMenu.Item>
+              {canToggle && (
+                <>
+                  <ContextMenu.Item
+                    onSelect={() => onToggleLock(node.nodeId)}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                  >
+                    <Lock className="size-3" /> {locked ? "Unlock" : "Lock"}
+                  </ContextMenu.Item>
+                  <ContextMenu.Item
+                    onSelect={() => onToggleVisibility(node.nodeId)}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                  >
+                    {hidden ? <Eye className="size-3" /> : <EyeOff className="size-3" />}{" "}
+                    {hidden ? "Show in preview" : "Hide from preview"}
+                  </ContextMenu.Item>
+                </>
+              )}
               {removable && (
                 <ContextMenu.Item
                   onSelect={() => onRemove(node.nodeId)}

@@ -23,11 +23,11 @@ import {
   LayoutTemplate,
   Loader2,
   type LucideIcon,
-  PanelLeftClose,
   PanelLeftOpen,
   Save,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CollapseRail } from "@/components/CollapseRail";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { serializeGui } from "@/lib/guiNode";
@@ -503,18 +503,14 @@ function OpenComponentPanes({
       {/* ALWAYS-VISIBLE Data Model panel (task 476) — persistent across View,
           Controller, and XML; collapsible to a slim toggle rail. */}
       {modelPanelOpen ? (
-        <div className="flex w-80 shrink-0 flex-col border-black border-l-2">
-          <div className="flex shrink-0 items-center justify-between border-b py-1 pr-1.5 pl-3">
+        <div className="relative flex w-80 shrink-0 flex-col border-black border-l-2">
+          <CollapseRail
+            side="left"
+            onClick={() => setModelPanelOpen(false)}
+            label="Collapse Data Model panel"
+          />
+          <div className="flex shrink-0 items-center border-b px-3 py-2">
             <h2 className="font-medium text-sm">Data Model</h2>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="Collapse Data Model panel"
-              aria-pressed
-              onClick={() => setModelPanelOpen(false)}
-            >
-              <PanelLeftClose className="rotate-180" />
-            </Button>
           </div>
           <div className="min-h-0 flex-1">
             <DataModelPanel

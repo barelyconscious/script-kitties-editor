@@ -9,12 +9,12 @@ import {
   Hash,
   KeyRound,
   Library,
-  PanelRightClose,
   PanelRightOpen,
   SearchIcon,
   Type,
 } from "lucide-react";
 import { type ComponentType, useMemo, useState } from "react";
+import { CollapseRail } from "@/components/CollapseRail";
 import { Input } from "@/components/ui/input";
 import { type ApiItem, type ApiItemType, GAME_API } from "@/lib/api/gameApi";
 import { filterApiTree, formatSignature, hasSignature, isDrillable } from "@/lib/api/search";
@@ -234,21 +234,16 @@ export function ApiReferencePane({
   }
 
   return (
-    <div className={cn("flex h-full min-h-0 w-80 flex-col border-l bg-background", className)}>
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+    <div
+      className={cn("relative flex h-full min-h-0 w-80 flex-col border-l bg-background", className)}
+    >
+      {collapsible && (
+        <CollapseRail side="left" onClick={() => setCollapsed(true)} label="Hide API reference" />
+      )}
+      <div className="flex items-center gap-2 border-b px-3 py-2">
         <h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
           API Reference
         </h3>
-        {collapsible && (
-          <button
-            type="button"
-            title="Hide API reference"
-            onClick={() => setCollapsed(true)}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <PanelRightClose className="size-4" />
-          </button>
-        )}
       </div>
 
       {focused ? (

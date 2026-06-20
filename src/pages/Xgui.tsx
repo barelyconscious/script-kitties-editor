@@ -526,11 +526,13 @@ function OpenComponentPanes({
               type="button"
               aria-label="Show Data Model panel"
               onClick={() => setModelPanelOpen(true)}
-              className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-black border-l-2 bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-full w-9 shrink-0 flex-col items-center border-black border-l-2 bg-background/40 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <PanelLeftOpen className="size-4 shrink-0 rotate-180" />
-              <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
-                Data Model
+              <span className="flex min-h-0 flex-1 items-center">
+                <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
+                  Data Model
+                </span>
               </span>
             </button>
           </TooltipTrigger>

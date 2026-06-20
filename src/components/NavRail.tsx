@@ -16,6 +16,22 @@ const TOOLS: { id: NavRailTool; label: string; icon: IconComponent }[] = [
   { id: "registry", label: "Registry", icon: Library },
 ];
 
+/**
+ * The tool order, shared with {@link import("../App").default} so its Cmd/Ctrl+1..4
+ * shortcuts map to the SAME positions the rail renders (1 = first rail button).
+ * One source of truth means reordering the rail reorders the shortcuts with it.
+ */
+export const NAV_RAIL_TOOLS: NavRailTool[] = TOOLS.map((t) => t.id);
+
+/**
+ * The primary-modifier label for shortcut hints — ⌘ on macOS, "Ctrl+" elsewhere —
+ * matching the `metaKey || ctrlKey` chords the App binds. Display-only.
+ */
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const PRIMARY_MODIFIER_LABEL = IS_MAC ? "⌘" : "Ctrl+";
+
 export function NavRail({
   active,
   onSelect,
@@ -26,10 +42,11 @@ export function NavRail({
   return (
     <aside className="sticky top-0 flex h-screen w-14 shrink-0 flex-col items-center justify-between border-r bg-sidebar py-3">
       <nav aria-label="Tools" className="flex flex-col items-center gap-1">
-        {TOOLS.map(({ id, label, icon: Icon }) => (
+        {TOOLS.map(({ id, label, icon: Icon }, index) => (
           <RailButton
             key={id}
             label={label}
+            shortcut={`${PRIMARY_MODIFIER_LABEL}${index + 1}`}
             isActive={active === id}
             onClick={() => onSelect?.(id)}
           >
@@ -56,11 +73,14 @@ export function NavRail({
 
 function RailButton({
   label,
+  shortcut,
   isActive,
   onClick,
   children,
 }: {
   label: string;
+  /** Keyboard-shortcut hint shown muted beside the label in the tooltip. */
+  shortcut?: string;
   isActive?: boolean;
   onClick?: () => void;
   children: ReactNode;
@@ -89,7 +109,14 @@ function RailButton({
             {children}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
+        <TooltipContent side="right" className="flex items-center gap-2">
+          {label}
+          {shortcut && (
+            <kbd className="rounded border border-border/60 bg-muted px-1 font-mono text-[0.65rem] text-muted-foreground">
+              {shortcut}
+            </kbd>
+          )}
+        </TooltipContent>
       </Tooltip>
     </div>
   );

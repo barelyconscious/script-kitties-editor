@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
-import { NavRail, type NavRailTool } from "./components/NavRail";
+import { NAV_RAIL_TOOLS, NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { usePreference } from "./lib/preferences";
 import { RegistryProvider } from "./lib/registry";
@@ -42,6 +42,26 @@ function App() {
     };
     window.addEventListener("keydown", swallowCloseWindow, { capture: true });
     return () => window.removeEventListener("keydown", swallowCloseWindow, { capture: true });
+  }, []);
+
+  // Cmd/Ctrl+1..4 jump straight to the Nth NavRail tool (1 = the topmost rail
+  // button). This is pure NAVIGATION — it sets the active tool directly rather
+  // than routing through `handleSelectTool`, so hitting the shortcut for the tool
+  // you're already on is a no-op, not a list-pane toggle. The digit→tool mapping
+  // comes from the shared `NAV_RAIL_TOOLS` order, so it can never drift from the
+  // rail. We read the physical digit key (`code`) so it survives non-US layouts,
+  // and ignore the combo when Shift/Alt are also held (those are other commands).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (!/^Digit[1-9]$/.test(e.code)) return;
+      const tool = NAV_RAIL_TOOLS[Number(e.code.slice(5)) - 1];
+      if (!tool) return;
+      e.preventDefault();
+      setActiveTool(tool);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, []);
 
   // The Workbench stays MOUNTED across tool switches (see below), so leaving it

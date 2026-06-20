@@ -46,7 +46,7 @@ import { usePalette } from "../../lib/guiPalette";
 import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
 import { GuiPreviewToolbar } from "./GuiPreviewToolbar";
-import { viewportGridStyle } from "./guiBlueprintGrid";
+import { gridLayerStyle, VIEWPORT_VOID_COLOR } from "./guiBlueprintGrid";
 import { withAttr } from "./guiProperties";
 import { findNode } from "./guiTreeEdit";
 
@@ -292,21 +292,23 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       onPointerMove={handleViewportPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
-      // Blueprint backdrop (479/480/481). The clipping viewport — the area
-      // BEHIND/around the 1280×768 stage — paints a two-tier graph-paper grid. It
-      // PANS with the view (its background-position is offset by the rounded view
-      // pan) so the graph paper feels anchored to the canvas and scrolls under the
-      // artboard as the user pans, but it does NOT zoom: the cell sizes are constant
-      // integers regardless of scale. The solid stage reads as an artboard on the
-      // blueprint canvas. The grid is purely the viewport's `background-*` (built by
-      // the pure `viewportGridStyle`), so it adds nothing to hit-testing/selection/
-      // drag. The cursor style is merged in below.
+      // The clipping viewport — the area BEHIND/around the 1280×768 stage. It paints
+      // only the flat void color; the two-tier graph-paper grid is a dedicated child
+      // LAYER below (so it can pan by a compositor transform instead of repainting its
+      // gradients every frame — see `gridLayerStyle`). The cursor style is set here.
       className="relative h-full min-h-0 overflow-hidden"
       style={{
-        ...viewportGridStyle({ panX: view.panX, panY: view.panY }),
+        backgroundColor: VIEWPORT_VOID_COLOR,
         cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined,
       }}
     >
+      {/* Blueprint backdrop (479/480/481): a two-tier graph-paper grid that PANS with
+          the view but does NOT zoom. Rendered as its own pointer-transparent layer
+          BEHIND the stage so a pan TRANSLATES it (cheap composite) rather than
+          repainting its gradients. `grabbing` promotes it to a layer only while
+          panning. It carries no node ids, so it never affects hit-testing/selection. */}
+      <div aria-hidden="true" className="pointer-events-none" style={gridLayerStyle(view, grabbing)} />
+
       <GuiPreview
         root={root}
         selectedNodeId={selectedNodeId}
@@ -318,6 +320,8 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
         view={view}
         isPanGesture={(e) => e.button === 1 || (e.button === 0 && spaceHeld.current)}
         isLocked={(nodeId) => state.lockedNodeIds.has(nodeId)}
+        // While a pan drag is active, let the stage composite as its own layer (perf).
+        interacting={grabbing}
       />
       <GuiPreviewToolbar
         scale={view.scale}

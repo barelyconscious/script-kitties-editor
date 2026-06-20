@@ -36,7 +36,7 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model"
  */
 
-import { type CSSProperties, useRef } from "react";
+import { type CSSProperties, memo, useMemo, useRef } from "react";
 import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
@@ -213,7 +213,7 @@ function renderChildren(
  * geometry/color/text are computed, and any attribute that didn't fully resolve
  * triggers the waiting-for-binding affordance on the box.
  */
-function GuiBox({
+const GuiBox = memo(function GuiBox({
   node,
   selectedNodeId,
   scope,
@@ -339,7 +339,7 @@ function GuiBox({
       )}
     </div>
   );
-}
+});
 
 /**
  * The shared placeholder a `<Component>` renders when its `src` cannot be mounted
@@ -422,6 +422,43 @@ function ComponentMount({
   const entry: ComponentEntry = useComponent(basename);
   const rawSrc = node.attrs.src ?? "";
 
+  // Build the child's FRESH ROOT scope. Normally that root is the `data=` base object
+  // (if any) with explicit overrides layered on top, all pre-resolved in the parent
+  // scope. As a GRID CELL, the grid item REPLACES that root wholesale (data=/overrides
+  // ignored — locked decision). Memoized so re-renders that don't change the inputs
+  // (a pan/zoom, a selection, an unrelated element's edit) don't rebuild it — and,
+  // crucially, keep `childRoot` referentially stable so the z-order memo below holds.
+  const childRoot = useMemo(
+    () => (rootOverride ? rootOverride.item : resolveChildRoot(node, parentScope)),
+    [rootOverride, node, parentScope],
+  );
+  // A null grid item (an empty cell) uses emptyItemScope() so the mounted child's
+  // {token}s resolve to "" with no waiting affordance — matching the non-Component
+  // cell path (caveat 5). flatRootScope(null) would MISS every token and paint the
+  // amber waiting state. Everything else resolves against the item as a flat root.
+  const childScope = useMemo(
+    () =>
+      rootOverride && rootOverride.item === null ? emptyItemScope() : flatRootScope(childRoot),
+    [rootOverride, childRoot],
+  );
+  // The child mounts as its own little stage: its boxes are positioned/ordered within
+  // THIS <Component> box. A nested z-order map ranks the child's own boxes among their
+  // siblings. Memoized on the child tree + root: this full tree walk + sort ran once
+  // PER MOUNTED COMPONENT on EVERY preview re-render before — the dominant cost when a
+  // screen nests many components. It only changes when the child file or its data does.
+  const entryRoot = entry.status === "ok" ? entry.root : null;
+  const childZOrder = useMemo(
+    () => (entryRoot ? computeZOrder(entryRoot, childRoot) : EMPTY_ZORDER),
+    [entryRoot, childRoot],
+  );
+  // The cycle-guard ancestor set carried INTO the child (parent set ∪ this basename).
+  // Memoized so it stays referentially stable across re-renders — it is the child
+  // boxes' `ancestry` prop, and a fresh Set each render would defeat their memo.
+  const childAncestry = useMemo(
+    () => (basename ? new Set(ancestry).add(basename) : ancestry),
+    [ancestry, basename],
+  );
+
   // Pure placeholder decisions (blank src, recursion) win immediately.
   if (decision.kind === "placeholder") {
     return <ComponentPlaceholder reason={decision.reason} src={rawSrc} />;
@@ -434,21 +471,7 @@ function ComponentMount({
     return <ComponentPlaceholder reason="missing" src={rawSrc} />;
   }
 
-  // ok: mount the child subtree in a FRESH ROOT scope. Normally that root is built
-  // from the `data=` base object (if any) with explicit overrides layered on top, all
-  // pre-resolved in the parent scope. As a GRID CELL, the grid item REPLACES that root
-  // wholesale (data=/overrides ignored — locked decision).
-  const childRoot = rootOverride ? rootOverride.item : resolveChildRoot(node, parentScope);
-  // A null grid item (an empty cell) uses emptyItemScope() so the mounted child's
-  // {token}s resolve to "" with no waiting affordance — matching the non-Component
-  // cell path (caveat 5). flatRootScope(null) would MISS every token and paint the
-  // amber waiting state. Everything else resolves against the item as a flat root.
-  const childScope =
-    rootOverride && rootOverride.item === null ? emptyItemScope() : flatRootScope(childRoot);
-  // The child mounts as its own little stage: its boxes are positioned/ordered
-  // within THIS <Component> box. A nested z-order map ranks the child's own boxes
-  // among their siblings, contained by this mount wrapper's stacking context.
-  const childZOrder = computeZOrder(entry.root, childRoot);
+  // ok: mount the child subtree.
   return (
     <div
       className="pointer-events-none absolute inset-0"
@@ -465,7 +488,7 @@ function ComponentMount({
         palette,
         "",
         childZOrder,
-        decision.childAncestry,
+        childAncestry,
       )}
     </div>
   );
@@ -512,7 +535,7 @@ type GridLayoutExpansionProps = {
  * The wrapper is `inset-0` (fills the parent content box) so the cells' relative
  * geometry resolves against the parent box, exactly as if the grid occupied it.
  */
-function GridLayoutExpansion({
+const GridLayoutExpansion = memo(function GridLayoutExpansion({
   node,
   scope,
   palette,
@@ -585,7 +608,7 @@ function GridLayoutExpansion({
       })}
     </div>
   );
-}
+});
 
 export type GuiPreviewProps = {
   /** The parsed component tree to render. Its root is expected to be `<View>`. */
@@ -657,6 +680,16 @@ export type GuiPreviewProps = {
    * Omit to treat every box as unlocked.
    */
   isLocked?: (nodeId: string) => boolean;
+  /**
+   * Whether a view gesture (pan) is in flight (473 perf): while true the stage is
+   * promoted to its OWN compositor layer (`will-change: transform`) so a pan moves a
+   * cached layer instead of REPAINTING the whole box subtree (every nested box +
+   * background-image texture) on every frame — the dominant cost when a screen nests
+   * many components. Gated to the gesture (not always-on) because a promoted layer is
+   * raster-scaled, which would soften zoomed/idle content; a pan only TRANSLATES (no
+   * scale change), so promoting during it costs no sharpness. Omit → never promoted.
+   */
+  interacting?: boolean;
 };
 
 /**
@@ -682,18 +715,46 @@ export function GuiPreview({
   view = IDENTITY_VIEW,
   isPanGesture,
   isLocked,
+  interacting = false,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
   // A single flat scope for the whole tree: every box resolves its bare tokens
-  // against this one model object.
-  const scope = flatRootScope(model);
+  // against this one model object. Memoized on `model` so a pan/zoom/selection
+  // re-render (which leaves the model untouched) reuses the same scope object —
+  // keeping it referentially stable so the content memo below can rely on it.
+  const scope = useMemo(() => flatRootScope(model), [model]);
   // Nested z-order: compute the `boxKey → z-index` map (each box ranked among its
   // siblings by resolved `layer`, ties → document order) up front, then hand it
   // down so each box can apply its rank. The flatten mirrors this render's tree, so
   // the map's keys line up with the boxes rendered below. Each box's z-index orders
   // it within its parent's stacking context, so a container's layer lifts its whole
   // subtree as a group.
-  const zOrder = computeZOrder(root, model);
+  //
+  // Memoized on `[root, model]` (skips the walk on a pan/zoom) AND ref-stabilized:
+  // a drag replaces `root` every frame but z-order depends only on STRUCTURE +
+  // `layer`, not position — so the recomputed map is value-equal. Returning the
+  // SAME map reference when nothing changed is what lets the memoized `GuiBox`es
+  // below skip re-rendering during a drag (a changed `zOrder` prop would re-render
+  // every box every frame, defeating the memo).
+  const zOrderRef = useRef<ZOrderMap | null>(null);
+  const zOrder = useMemo(() => {
+    const next = computeZOrder(root, model);
+    const prev = zOrderRef.current;
+    if (prev && zOrderMapsEqual(prev, next)) return prev;
+    zOrderRef.current = next;
+    return next;
+  }, [root, model]);
+  // The rendered box tree. The view transform (zoom/pan) lives ONLY on the stage's
+  // own `transform` style — none of the boxes depend on it — yet without this memo a
+  // pan/zoom (a continuous, every-frame gesture) would re-render the WHOLE subtree.
+  // Memoizing on the inputs the boxes actually read decouples the view gesture from
+  // the tree: a pan/zoom reuses these elements and only restyles the stage div. The
+  // tree still re-renders when it genuinely changes (an edit replaces `root`, a
+  // selection flips `selectedNodeId`, the model/palette change).
+  const content = useMemo(
+    () => renderChildren(root.children, selectedNodeId, scope, palette, "", zOrder, EMPTY_ANCESTRY),
+    [root.children, selectedNodeId, scope, palette, zOrder],
+  );
   // The DOM half of the back-reference: walk outward from the click target to
   // the nearest box carrying a node id. `closest` matches the target itself
   // first, then ancestors — exactly the "nearest enclosing box" rule. Reading
@@ -842,6 +903,12 @@ export function GuiPreview({
         // center bakes the centering into pan.
         transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
         transformOrigin: "top left",
+        // PERF: while a pan gesture is in flight, promote the stage to its own
+        // compositor layer so each frame just re-composites a cached bitmap rather
+        // than REPAINTING the entire nested box tree (every box + texture). Dropped
+        // when idle so static/zoomed content rasterizes sharp (a pan never scales, so
+        // the promotion costs no sharpness during the gesture). See `interacting`.
+        willChange: interacting ? "transform" : undefined,
         // The stage forms the root stacking context for the whole tree (`position:
         // relative` + a numeric `z-index`). Its direct children are ranked among
         // themselves by `layer` within it; each of those children in turn forms its
@@ -849,13 +916,31 @@ export function GuiPreview({
         zIndex: 0,
       }}
     >
-      {renderChildren(root.children, selectedNodeId, scope, palette, "", zOrder, EMPTY_ANCESTRY)}
+      {content}
     </div>
   );
 }
 
 /** The empty `<Component>`-`src` ancestor set at the stage root (no mounts above). */
 const EMPTY_ANCESTRY: ReadonlySet<string> = new Set();
+
+/** A shared empty z-order map for a not-yet-mounted child (stable identity for memo deps). */
+const EMPTY_ZORDER: ZOrderMap = new Map();
+
+/**
+ * Value-equality for two z-order maps (same keys → same ranks). Used to keep the
+ * `zOrder` reference STABLE across a drag: position changes replace `root` and force
+ * a recompute, but the resulting ranks are identical, so returning the prior map
+ * lets the memoized boxes skip re-rendering. Cheap: one size check + one pass.
+ */
+function zOrderMapsEqual(a: ZOrderMap, b: ZOrderMap): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
 
 /** The default view transform: native 100% at the origin (no zoom, no pan). */
 const IDENTITY_VIEW: ViewTransform = { scale: 1, panX: 0, panY: 0 };

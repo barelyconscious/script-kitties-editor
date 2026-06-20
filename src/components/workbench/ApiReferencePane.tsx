@@ -220,13 +220,15 @@ export function ApiReferencePane({
         title="Show API reference"
         onClick={() => setCollapsed(false)}
         className={cn(
-          "flex h-full w-10 shrink-0 flex-col items-center gap-2 border-l bg-background py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          "flex h-full w-10 shrink-0 flex-col items-center border-l bg-background py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
       >
         <PanelRightOpen className="size-4 shrink-0" />
-        <span className="font-medium text-[0.6rem] uppercase tracking-widest [writing-mode:vertical-rl]">
-          API Reference
+        <span className="flex min-h-0 flex-1 items-center">
+          <span className="font-medium text-[0.6rem] uppercase tracking-widest [writing-mode:vertical-rl]">
+            API Reference
+          </span>
         </span>
       </button>
     );

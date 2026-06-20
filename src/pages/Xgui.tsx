@@ -585,11 +585,13 @@ function CollapsedListRail({ onShow }: { onShow: () => void }) {
           type="button"
           aria-label="Show component list"
           onClick={onShow}
-          className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-r bg-sidebar py-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          className="flex h-full w-9 shrink-0 flex-col items-center border-r bg-sidebar py-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
         >
           <PanelLeftOpen className="size-4 shrink-0" />
-          <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
-            Components
+          <span className="flex min-h-0 flex-1 items-center">
+            <span className="text-xs uppercase tracking-wide [writing-mode:vertical-rl]">
+              Components
+            </span>
           </span>
         </button>
       </TooltipTrigger>

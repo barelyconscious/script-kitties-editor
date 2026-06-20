@@ -60,8 +60,10 @@ function tagColorClass(tag: GuiTag): string {
     case "View":
       return "text-primary";
     case "Component":
-      // Emerald, not amber — amber now reads exclusively as the missing-id warning.
-      return "text-emerald-400";
+      // Aquamarine (slightly desaturated) — distinct from the others without
+      // colliding with a semantic color (amber = missing-id warning; plain green =
+      // "added" in a diff/VCS).
+      return "text-[#86e3c6]";
     case "Event":
       return "text-sky-400";
     case "GridLayout":
@@ -219,7 +221,7 @@ function TreeRow({
             // A row is selected by click and right-clicked to add. The whole row is
             // a button so keyboard focus + Enter selects it.
             className={cn(
-              "group flex w-full items-center py-0.5 pr-2 text-left text-xs transition-colors hover:bg-muted/60",
+              "group flex w-full items-center py-0.5 pr-2 text-left text-[13px] transition-colors hover:bg-muted/60",
               // A missing-id element tints the whole row a muted warning color (its
               // type icon is also swapped for a warning glyph below). Selection still
               // wins so the selected row reads clearly.

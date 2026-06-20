@@ -400,11 +400,8 @@ function TreeRow({
                       >
                         <ChildIcon className={cn("size-3 shrink-0", tagColorClass(childTag))} />
                         <span className={cn("font-medium font-mono", tagColorClass(childTag))}>
-                          {`<${childTag}>`}
+                          {childTag}
                         </span>
-                        {childTag === "Component" && (
-                          <span className="text-muted-foreground">…</span>
-                        )}
                       </ContextMenu.Item>
                     );
                   })}
@@ -521,9 +518,8 @@ function AddMenu({
                 >
                   <ChildIcon className={cn("size-3 shrink-0", tagColorClass(childTag))} />
                   <span className={cn("font-medium font-mono", tagColorClass(childTag))}>
-                    {`<${childTag}>`}
+                    {childTag}
                   </span>
-                  {childTag === "Component" && <span className="text-muted-foreground">…</span>}
                 </button>
               );
             })}

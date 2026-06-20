@@ -21,6 +21,8 @@ function openDoc(overrides: Partial<OpenComponent> = {}): OpenComponent {
 const CLEAN: EditorState = {
   open: null,
   selectedNodeId: null,
+  lockedNodeIds: new Set(),
+  hiddenNodeIds: new Set(),
   activeTab: "view",
   dirty: false,
   past: [],
@@ -62,6 +64,60 @@ describe("editorReducer", () => {
     expect(next.dirty).toBe(false);
     // Clearing the selection is supported.
     expect(editorReducer(next, { type: "select", nodeId: null }).selectedNodeId).toBeNull();
+  });
+
+  it("toggleLock adds then removes a nodeId without touching dirty/history", () => {
+    const state: EditorState = { ...CLEAN, open: openDoc() };
+    const locked = editorReducer(state, { type: "toggleLock", nodeId: "n1" });
+    expect(locked.lockedNodeIds.has("n1")).toBe(true);
+    // Editor-only view state: no dirty, no history step.
+    expect(locked.dirty).toBe(false);
+    expect(locked.past).toHaveLength(0);
+    // A fresh Set (not a mutation of the previous one).
+    expect(locked.lockedNodeIds).not.toBe(state.lockedNodeIds);
+    // Toggling the same id again clears it.
+    const unlocked = editorReducer(locked, { type: "toggleLock", nodeId: "n1" });
+    expect(unlocked.lockedNodeIds.has("n1")).toBe(false);
+  });
+
+  it("toggleLock is a no-op when nothing is open", () => {
+    const next = editorReducer(CLEAN, { type: "toggleLock", nodeId: "n1" });
+    expect(next).toBe(CLEAN);
+  });
+
+  it("open clears any existing locks (nodeIds are re-minted)", () => {
+    const state: EditorState = {
+      ...CLEAN,
+      open: openDoc({ name: "old" }),
+      lockedNodeIds: new Set(["n1", "n2"]),
+    };
+    const next = editorReducer(state, { type: "open", component: openDoc({ name: "bag" }) });
+    expect(next.lockedNodeIds.size).toBe(0);
+  });
+
+  it("toggleVisibility adds then removes a nodeId without touching dirty/history", () => {
+    const state: EditorState = { ...CLEAN, open: openDoc() };
+    const hidden = editorReducer(state, { type: "toggleVisibility", nodeId: "n1" });
+    expect(hidden.hiddenNodeIds.has("n1")).toBe(true);
+    expect(hidden.dirty).toBe(false);
+    expect(hidden.past).toHaveLength(0);
+    expect(hidden.hiddenNodeIds).not.toBe(state.hiddenNodeIds);
+    const shown = editorReducer(hidden, { type: "toggleVisibility", nodeId: "n1" });
+    expect(shown.hiddenNodeIds.has("n1")).toBe(false);
+  });
+
+  it("toggleVisibility is a no-op when nothing is open", () => {
+    expect(editorReducer(CLEAN, { type: "toggleVisibility", nodeId: "n1" })).toBe(CLEAN);
+  });
+
+  it("open clears any existing visibility hides (session-only)", () => {
+    const state: EditorState = {
+      ...CLEAN,
+      open: openDoc({ name: "old" }),
+      hiddenNodeIds: new Set(["n1"]),
+    };
+    const next = editorReducer(state, { type: "open", component: openDoc({ name: "bag" }) });
+    expect(next.hiddenNodeIds.size).toBe(0);
   });
 
   it("setTab switches the active tab", () => {

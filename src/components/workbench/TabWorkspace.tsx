@@ -255,38 +255,10 @@ export function TabWorkspace({
                     />
                   </div>
                 )}
-                {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
-                  editor is mounted; scripts undo inside Monaco, not here. */}
-                {undoTarget && (
-                  <div className="ml-1 flex items-center">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Undo (Ctrl+Z)"
-                      disabled={!undoTarget.canUndo}
-                      onClick={() => undoTarget.undo()}
-                    >
-                      <Undo2 />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Redo (Ctrl+Shift+Z)"
-                      disabled={!undoTarget.canRedo}
-                      onClick={() => undoTarget.redo()}
-                    >
-                      <Redo2 />
-                    </Button>
-                  </div>
-                )}
-                {/* Bespoke editors (bundle/pack) already show the name in the tab and
-                in their own Details section, so the toolbar omits it to avoid a
-                third copy. */}
-                {!isBespoke && (
-                  <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
-                )}
-                {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
-                toolbar doesn't repeat it. */}
+                {/* The object name is NOT repeated here: it already shows on the tab
+                (TabBar) and in the Data pane's Details/Name field, so a toolbar copy
+                was a redundant third instance. The unsaved-changes dot likewise lives
+                on the tab, so the toolbar doesn't repeat it either. */}
                 {status && status.message.length > 0 && (
                   <span
                     role="status"
@@ -301,6 +273,31 @@ export function TabWorkspace({
                 )}
                 <div className="ml-auto flex items-center gap-2">
                   <AutoSaveIndicator status={autoStatus} />
+                  {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
+                    editor is mounted; scripts undo inside Monaco, not here. Sits with
+                    the save controls on the right. */}
+                  {undoTarget && (
+                    <div className="flex items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Undo (Ctrl+Z)"
+                        disabled={!undoTarget.canUndo}
+                        onClick={() => undoTarget.undo()}
+                      >
+                        <Undo2 />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Redo (Ctrl+Shift+Z)"
+                        disabled={!undoTarget.canRedo}
+                        onClick={() => undoTarget.redo()}
+                      >
+                        <Redo2 />
+                      </Button>
+                    </div>
+                  )}
                   {/* Scripts save manually; bundles/packs are script-less, so the
                   button only appears when the tab actually has a script. */}
                   {bus.hasManualTarget && (

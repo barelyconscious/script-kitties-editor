@@ -13,8 +13,10 @@ import {
   nextAutoId,
   nodeLabel,
   nodePath,
+  pruneNodes,
   removeNode,
   setNodeAttrs,
+  treeNodePrimaryLabel,
 } from "./guiTreeEdit";
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
@@ -101,9 +103,12 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(panel, "Event")).toBe(false);
   });
 
-  it("Text accepts boxes but never a GridLayout (a grid lives only under Panel/View)", () => {
+  it("Text is a leaf — no children (nesting under a Text is a runtime parse error)", () => {
     const text = node("t", "Text");
-    expect(allowedChildTags(text)).toEqual(["Panel", "Text", "Component"]);
+    expect(allowedChildTags(text)).toEqual([]);
+    expect(canAddChild(text, "Panel")).toBe(false);
+    expect(canAddChild(text, "Text")).toBe(false);
+    expect(canAddChild(text, "Component")).toBe(false);
     expect(canAddChild(text, "GridLayout")).toBe(false);
     expect(canAddChild(text, "Event")).toBe(false);
   });
@@ -182,6 +187,34 @@ describe("nodeLabel — tree row labeling", () => {
   it("gives a non-Event node with no id a null secondary label", () => {
     expect(nodeLabel(nodeWith("Panel", {})).secondary).toBeNull();
     expect(nodeLabel(nodeWith("Text", { id: "  " })).secondary).toBeNull();
+  });
+});
+
+describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
+  it("labels a non-Event node by its trimmed id (replacing the tag name)", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Panel", { id: " Panel1 " }))).toEqual({
+      text: "Panel1",
+      placeholder: false,
+    });
+  });
+
+  it("falls back to the bare tag name when a non-Event node has no id", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({ text: "Panel", placeholder: false });
+    expect(treeNodePrimaryLabel(nodeWith("Text", { id: "  " }))).toEqual({
+      text: "Text",
+      placeholder: false,
+    });
+  });
+
+  it("labels an <Event> by its name, flagging the placeholder when blank", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Event", { name: "Tick" }))).toEqual({
+      text: "Tick",
+      placeholder: false,
+    });
+    expect(treeNodePrimaryLabel(nodeWith("Event", {}))).toEqual({
+      text: EVENT_PLACEHOLDER_LABEL,
+      placeholder: true,
+    });
   });
 });
 
@@ -402,6 +435,38 @@ describe("removeNode — immutable detach (F9c Event delete)", () => {
     const root = node("root", "View", [node("a", "Panel"), node("b", "Text")]);
     removeNode(root, "b");
     expect(root.children.map((c) => c.nodeId)).toEqual(["a", "b"]);
+  });
+});
+
+describe("pruneNodes — multi-node render-only prune (editor visibility)", () => {
+  it("drops every listed node AND its subtree, keeping the rest in order", () => {
+    const root = node("root", "View", [
+      node("a", "Panel", [node("a1", "Text")]),
+      node("b", "Panel"),
+      node("c", "Panel"),
+    ]);
+    const next = pruneNodes(root, new Set(["a", "c"]));
+    expect(next.children.map((n) => n.nodeId)).toEqual(["b"]);
+  });
+
+  it("prunes a deeply nested node without touching its siblings", () => {
+    const root = node("root", "View", [node("a", "Panel", [node("x", "Text"), node("y", "Text")])]);
+    const next = pruneNodes(root, new Set(["x"]));
+    expect(next.children[0].children.map((n) => n.nodeId)).toEqual(["y"]);
+  });
+
+  it("returns the SAME root reference when nothing is hidden (empty set or no match)", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    expect(pruneNodes(root, new Set())).toBe(root);
+    expect(pruneNodes(root, new Set(["missing"]))).toBe(root);
+  });
+
+  it("reuses untouched sibling subtrees by reference; does not mutate the original", () => {
+    const sib = node("sib", "Panel", [node("deep", "Text")]);
+    const root = node("root", "View", [node("a", "Panel", [node("t", "Text")]), sib]);
+    const next = pruneNodes(root, new Set(["t"]));
+    expect(next.children[1]).toBe(sib);
+    expect(root.children[0].children.map((n) => n.nodeId)).toEqual(["t"]); // original intact
   });
 });
 

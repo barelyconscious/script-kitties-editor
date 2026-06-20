@@ -22,17 +22,17 @@ import {
   FileCode2,
   FolderPlus,
   MonitorPlay,
-  PanelLeftClose,
   Plus,
   SearchIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { CollapseRail } from "@/components/CollapseRail";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
+import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
 import {
   flattenTree,
   type GuiComponentRef,
@@ -130,7 +130,11 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
           return;
         }
         const component = buildOpenComponent(ref, xml);
-        dispatch({ type: "open", component });
+        // Restore any locks persisted for this component (resolved from stable
+        // structural keys against the just-parsed tree), so locking survives
+        // reloads/restarts.
+        const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
+        dispatch({ type: "open", component, lockedNodeIds });
       } catch (err) {
         const message =
           err instanceof GuiParseError
@@ -212,21 +216,15 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
 
   return (
     <div
-      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar", className)}
+      className={cn(
+        "relative flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-sidebar",
+        className,
+      )}
     >
+      {onCollapse && (
+        <CollapseRail side="right" onClick={onCollapse} label="Collapse component list" />
+      )}
       <div className="flex items-center gap-1 px-3 py-2">
-        {onCollapse && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onCollapse}
-            title="Collapse component list"
-            aria-label="Collapse component list"
-            className="shrink-0 text-muted-foreground"
-          >
-            <PanelLeftClose />
-          </Button>
-        )}
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input

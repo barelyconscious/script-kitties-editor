@@ -30,7 +30,7 @@
  * mount.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyDragDelta,
   fitView,
@@ -46,9 +46,9 @@ import { usePalette } from "../../lib/guiPalette";
 import { useEditorStore } from "./editorState";
 import { GuiPreview } from "./GuiPreview";
 import { GuiPreviewToolbar } from "./GuiPreviewToolbar";
-import { viewportGridStyle } from "./guiBlueprintGrid";
+import { gridLayerStyle, VIEWPORT_VOID_COLOR } from "./guiBlueprintGrid";
 import { withAttr } from "./guiProperties";
-import { findNode } from "./guiTreeEdit";
+import { findNode, pruneNodes } from "./guiTreeEdit";
 
 export type GuiPreviewHostProps = {
   /** The parsed component to preview. */
@@ -74,6 +74,19 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
   // highlight off this one value — sync is free because there is one source.
   const { state, dispatch } = useEditorStore();
   const selectedNodeId = state.selectedNodeId;
+  // Editor visibility (visibility toggle): the tree that the preview RENDERS has the
+  // user-hidden elements (and their subtrees) pruned out. `pruneNodes` structure-
+  // shares (and returns the same `root` when nothing is hidden), so this is a cheap
+  // no-op until something is actually hidden. A hidden `<View>` root would still
+  // render the (empty) stage, so we special-case it to drop all children. The store
+  // keeps the FULL tree — this prune is render-only, and the drag handlers below
+  // still resolve against the full `root` (only a VISIBLE box can be dragged anyway).
+  const hiddenNodeIds = state.hiddenNodeIds;
+  const visibleRoot = useMemo(() => {
+    if (hiddenNodeIds.size === 0) return root;
+    if (hiddenNodeIds.has(root.nodeId)) return { ...root, children: [] };
+    return pruneNodes(root, hiddenNodeIds);
+  }, [root, hiddenNodeIds]);
   // The STABLE identity of the open component — its gui-relative path. This is what
   // "a component opened" keys on: it stays fixed across every edit to the SAME file
   // (drag, property edit, add/remove, undo/redo, live-reload), and only changes when
@@ -292,23 +305,25 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       onPointerMove={handleViewportPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
-      // Blueprint backdrop (479/480/481). The clipping viewport — the area
-      // BEHIND/around the 1280×768 stage — paints a two-tier graph-paper grid. It
-      // PANS with the view (its background-position is offset by the rounded view
-      // pan) so the graph paper feels anchored to the canvas and scrolls under the
-      // artboard as the user pans, but it does NOT zoom: the cell sizes are constant
-      // integers regardless of scale. The solid stage reads as an artboard on the
-      // blueprint canvas. The grid is purely the viewport's `background-*` (built by
-      // the pure `viewportGridStyle`), so it adds nothing to hit-testing/selection/
-      // drag. The cursor style is merged in below.
+      // The clipping viewport — the area BEHIND/around the 1280×768 stage. It paints
+      // only the flat void color; the two-tier graph-paper grid is a dedicated child
+      // LAYER below (so it can pan by a compositor transform instead of repainting its
+      // gradients every frame — see `gridLayerStyle`). The cursor style is set here.
       className="relative h-full min-h-0 overflow-hidden"
       style={{
-        ...viewportGridStyle({ panX: view.panX, panY: view.panY }),
+        backgroundColor: VIEWPORT_VOID_COLOR,
         cursor: grabbing ? "grabbing" : grabReady ? "grab" : undefined,
       }}
     >
+      {/* Blueprint backdrop (479/480/481): a two-tier graph-paper grid that PANS with
+          the view but does NOT zoom. Rendered as its own pointer-transparent layer
+          BEHIND the stage so a pan TRANSLATES it (cheap composite) rather than
+          repainting its gradients. `grabbing` promotes it to a layer only while
+          panning. It carries no node ids, so it never affects hit-testing/selection. */}
+      <div aria-hidden="true" className="pointer-events-none" style={gridLayerStyle(view, grabbing)} />
+
       <GuiPreview
-        root={root}
+        root={visibleRoot}
         selectedNodeId={selectedNodeId}
         onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
         model={model}
@@ -317,6 +332,9 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
         onDragMove={handleDragMove}
         view={view}
         isPanGesture={(e) => e.button === 1 || (e.button === 0 && spaceHeld.current)}
+        isLocked={(nodeId) => state.lockedNodeIds.has(nodeId)}
+        // While a pan drag is active, let the stage composite as its own layer (perf).
+        interacting={grabbing}
       />
       <GuiPreviewToolbar
         scale={view.scale}

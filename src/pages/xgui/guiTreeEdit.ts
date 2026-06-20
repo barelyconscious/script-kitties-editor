@@ -46,6 +46,29 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
 }
 
 /**
+ * The PRIMARY label a tree row shows — the element's IDENTITY rather than its tag
+ * (the tag is conveyed by the row's per-tag icon + color), so e.g. a `<Panel
+ * id="Panel1">` reads as `Panel1`, not `Panel`:
+ *  - `<Event>` has no id (events are name→handler), so it labels by its `name`,
+ *    falling back to {@link EVENT_PLACEHOLDER_LABEL} (flagged `placeholder`) when blank;
+ *  - every other tag labels by its authored `id` (trimmed) when present, and falls
+ *    back to the bare tag name when it has none — so the row is never empty (an idless
+ *    id-bearing element is additionally flagged by the tree's missing-id warning).
+ *
+ * Pure (no React) so the labeling rule is unit-tested without rendering the tree.
+ */
+export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder: boolean } {
+  if (node.tag === "Event") {
+    const name = node.attrs.name?.trim();
+    return name
+      ? { text: name, placeholder: false }
+      : { text: EVENT_PLACEHOLDER_LABEL, placeholder: true };
+  }
+  const id = node.attrs.id?.trim();
+  return id ? { text: id, placeholder: false } : { text: node.tag, placeholder: false };
+}
+
+/**
  * The tags a user can ADD as a child under the given parent NODE, honoring the
  * phase-1 structural rules. This is CHILDREN-AWARE — some rules depend not just on
  * the parent's tag but on what it already contains (a GridLayout holds one child; a
@@ -56,13 +79,14 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
  *    never appears in any parent's allow-list.
  *  - `<Component>` cannot have children (design: "Components cannot have
  *    children"), so its allow-list is empty.
+ *  - `<Text>` is a LEAF — it carries text content and cannot hold children (nesting
+ *    under it is a runtime parse error), so its allow-list is empty too.
  *  - `<Event>` may appear ONLY as an immediate child of `<View>`, so it is offered
  *    under `View` and nowhere else.
- *  - `<Panel>` / `<Text>` are ordinary visual containers and may be added under
- *    `View`, `Panel`, or `Text`. `<View>`/`<Panel>` may ALSO hold a `<GridLayout>`,
- *    but only when they don't ALREADY contain one (a grid fills its container, so
- *    sibling grids are meaningless). `<Text>` may not hold a GridLayout (a grid
- *    lives only under Panel/View).
+ *  - `<Panel>` is an ordinary visual container: it may hold `<Panel>`/`<Text>`/
+ *    `<Component>` and a single `<GridLayout>` (only when it doesn't ALREADY contain
+ *    one — a grid fills its container, so sibling grids are meaningless). `<View>`
+ *    holds the same plus the View-only `<Event>`.
  *  - `<GridLayout>` repeats a SINGLE child of tag Panel/Text/Component — so it
  *    offers those three ONLY while it is empty, and offers NOTHING once it has its
  *    one child (no `+`).
@@ -85,8 +109,9 @@ export function allowedChildTags(parent: GuiNode): GuiTag[] {
         ? ["Panel", "Text", "Component"]
         : ["Panel", "Text", "Component", "GridLayout"];
     case "Text":
-      // Visual container, but a grid lives only under Panel/View — no GridLayout.
-      return ["Panel", "Text", "Component"];
+      // A <Text> is a LEAF: it carries text content and cannot hold child elements
+      // (nesting children under a <Text> is a parse error in the runtime). Empty.
+      return [];
     case "GridLayout":
       // A grid repeats ONE child; offer its legal child tags only while empty.
       return parent.children.length === 0 ? ["Panel", "Text", "Component"] : [];
@@ -285,6 +310,32 @@ export function removeNode(root: GuiNode, nodeId: string): GuiNode {
       continue; // drop this child
     }
     const next = removeNode(child, nodeId);
+    if (next !== child) changed = true;
+    children.push(next);
+  }
+  return changed ? { ...root, children } : root;
+}
+
+/**
+ * Drop every node in `nodeIds` (and its whole subtree) from the tree, returning a
+ * NEW root — the multi-node analogue of {@link removeNode}, used by the preview's
+ * EDITOR-VISIBILITY prune (hidden elements are pruned before rendering, not removed
+ * from the document). Immutable + structure-sharing: an empty set, or a tree with no
+ * hidden nodes, returns the SAME root reference (so a no-op never churns the preview
+ * memo). The root itself is never pruned (the `<View>` stage always renders); to hide
+ * everything, the caller empties the root's children. Unlike a save-time edit, this is
+ * a render-only transform — the store keeps the full tree.
+ */
+export function pruneNodes(root: GuiNode, nodeIds: ReadonlySet<string>): GuiNode {
+  if (nodeIds.size === 0) return root;
+  let changed = false;
+  const children: GuiNode[] = [];
+  for (const child of root.children) {
+    if (nodeIds.has(child.nodeId)) {
+      changed = true;
+      continue; // drop this child and its whole subtree
+    }
+    const next = pruneNodes(child, nodeIds);
     if (next !== child) changed = true;
     children.push(next);
   }

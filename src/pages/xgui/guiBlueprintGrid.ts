@@ -78,24 +78,46 @@ export type GridPan = {
 };
 
 /**
- * Build the viewport's blueprint backdrop style for the given pan offset.
- *
- * The grid PANS with the view but does NOT zoom: the cell sizes are constant
- * integers (screen-fixed, never multiplied by scale), and the background-position is
- * offset by the view's pan so the graph paper scrolls under the artboard as the user
- * pans. The pan offset is ROUNDED to whole pixels so every line still falls on a
- * whole pixel (integer size + integer position + hard gradient stops) and the grid
- * renders crisp rather than blurry, even mid-pan.
+ * How far the grid layer extends BEYOND each viewport edge. The layer pans by a
+ * transform within `[0, GRID_MAJOR_PX)` (one period — see {@link gridLayerStyle}), so
+ * overscanning by exactly one period guarantees the translated layer never exposes an
+ * uncovered edge inside the clipping viewport.
  */
-export function viewportGridStyle({ panX, panY }: GridPan): CSSProperties {
-  // Round the pan to whole pixels so all four layers anchor on integer offsets and
-  // the lines stay sharp while the major/minor phases stay locked together.
-  const x = Math.round(panX);
-  const y = Math.round(panY);
+export const GRID_OVERSCAN_PX = GRID_MAJOR_PX;
+
+/**
+ * Build the blueprint backdrop style for a DEDICATED, oversized grid LAYER that pans
+ * by a CSS `transform` rather than a `background-position` offset (perf).
+ *
+ * The graph paper is periodic with period {@link GRID_MAJOR_PX}, so translating the
+ * layer by `pan mod GRID_MAJOR_PX` is visually IDENTICAL to offsetting the pattern by
+ * the full pan — but a transform COMPOSITES (the browser moves a cached layer) whereas
+ * a `background-position` change REPAINTS all four gradients across the whole viewport
+ * every frame. Over a screen that nests many components, that per-frame backdrop
+ * repaint is a real share of pan jank; this removes it.
+ *
+ * The layer is inset by one period on every side ({@link GRID_OVERSCAN_PX}) so the
+ * `[0, period)` translation always keeps it covering the clipped viewport. The pan is
+ * rounded to whole pixels (integer size + integer translate + hard gradient stops) so
+ * every line lands on a device pixel and stays crisp mid-pan. `interacting` promotes
+ * the layer (`will-change: transform`) only while panning so the gesture composites;
+ * idle it is a plain painted backdrop (no standing GPU-memory cost).
+ *
+ * It does NOT zoom: the cell sizes are constant integers, screen-fixed regardless of
+ * scale. The flat void color sits on the VIEWPORT behind this transparent layer.
+ */
+export function gridLayerStyle({ panX, panY }: GridPan, interacting = false): CSSProperties {
+  const period = GRID_MAJOR_PX;
+  // Positive modulo so the translate stays in [0, period); the one-period overscan
+  // then always covers the viewport. Rounded so lines fall on whole device pixels.
+  const tx = ((Math.round(panX) % period) + period) % period;
+  const ty = ((Math.round(panY) % period) + period) % period;
   return {
-    backgroundColor: VIEWPORT_VOID_COLOR,
+    position: "absolute",
+    inset: `-${GRID_OVERSCAN_PX}px`,
     backgroundImage: gridImageLayers(),
     backgroundSize: gridSizeLayers(),
-    backgroundPosition: `${x}px ${y}px`,
+    transform: `translate(${tx}px, ${ty}px)`,
+    willChange: interacting ? "transform" : undefined,
   };
 }

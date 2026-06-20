@@ -9,12 +9,12 @@ import {
   Hash,
   KeyRound,
   Library,
-  PanelRightClose,
   PanelRightOpen,
   SearchIcon,
   Type,
 } from "lucide-react";
 import { type ComponentType, useMemo, useState } from "react";
+import { CollapseRail } from "@/components/CollapseRail";
 import { Input } from "@/components/ui/input";
 import { type ApiItem, type ApiItemType, GAME_API } from "@/lib/api/gameApi";
 import { filterApiTree, formatSignature, hasSignature, isDrillable } from "@/lib/api/search";
@@ -211,44 +211,40 @@ export function ApiReferencePane({
   }
 
   if (collapsible && collapsed) {
+    // The WHOLE strip is the click target (matching the Workbench/XGUI collapsed
+    // list rails), so re-opening is "grab the rail", not "find the little button".
     return (
-      <div
+      <button
+        type="button"
+        aria-label="Show API reference"
+        title="Show API reference"
+        onClick={() => setCollapsed(false)}
         className={cn(
-          "flex h-full w-10 flex-col items-center border-l bg-background py-2",
+          "flex h-full w-10 shrink-0 flex-col items-center border-l bg-background py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
       >
-        <button
-          type="button"
-          title="Show API reference"
-          onClick={() => setCollapsed(false)}
-          className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelRightOpen className="size-4" />
-        </button>
-        <span className="mt-2 font-medium text-[0.6rem] text-muted-foreground uppercase tracking-widest [writing-mode:vertical-rl]">
-          API Reference
+        <PanelRightOpen className="size-4 shrink-0" />
+        <span className="flex min-h-0 flex-1 items-center">
+          <span className="font-medium text-[0.6rem] uppercase tracking-widest [writing-mode:vertical-rl]">
+            API Reference
+          </span>
         </span>
-      </div>
+      </button>
     );
   }
 
   return (
-    <div className={cn("flex h-full min-h-0 w-80 flex-col border-l bg-background", className)}>
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+    <div
+      className={cn("relative flex h-full min-h-0 w-80 flex-col border-l bg-background", className)}
+    >
+      {collapsible && (
+        <CollapseRail side="left" onClick={() => setCollapsed(true)} label="Hide API reference" />
+      )}
+      <div className="flex items-center gap-2 border-b px-3 py-2">
         <h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
           API Reference
         </h3>
-        {collapsible && (
-          <button
-            type="button"
-            title="Hide API reference"
-            onClick={() => setCollapsed(true)}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <PanelRightClose className="size-4" />
-          </button>
-        )}
       </div>
 
       {focused ? (

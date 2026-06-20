@@ -211,25 +211,24 @@ export function ApiReferencePane({
   }
 
   if (collapsible && collapsed) {
+    // The WHOLE strip is the click target (matching the Workbench/XGUI collapsed
+    // list rails), so re-opening is "grab the rail", not "find the little button".
     return (
-      <div
+      <button
+        type="button"
+        aria-label="Show API reference"
+        title="Show API reference"
+        onClick={() => setCollapsed(false)}
         className={cn(
-          "flex h-full w-10 flex-col items-center border-l bg-background py-2",
+          "flex h-full w-10 shrink-0 flex-col items-center gap-2 border-l bg-background py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
       >
-        <button
-          type="button"
-          title="Show API reference"
-          onClick={() => setCollapsed(false)}
-          className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelRightOpen className="size-4" />
-        </button>
-        <span className="mt-2 font-medium text-[0.6rem] text-muted-foreground uppercase tracking-widest [writing-mode:vertical-rl]">
+        <PanelRightOpen className="size-4 shrink-0" />
+        <span className="font-medium text-[0.6rem] uppercase tracking-widest [writing-mode:vertical-rl]">
           API Reference
         </span>
-      </div>
+      </button>
     );
   }
 

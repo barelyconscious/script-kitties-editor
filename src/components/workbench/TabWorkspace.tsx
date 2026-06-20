@@ -279,14 +279,10 @@ export function TabWorkspace({
                     </Button>
                   </div>
                 )}
-                {/* Bespoke editors (bundle/pack) already show the name in the tab and
-                in their own Details section, so the toolbar omits it to avoid a
-                third copy. */}
-                {!isBespoke && (
-                  <span className="ml-1 truncate font-medium text-sm">{tab.name}</span>
-                )}
-                {/* The unsaved-changes dot lives on the tab itself (TabBar), so the
-                toolbar doesn't repeat it. */}
+                {/* The object name is NOT repeated here: it already shows on the tab
+                (TabBar) and in the Data pane's Details/Name field, so a toolbar copy
+                was a redundant third instance. The unsaved-changes dot likewise lives
+                on the tab, so the toolbar doesn't repeat it either. */}
                 {status && status.message.length > 0 && (
                   <span
                     role="status"

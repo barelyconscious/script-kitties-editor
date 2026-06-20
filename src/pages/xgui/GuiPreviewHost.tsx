@@ -30,7 +30,7 @@
  * mount.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyDragDelta,
   fitView,
@@ -48,7 +48,7 @@ import { GuiPreview } from "./GuiPreview";
 import { GuiPreviewToolbar } from "./GuiPreviewToolbar";
 import { gridLayerStyle, VIEWPORT_VOID_COLOR } from "./guiBlueprintGrid";
 import { withAttr } from "./guiProperties";
-import { findNode } from "./guiTreeEdit";
+import { findNode, pruneNodes } from "./guiTreeEdit";
 
 export type GuiPreviewHostProps = {
   /** The parsed component to preview. */
@@ -74,6 +74,19 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
   // highlight off this one value — sync is free because there is one source.
   const { state, dispatch } = useEditorStore();
   const selectedNodeId = state.selectedNodeId;
+  // Editor visibility (visibility toggle): the tree that the preview RENDERS has the
+  // user-hidden elements (and their subtrees) pruned out. `pruneNodes` structure-
+  // shares (and returns the same `root` when nothing is hidden), so this is a cheap
+  // no-op until something is actually hidden. A hidden `<View>` root would still
+  // render the (empty) stage, so we special-case it to drop all children. The store
+  // keeps the FULL tree — this prune is render-only, and the drag handlers below
+  // still resolve against the full `root` (only a VISIBLE box can be dragged anyway).
+  const hiddenNodeIds = state.hiddenNodeIds;
+  const visibleRoot = useMemo(() => {
+    if (hiddenNodeIds.size === 0) return root;
+    if (hiddenNodeIds.has(root.nodeId)) return { ...root, children: [] };
+    return pruneNodes(root, hiddenNodeIds);
+  }, [root, hiddenNodeIds]);
   // The STABLE identity of the open component — its gui-relative path. This is what
   // "a component opened" keys on: it stays fixed across every edit to the SAME file
   // (drag, property edit, add/remove, undo/redo, live-reload), and only changes when
@@ -310,7 +323,7 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
       <div aria-hidden="true" className="pointer-events-none" style={gridLayerStyle(view, grabbing)} />
 
       <GuiPreview
-        root={root}
+        root={visibleRoot}
         selectedNodeId={selectedNodeId}
         onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
         model={model}

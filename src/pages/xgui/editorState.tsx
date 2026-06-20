@@ -147,6 +147,16 @@ export type EditorState = {
    * per row); the preview and Properties read this set to gate selection/editing.
    */
   lockedNodeIds: Set<string>;
+  /**
+   * The `nodeId`s the user has HIDDEN in the preview (visibility toggle). A hidden
+   * element AND its whole subtree are not rendered in the preview — an editor-only
+   * view convenience (like a design tool's layer visibility), NOT the authored
+   * `visible` attribute, so it is never serialized and does not mark the component
+   * dirty. Session-only: reset whenever the document is established/replaced
+   * (`open`/`close`/`reloadOpen`). The structure tree toggles it; the preview prunes
+   * these (and their subtrees) before rendering.
+   */
+  hiddenNodeIds: Set<string>;
   /** The active main-content tab. */
   activeTab: EditorTab;
   /** True when the open component has unsaved edits (F11 reads; save clears). */
@@ -211,6 +221,13 @@ export type EditorAction =
    * history step, and is never serialized. A no-op if nothing is open.
    */
   | { type: "toggleLock"; nodeId: string }
+  /**
+   * Toggle preview VISIBILITY of the node identified by `nodeId` (visibility toggle).
+   * A hidden node and its whole subtree are not rendered in the preview. Editor-only
+   * view state — does NOT mark dirty, pushes no history, and is never serialized. A
+   * no-op if nothing is open.
+   */
+  | { type: "toggleVisibility"; nodeId: string }
   /** Switch the main-content tab. */
   | { type: "setTab"; tab: EditorTab }
   /** Update the Data Model JSON text (preview-only; does NOT mark dirty). */
@@ -332,6 +349,7 @@ const initialState: EditorState = {
   open: null,
   selectedNodeId: null,
   lockedNodeIds: new Set(),
+  hiddenNodeIds: new Set(),
   activeTab: "view",
   dirty: false,
   past: [],
@@ -422,6 +440,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Seed locks from persisted structural keys (resolved by the caller against
         // the just-parsed tree); empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
+        // Visibility hides are session-only — a fresh document starts all-visible.
+        hiddenNodeIds: new Set(),
         activeTab: "view",
         dirty: false,
         past: [],
@@ -442,6 +462,15 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (next.has(action.nodeId)) next.delete(action.nodeId);
       else next.add(action.nodeId);
       return { ...state, lockedNodeIds: next };
+    }
+    case "toggleVisibility": {
+      // Editor-only view state (mirrors toggleLock): flip membership immutably; the
+      // preview prunes hidden subtrees. Never dirties, pushes no history, not saved.
+      if (!state.open) return state;
+      const next = new Set(state.hiddenNodeIds);
+      if (next.has(action.nodeId)) next.delete(action.nodeId);
+      else next.add(action.nodeId);
+      return { ...state, hiddenNodeIds: next };
     }
     case "setTab":
       return { ...state, activeTab: action.tab };
@@ -586,6 +615,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // The re-read tree re-mints nodeIds, so locks are re-resolved by the caller
         // from persisted structural keys; empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
+        // Visibility hides are session-only and keyed by the now-stale nodeIds — clear.
+        hiddenNodeIds: new Set(),
         // Editor now matches disk — nothing unsaved.
         dirty: false,
         // A live external reload RESETS history — you cannot undo across a disk

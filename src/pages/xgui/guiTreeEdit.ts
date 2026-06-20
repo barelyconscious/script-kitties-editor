@@ -315,6 +315,32 @@ export function removeNode(root: GuiNode, nodeId: string): GuiNode {
 }
 
 /**
+ * Drop every node in `nodeIds` (and its whole subtree) from the tree, returning a
+ * NEW root — the multi-node analogue of {@link removeNode}, used by the preview's
+ * EDITOR-VISIBILITY prune (hidden elements are pruned before rendering, not removed
+ * from the document). Immutable + structure-sharing: an empty set, or a tree with no
+ * hidden nodes, returns the SAME root reference (so a no-op never churns the preview
+ * memo). The root itself is never pruned (the `<View>` stage always renders); to hide
+ * everything, the caller empties the root's children. Unlike a save-time edit, this is
+ * a render-only transform — the store keeps the full tree.
+ */
+export function pruneNodes(root: GuiNode, nodeIds: ReadonlySet<string>): GuiNode {
+  if (nodeIds.size === 0) return root;
+  let changed = false;
+  const children: GuiNode[] = [];
+  for (const child of root.children) {
+    if (nodeIds.has(child.nodeId)) {
+      changed = true;
+      continue; // drop this child and its whole subtree
+    }
+    const next = pruneNodes(child, nodeIds);
+    if (next !== child) changed = true;
+    children.push(next);
+  }
+  return changed ? { ...root, children } : root;
+}
+
+/**
  * The chain of nodes from the root DOWN TO (and including) the node identified by
  * `nodeId`, or `null` if the node is not in the tree. Used to derive the computed
  * hierarchical id (the parent chain of authored `id` attrs) for the Properties

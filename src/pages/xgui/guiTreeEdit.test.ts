@@ -13,6 +13,7 @@ import {
   nextAutoId,
   nodeLabel,
   nodePath,
+  pruneNodes,
   removeNode,
   setNodeAttrs,
   treeNodePrimaryLabel,
@@ -431,6 +432,38 @@ describe("removeNode — immutable detach (F9c Event delete)", () => {
     const root = node("root", "View", [node("a", "Panel"), node("b", "Text")]);
     removeNode(root, "b");
     expect(root.children.map((c) => c.nodeId)).toEqual(["a", "b"]);
+  });
+});
+
+describe("pruneNodes — multi-node render-only prune (editor visibility)", () => {
+  it("drops every listed node AND its subtree, keeping the rest in order", () => {
+    const root = node("root", "View", [
+      node("a", "Panel", [node("a1", "Text")]),
+      node("b", "Panel"),
+      node("c", "Panel"),
+    ]);
+    const next = pruneNodes(root, new Set(["a", "c"]));
+    expect(next.children.map((n) => n.nodeId)).toEqual(["b"]);
+  });
+
+  it("prunes a deeply nested node without touching its siblings", () => {
+    const root = node("root", "View", [node("a", "Panel", [node("x", "Text"), node("y", "Text")])]);
+    const next = pruneNodes(root, new Set(["x"]));
+    expect(next.children[0].children.map((n) => n.nodeId)).toEqual(["y"]);
+  });
+
+  it("returns the SAME root reference when nothing is hidden (empty set or no match)", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    expect(pruneNodes(root, new Set())).toBe(root);
+    expect(pruneNodes(root, new Set(["missing"]))).toBe(root);
+  });
+
+  it("reuses untouched sibling subtrees by reference; does not mutate the original", () => {
+    const sib = node("sib", "Panel", [node("deep", "Text")]);
+    const root = node("root", "View", [node("a", "Panel", [node("t", "Text")]), sib]);
+    const next = pruneNodes(root, new Set(["t"]));
+    expect(next.children[1]).toBe(sib);
+    expect(root.children[0].children.map((n) => n.nodeId)).toEqual(["t"]); // original intact
   });
 });
 

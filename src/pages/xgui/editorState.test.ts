@@ -22,6 +22,7 @@ const CLEAN: EditorState = {
   open: null,
   selectedNodeId: null,
   lockedNodeIds: new Set(),
+  hiddenNodeIds: new Set(),
   activeTab: "view",
   dirty: false,
   past: [],
@@ -92,6 +93,31 @@ describe("editorReducer", () => {
     };
     const next = editorReducer(state, { type: "open", component: openDoc({ name: "bag" }) });
     expect(next.lockedNodeIds.size).toBe(0);
+  });
+
+  it("toggleVisibility adds then removes a nodeId without touching dirty/history", () => {
+    const state: EditorState = { ...CLEAN, open: openDoc() };
+    const hidden = editorReducer(state, { type: "toggleVisibility", nodeId: "n1" });
+    expect(hidden.hiddenNodeIds.has("n1")).toBe(true);
+    expect(hidden.dirty).toBe(false);
+    expect(hidden.past).toHaveLength(0);
+    expect(hidden.hiddenNodeIds).not.toBe(state.hiddenNodeIds);
+    const shown = editorReducer(hidden, { type: "toggleVisibility", nodeId: "n1" });
+    expect(shown.hiddenNodeIds.has("n1")).toBe(false);
+  });
+
+  it("toggleVisibility is a no-op when nothing is open", () => {
+    expect(editorReducer(CLEAN, { type: "toggleVisibility", nodeId: "n1" })).toBe(CLEAN);
+  });
+
+  it("open clears any existing visibility hides (session-only)", () => {
+    const state: EditorState = {
+      ...CLEAN,
+      open: openDoc({ name: "old" }),
+      hiddenNodeIds: new Set(["n1"]),
+    };
+    const next = editorReducer(state, { type: "open", component: openDoc({ name: "bag" }) });
+    expect(next.hiddenNodeIds.size).toBe(0);
   });
 
   it("setTab switches the active tab", () => {

@@ -29,6 +29,8 @@ import {
   AppWindow,
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   LayoutGrid,
   Lock,
   type LucideIcon,
@@ -145,10 +147,12 @@ export function StructureTree() {
           depth={0}
           selectedNodeId={selectedNodeId}
           lockedNodeIds={state.lockedNodeIds}
+          hiddenNodeIds={state.hiddenNodeIds}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
           onRemove={handleRemove}
           onToggleLock={(nodeId) => dispatch({ type: "toggleLock", nodeId })}
+          onToggleVisibility={(nodeId) => dispatch({ type: "toggleVisibility", nodeId })}
         />
       </ul>
 
@@ -172,10 +176,12 @@ type TreeRowProps = {
   depth: number;
   selectedNodeId: string | null;
   lockedNodeIds: Set<string>;
+  hiddenNodeIds: Set<string>;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onRemove: (nodeId: string) => void;
   onToggleLock: (nodeId: string) => void;
+  onToggleVisibility: (nodeId: string) => void;
 };
 
 function TreeRow({
@@ -183,10 +189,12 @@ function TreeRow({
   depth,
   selectedNodeId,
   lockedNodeIds,
+  hiddenNodeIds,
   onSelect,
   onAdd,
   onRemove,
   onToggleLock,
+  onToggleVisibility,
 }: TreeRowProps) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
@@ -208,9 +216,10 @@ function TreeRow({
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
   const locked = lockedNodeIds.has(node.nodeId);
+  const hidden = hiddenNodeIds.has(node.nodeId);
   // The row carries a context menu when there's anything to do on it: add a child
-  // (containers), lock it, or delete it (any non-root element). Lock is offered on
-  // every row, so the menu is always present.
+  // (containers), lock/hide it, or delete it (any non-root element). These are offered
+  // on every row, so the menu is always present.
   const hasMenu = true;
 
   return (
@@ -252,7 +261,30 @@ function TreeRow({
               <Lock className="size-3" />
             </button>
 
-            {/* Indented row content (everything except the far-left lock gutter). */}
+            {/* Visibility toggle — sits in the gutter just right of the lock. Visible:
+                a muted eye that appears only on hover. Hidden: a persistent slashed eye
+                (EyeOff). Hiding an element drops it AND its subtree from the preview. */}
+            <button
+              type="button"
+              aria-label={hidden ? `Show ${tag} in preview` : `Hide ${tag} from preview`}
+              aria-pressed={hidden}
+              title={
+                hidden
+                  ? "Hidden from the preview (with its children). Click to show."
+                  : "Hide this element (and its children) from the preview."
+              }
+              onClick={() => onToggleVisibility(node.nodeId)}
+              className={cn(
+                "flex size-4 shrink-0 items-center justify-center rounded transition-opacity",
+                hidden
+                  ? "text-foreground opacity-100"
+                  : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100",
+              )}
+            >
+              {hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+            </button>
+
+            {/* Indented row content (everything except the far-left lock/eye gutter). */}
             <div
               className="flex min-w-0 flex-1 items-center gap-1"
               style={{ paddingLeft: `${0.25 + depth * INDENT_REM}rem` }}
@@ -360,6 +392,13 @@ function TreeRow({
               >
                 <Lock className="size-3" /> {locked ? "Unlock" : "Lock"}
               </ContextMenu.Item>
+              <ContextMenu.Item
+                onSelect={() => onToggleVisibility(node.nodeId)}
+                className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+              >
+                {hidden ? <Eye className="size-3" /> : <EyeOff className="size-3" />}{" "}
+                {hidden ? "Show in preview" : "Hide from preview"}
+              </ContextMenu.Item>
               {removable && (
                 <ContextMenu.Item
                   onSelect={() => onRemove(node.nodeId)}
@@ -382,10 +421,12 @@ function TreeRow({
               depth={depth + 1}
               selectedNodeId={selectedNodeId}
               lockedNodeIds={lockedNodeIds}
+              hiddenNodeIds={hiddenNodeIds}
               onSelect={onSelect}
               onAdd={onAdd}
               onRemove={onRemove}
               onToggleLock={onToggleLock}
+              onToggleVisibility={onToggleVisibility}
             />
           ))}
         </ul>

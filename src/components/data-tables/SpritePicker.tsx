@@ -53,8 +53,10 @@ export function SpritePicker({
           disabled={disabled}
           className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-transparent px-2 text-left text-sm shadow-xs hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
         >
-          <Sprite name={value} className="size-6" />
-          <span className="truncate text-muted-foreground">{value || "Choose sprite…"}</span>
+          <Sprite name={value} className="size-6 shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {value || "Choose sprite…"}
+          </span>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0" align="start" container={container}>

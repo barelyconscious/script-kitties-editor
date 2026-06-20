@@ -140,13 +140,14 @@ function isBareKey(key: string): boolean {
 }
 
 /**
- * The bare component identity for a `src` value: path-stripped (via `srcBasename`)
- * and with a trailing `.xml` removed, so `"button"`, `"button.xml"`, and
- * `"widgets/button.xml"` all key on `"button"` — matching how the picker writes
- * `src` and how the backend (`get_component`) resolves a component.
+ * The bare component identity for a `src` value. {@link srcBasename} path-strips and
+ * REQUIRES a `.xml` extension, so `"button.xml"` and `"widgets/button.xml"` key on
+ * `"button"` while a non-`.xml` `src` keys on `""` (not a valid reference) — matching
+ * how the backend (`get_component`) resolves a component. Kept as a named helper for
+ * call-site clarity.
  */
 function bareComponentName(src: string | undefined): string {
-  return srcBasename(src).replace(/\.xml$/i, "");
+  return srcBasename(src);
 }
 
 /**

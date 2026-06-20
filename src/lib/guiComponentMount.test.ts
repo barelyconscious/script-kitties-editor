@@ -15,23 +15,32 @@ function component(attrs: Record<string, string>): GuiNode {
 }
 
 describe("srcBasename", () => {
-  it("returns a bare basename unchanged", () => {
-    expect(srcBasename("bag_slot.xml")).toBe("bag_slot.xml");
+  it("requires the .xml extension, returning the stem it resolves on", () => {
+    expect(srcBasename("bag_slot.xml")).toBe("bag_slot");
+    expect(srcBasename("bag_slot.XML")).toBe("bag_slot"); // case-insensitive
+  });
+
+  it("treats a src WITHOUT .xml as not a valid component reference (→ missing)", () => {
+    // Only the `.xml` form resolves; a bare name (or other extension) is "" → missing.
+    expect(srcBasename("bag_slot")).toBe("");
+    expect(srcBasename("bag_slot.lua")).toBe("");
   });
 
   it("strips path segments (defensive — src is basename by design)", () => {
-    expect(srcBasename("widgets/bag_slot.xml")).toBe("bag_slot.xml");
-    expect(srcBasename("a\\b\\bag_slot.xml")).toBe("bag_slot.xml");
+    expect(srcBasename("widgets/bag_slot.xml")).toBe("bag_slot");
+    expect(srcBasename("a\\b\\bag_slot.xml")).toBe("bag_slot");
   });
 
-  it("trims surrounding whitespace", () => {
-    expect(srcBasename("  bag_slot.xml  ")).toBe("bag_slot.xml");
+  it("trims surrounding whitespace and keeps inner dots in the stem", () => {
+    expect(srcBasename("  bag_slot.xml  ")).toBe("bag_slot");
+    expect(srcBasename("foo.bar.xml")).toBe("foo.bar");
   });
 
-  it("maps blank/absent to the empty string (→ missing)", () => {
+  it("maps blank/absent (or a bare extension) to the empty string (→ missing)", () => {
     expect(srcBasename("")).toBe("");
     expect(srcBasename("   ")).toBe("");
     expect(srcBasename(undefined)).toBe("");
+    expect(srcBasename(".xml")).toBe("");
   });
 });
 
@@ -133,21 +142,21 @@ describe("resolveChildRoot — data base + overrides layered on top", () => {
 });
 
 describe("mountDecision — cycle guard + blank src", () => {
-  it("yields a mount decision for a resolvable src with empty ancestry", () => {
+  it("yields a mount decision (basename is the .xml-stripped stem) with empty ancestry", () => {
     const decision = mountDecision(component({ src: "a.xml" }));
     expect(decision).toEqual({
       kind: "mount",
-      basename: "a.xml",
-      childAncestry: new Set(["a.xml"]),
+      basename: "a",
+      childAncestry: new Set(["a"]),
     });
   });
 
   it("carries the parent ancestry forward, adding this basename", () => {
-    const decision = mountDecision(component({ src: "b.xml" }), new Set(["a.xml"]));
+    const decision = mountDecision(component({ src: "b.xml" }), new Set(["a"]));
     expect(decision.kind).toBe("mount");
     if (decision.kind === "mount") {
-      expect(decision.basename).toBe("b.xml");
-      expect([...decision.childAncestry].sort()).toEqual(["a.xml", "b.xml"]);
+      expect(decision.basename).toBe("b");
+      expect([...decision.childAncestry].sort()).toEqual(["a", "b"]);
     }
   });
 
@@ -160,8 +169,19 @@ describe("mountDecision — cycle guard + blank src", () => {
   });
 
   it("returns a 'recursive' placeholder when src is already on the mount path (A→A)", () => {
-    const decision = mountDecision(component({ src: "a.xml" }), new Set(["a.xml"]));
+    const decision = mountDecision(component({ src: "a.xml" }), new Set(["a"]));
     expect(decision).toEqual({ kind: "placeholder", reason: "recursive" });
+  });
+
+  it("requires .xml: a src without the extension is a missing placeholder", () => {
+    // Only the `.xml` form is a valid reference; a bare name does not resolve.
+    expect(mountDecision(component({ src: "a" }))).toEqual({
+      kind: "placeholder",
+      reason: "missing",
+    });
+    // The `.xml` form mounts on the stem.
+    const withExt = mountDecision(component({ src: "a.xml" }));
+    expect(withExt.kind === "mount" && withExt.basename).toBe("a");
   });
 
   it("catches A→B→A via the ancestor set (not a depth cap)", () => {
@@ -186,14 +206,14 @@ describe("mountDecision — cycle guard + blank src", () => {
       ancestry = d.childAncestry;
     }
     // A sibling re-use of a NON-ancestor basename is fine (diamond, not cycle):
-    // mounting `b.xml` again from a path that does not contain it still mounts.
-    const fresh = mountDecision(component({ src: "b.xml" }), new Set(["a.xml"]));
+    // mounting `b` again from a path that does not contain it still mounts.
+    const fresh = mountDecision(component({ src: "b.xml" }), new Set(["a"]));
     expect(fresh.kind).toBe("mount");
   });
 
-  it("normalizes the src basename before the ancestry check", () => {
-    // A path-y src collides with a bare-basename ancestor entry.
-    const decision = mountDecision(component({ src: "widgets/a.xml" }), new Set(["a.xml"]));
+  it("normalizes the src (path + .xml stripped) before the ancestry check", () => {
+    // A path-y, extension-ful src collides with the bare-stem ancestor entry `a`.
+    const decision = mountDecision(component({ src: "widgets/a.xml" }), new Set(["a"]));
     expect(decision).toEqual({ kind: "placeholder", reason: "recursive" });
   });
 });

@@ -13,7 +13,7 @@ const tree = (xml: string) => parseGui(xml);
 
 // A "button" child that now binds only {label}; a "card" parent that includes it.
 const button = tree('<View><Text text="{label}"/></View>');
-const card = tree('<View><Component src="button" data="buttonProps"/></View>');
+const card = tree('<View><Component src="button.xml" data="buttonProps"/></View>');
 const plain = tree('<View><Text text="{title}"/></View>'); // references nothing
 
 const resolve: ComponentResolver = (name) => (name.replace(/\.xml$/, "") === "button" ? button : undefined);

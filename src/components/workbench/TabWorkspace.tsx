@@ -255,30 +255,6 @@ export function TabWorkspace({
                     />
                   </div>
                 )}
-                {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
-                  editor is mounted; scripts undo inside Monaco, not here. */}
-                {undoTarget && (
-                  <div className="ml-1 flex items-center">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Undo (Ctrl+Z)"
-                      disabled={!undoTarget.canUndo}
-                      onClick={() => undoTarget.undo()}
-                    >
-                      <Undo2 />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Redo (Ctrl+Shift+Z)"
-                      disabled={!undoTarget.canRedo}
-                      onClick={() => undoTarget.redo()}
-                    >
-                      <Redo2 />
-                    </Button>
-                  </div>
-                )}
                 {/* The object name is NOT repeated here: it already shows on the tab
                 (TabBar) and in the Data pane's Details/Name field, so a toolbar copy
                 was a redundant third instance. The unsaved-changes dot likewise lives
@@ -297,6 +273,31 @@ export function TabWorkspace({
                 )}
                 <div className="ml-auto flex items-center gap-2">
                   <AutoSaveIndicator status={autoStatus} />
+                  {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
+                    editor is mounted; scripts undo inside Monaco, not here. Sits with
+                    the save controls on the right. */}
+                  {undoTarget && (
+                    <div className="flex items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Undo (Ctrl+Z)"
+                        disabled={!undoTarget.canUndo}
+                        onClick={() => undoTarget.undo()}
+                      >
+                        <Undo2 />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Redo (Ctrl+Shift+Z)"
+                        disabled={!undoTarget.canRedo}
+                        onClick={() => undoTarget.redo()}
+                      >
+                        <Redo2 />
+                      </Button>
+                    </div>
+                  )}
                   {/* Scripts save manually; bundles/packs are script-less, so the
                   button only appears when the tab actually has a script. */}
                   {bus.hasManualTarget && (

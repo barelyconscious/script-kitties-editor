@@ -65,7 +65,7 @@ import {
 import { cellGeometry, parseGridDimension, parseGutter } from "../../lib/guiGridGeometry";
 import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
-import { isNodeSelected, NODE_ID_ATTR, nearestNodeId } from "../../lib/guiSelection";
+import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
 import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
 
@@ -674,10 +674,11 @@ export type GuiPreviewProps = {
   isPanGesture?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
   /**
    * Element-lock predicate (task: element lock): returns `true` for a `nodeId` the
-   * user has locked. A locked box cannot be selected OR dragged from the preview —
-   * a press/click that resolves to a locked box is ignored (selection unchanged),
-   * so the only way to act on it is to unlock it from the structure tree first.
-   * Omit to treat every box as unlocked.
+   * user has locked. A locked box is CLICK-THROUGH in the preview — it can't be
+   * selected or dragged; a press/click over it resolves to the nearest UNLOCKED box
+   * BEHIND it instead (an overlapping sibling, or the enclosing parent), or clears
+   * the selection when only the stage sits behind. Unlock from the structure tree to
+   * make it directly selectable again. Omit to treat every box as unlocked.
    */
   isLocked?: (nodeId: string) => boolean;
   /**
@@ -693,11 +694,40 @@ export type GuiPreviewProps = {
 };
 
 /**
+ * Resolve a click at viewport coordinates to the nearest SELECTABLE box's node id,
+ * treating LOCKED boxes as CLICK-THROUGH: walk the hit-stack from the topmost
+ * element down and return the first box whose node isn't locked, so a press over a
+ * locked element acts on whatever sits behind it — an overlapping sibling, or the
+ * enclosing parent box. Returns `null` for the empty stage background (which clears
+ * the selection).
+ *
+ * This is the click-through generalization of `event.target.closest('[data-node-id]')`:
+ * a plain `closest` only ever sees the topmost box and so a locked box would block
+ * everything beneath it. `elementsFromPoint` already omits `pointer-events:none`
+ * layers (the grid-cell / component-mount wrappers), so their fall-through to the
+ * enclosing real box is preserved unchanged.
+ */
+function nodeIdAtPoint(
+  clientX: number,
+  clientY: number,
+  isLocked?: (nodeId: string) => boolean,
+): string | null {
+  if (typeof document === "undefined") return null;
+  for (const el of document.elementsFromPoint(clientX, clientY)) {
+    const id = el.closest(`[${NODE_ID_ATTR}]`)?.getAttribute(NODE_ID_ATTR);
+    if (!id) continue;
+    if (isLocked?.(id)) continue; // locked → see through to whatever is behind it
+    return id;
+  }
+  return null;
+}
+
+/**
  * The fixed-resolution preview stage. The `<View>` root is the stage itself
  * (1280×768, `position: relative`); its visual children render as nested
- * absolutely-positioned boxes. A click is resolved to the nearest box via the
- * DOM `closest('[data-node-id]')` — the one piece that needs a browser — and
- * the resulting node id is handed to `onSelect`.
+ * absolutely-positioned boxes. A click is resolved to the nearest UNLOCKED box via
+ * {@link nodeIdAtPoint} (locked boxes are click-through) — the one piece that needs
+ * a browser — and the resulting node id is handed to `onSelect`.
  *
  * A flat {@link ResolveScope} is built from `model` once (see
  * {@link flatRootScope}) and threaded down to every box; each box resolves its
@@ -773,14 +803,9 @@ export function GuiPreview({
       suppressNextClick.current = false;
       return;
     }
-    const target = event.target as Element;
-    const box = target.closest(`[${NODE_ID_ATTR}]`);
-    const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
-    // A click that resolves to a LOCKED box is ignored — the box can't be selected,
-    // so the current selection is left untouched (only an unlock from the tree can
-    // make it selectable). A background click (id === null) still clears selection.
-    if (id !== null && isLocked?.(id)) return;
-    onSelect(id);
+    // Resolve through any LOCKED boxes to the nearest selectable box behind them
+    // (locked = click-through), or `null` on the empty stage (clears selection).
+    onSelect(nodeIdAtPoint(event.clientX, event.clientY, isLocked));
   };
 
   // F7 drag-to-move (475): a drag begins on POINTERDOWN over ANY box — pressing on a
@@ -806,14 +831,11 @@ export function GuiPreview({
     }
     // Dragging is opt-in (host supplies the writeback) and primary-button only.
     if (!onDragMove || event.button !== 0) return;
-    const target = event.target as Element;
-    const box = target.closest(`[${NODE_ID_ATTR}]`);
-    const id = nearestNodeId([box?.getAttribute(NODE_ID_ATTR)]);
-    // A LOCKED box can't be selected or dragged: yield the gesture entirely (no
-    // arm, no select, no click suppression) so it behaves as if the box were inert.
-    // The trailing `click` falls through to `handleClick`, which also no-ops on a
-    // locked box, leaving the existing selection intact.
-    if (id !== null && isLocked?.(id)) return;
+    // Resolve through LOCKED boxes to the nearest unlocked box behind them (locked =
+    // click-through): a press over a locked element acts on whatever sits behind it,
+    // never on the locked box itself — so it can't be selected or dragged. A press on
+    // the empty stage resolves to `null` and arms nothing (the trailing click clears).
+    const id = nodeIdAtPoint(event.clientX, event.clientY, isLocked);
     // 475: pressing on ANY box selects it AND arms a drag in the same gesture — no
     // prior click-to-select. The pure decision settles both: a press on empty stage
     // background (id === null) does NOT arm (the trailing `click` clears selection);

@@ -9,8 +9,8 @@
  *  - (a) controller-less — `open.controllerFileName == null`: the component has
  *        no controller yet, so the tab shows an "Add script" affordance (an
  *        editable default name + a button). Clicking it does NOT touch disk — it
- *        dispatches `addController`, which sets `<View controller="…">`, seeds an
- *        empty buffer, and flips to the editor. The `.lua` FILE is created later
+ *        dispatches `addController`, which sets `<View controller="…">`, seeds the
+ *        controller starter template, and flips to the editor. The `.lua` FILE is created later
  *        by Save (F11), consistent with the editor's manual-save model where
  *        nothing persists until Save.
  *  - (b) loading — `controllerFileName` is set but `controllerText` is still

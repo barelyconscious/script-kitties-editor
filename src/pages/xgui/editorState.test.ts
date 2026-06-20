@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GuiNode } from "../../lib/guiNode";
+import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { type EditorState, editorReducer, type OpenComponent } from "./editorState";
 
 function node(tag: GuiNode["tag"] = "View"): GuiNode {
@@ -385,7 +386,7 @@ describe("editorReducer", () => {
       expect(editorReducer(CLEAN, { type: "setControllerText", text: "x" })).toBe(CLEAN);
     });
 
-    it("addController sets the <View controller> attr, seeds an empty buffer, flips tab, dirties", () => {
+    it("addController sets the <View controller> attr, seeds the starter template, flips tab, dirties", () => {
       const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
       const state: EditorState = {
         ...CLEAN,
@@ -398,7 +399,7 @@ describe("editorReducer", () => {
       });
       expect(next.open?.root.attrs.controller).toBe("bag_controller.lua");
       expect(next.open?.controllerFileName).toBe("bag_controller.lua");
-      expect(next.open?.controllerText).toBe("");
+      expect(next.open?.controllerText).toBe(NEW_CONTROLLER_TEMPLATE);
       expect(next.activeTab).toBe("controller");
       expect(next.dirty).toBe(true);
     });
@@ -718,11 +719,11 @@ describe("editorReducer", () => {
       // Back to controller-less: the VISUAL document reverts — filename and the
       // <View controller> attr are restored to none. The controller TEXT buffer
       // is NOT part of document history (task 472, Monaco owns its undo), so it is
-      // left as the empty buffer Add-script seeded; only the tree-level state
+      // left as the starter template Add-script seeded; only the tree-level state
       // (filename + attr) is what undo restores.
       expect(undone.open?.controllerFileName).toBeNull();
       expect(undone.open?.root.attrs.controller).toBeUndefined();
-      expect(undone.open?.controllerText).toBe("");
+      expect(undone.open?.controllerText).toBe(NEW_CONTROLLER_TEMPLATE);
     });
 
     it("preserves the selection across undo when the node still exists", () => {

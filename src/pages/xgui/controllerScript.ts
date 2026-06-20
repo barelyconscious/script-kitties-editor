@@ -9,6 +9,17 @@
 import { toComponentBasename } from "./guiTree";
 
 /**
+ * The starter body a freshly-added controller is seeded with. The runtime calls
+ * a controller as `controller(view)` and expects it to return its handler table,
+ * so we scaffold that shape (an empty table) rather than an empty file — the
+ * author fills in the table instead of remembering the wrapper.
+ */
+export const NEW_CONTROLLER_TEMPLATE = `return function(view)
+    return {}
+end
+`;
+
+/**
  * The sensible default controller filename for a component: its snake_case name
  * with a `_controller.lua` suffix (design section 4: default name
  * `{component_name_in_snake_case}_controller.lua`). The user may edit it before

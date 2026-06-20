@@ -67,6 +67,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo, useReducer } from "react";
 import type { GuiNode } from "../../lib/guiNode";
+import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { nodeHasId } from "./guiProperties";
 import { addChild, findNode, nextAutoId, removeNode, setNodeAttrs } from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
@@ -103,7 +104,7 @@ export type OpenComponent = {
    * loaded" — a component with a `controllerFileName` reads its text from disk
    * (via `get_script`) on first view of the Controller tab and seeds it through
    * `loadControllerText` (which does NOT dirty). A controller-less component
-   * stays `null` until Add-script seeds an empty buffer through `addController`.
+   * stays `null` until Add-script seeds the starter template through `addController`.
    * Once non-null, user edits flow through `setControllerText` (which dirties).
    */
   controllerText: string | null;
@@ -589,9 +590,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           ...state.open,
           root: nextRoot,
           controllerFileName: action.fileName,
-          // Seed an EMPTY buffer — the new controller has no contents until typed;
-          // F11's Save writes whatever this holds to the new `.lua`.
-          controllerText: "",
+          // Seed the controller starter template (the `return function(view) … end`
+          // wrapper the runtime calls) rather than an empty buffer, so the author
+          // starts from the right shape. F11's Save writes this to the new `.lua`.
+          controllerText: NEW_CONTROLLER_TEMPLATE,
         },
         // Show the user the editor they just created.
         activeTab: "controller",

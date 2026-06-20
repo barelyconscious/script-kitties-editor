@@ -2,12 +2,15 @@
  * ComponentPicker — the searchable basename picker the structure tree opens when
  * the user adds a `<Component>` child (F9a). It lists every component across the
  * WHOLE `gui/` tree by bare basename (the folder shown only as a disambiguating
- * hint), and on pick writes the bare basename into the new `<Component>`'s `src`.
+ * hint), and on pick writes the chosen component's `.xml` FILENAME into the new
+ * `<Component>`'s `src` (e.g. `bag_slot.xml`).
  *
- * Why basename-only: per design subsection (3), `<Component src>` resolves by
- * basename across the whole tree (the manifest is basename-keyed and basenames are
- * tree-wide unique), so the picker spans every folder but the value it writes is
- * the bare name — never a path. The folder is a human hint only.
+ * Why filename (with `.xml`): `<Component src>` resolves on the canonical `.xml`
+ * form (matching the `assets.json` key), so the picker appends the extension for the
+ * user — they only ever pick/type a name. Why basename (no path): per design
+ * subsection (3) `src` resolves by basename across the whole tree (the manifest is
+ * basename-keyed and basenames are tree-wide unique), so the value is the filename,
+ * never a folder path. The folder is a human hint only.
  *
  * The list is loaded from `get_gui_tree` (B1) when the dialog opens, so it reflects
  * the current project without the tree panel owning that fetch.
@@ -31,10 +34,11 @@ export type ComponentPickerProps = {
   /** Close the dialog (cancel, escape, overlay click, or after a pick). */
   onOpenChange: (open: boolean) => void;
   /**
-   * Called with the chosen BARE basename to write into the new `<Component>`'s
-   * `src`. The dialog closes itself after.
+   * Called with the `src` value to write into the new `<Component>` — the chosen
+   * component's filename WITH its `.xml` extension (`bag_slot.xml`), the canonical
+   * form the resolver requires. The dialog closes itself after.
    */
-  onPick: (basename: string) => void;
+  onPick: (src: string) => void;
   /**
    * The bare basename of the component currently being edited, if any. It is
    * EXCLUDED from the list so a component can never include itself (a direct
@@ -75,7 +79,9 @@ export function ComponentPicker({ open, onOpenChange, onPick, excludeName }: Com
   const filtered = useMemo(() => (items ? filterPickItems(items, query) : []), [items, query]);
 
   const handlePick = (basename: string) => {
-    onPick(basename);
+    // Write the canonical `.xml` form into `src` — that is what the resolver requires
+    // (a bare basename does not resolve), so the user never has to type the extension.
+    onPick(`${basename}.xml`);
     onOpenChange(false);
   };
 

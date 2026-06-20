@@ -151,18 +151,26 @@ export function NewComponentDialog({
         <div className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="new-component-name">Name</Label>
-            <Input
-              id="new-component-name"
-              autoFocus
-              value={name}
-              disabled={busy}
-              onChange={(e) => {
-                const value = e.currentTarget.value;
-                setName(value);
-              }}
-              placeholder="Display name"
-              aria-invalid={!!nameError}
-            />
+            <div className="relative">
+              <Input
+                id="new-component-name"
+                autoFocus
+                value={name}
+                disabled={busy}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setName(value);
+                }}
+                placeholder="name"
+                aria-invalid={!!nameError}
+                className="pr-11 font-mono"
+              />
+              {/* The `.xml` extension is added automatically — shown muted so the user
+                  types ONLY the name and never the extension. */}
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex select-none items-center font-mono text-muted-foreground text-sm">
+                .xml
+              </span>
+            </div>
             {basename && !nameError && (
               <p className="text-muted-foreground text-xs">
                 Creates <code className="font-mono">{basename}.xml</code>

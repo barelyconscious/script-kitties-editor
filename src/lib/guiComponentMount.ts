@@ -77,11 +77,17 @@ const NON_OVERRIDE_ATTRS = new Set([
 ]);
 
 /**
- * Normalize a `src` value to the basename key the manifest/cache resolves against.
- * `src` is a bare basename by design (folders are not a resolution namespace —
- * design (3)), but we defensively strip any path segments and trim whitespace so a
- * stray `widgets/bag_slot.xml` still keys on `bag_slot.xml`. An empty/whitespace
- * `src` normalizes to `""` (→ treated as missing by the renderer).
+ * Normalize a `src` value to the component IDENTITY the editor resolves against —
+ * the bare STEM that `get_component` matches in the gui tree (e.g. `bag_slot`).
+ *
+ * **The `.xml` extension is REQUIRED.** A `<Component src>` must carry the full
+ * filename (`bag_slot.xml`) — the canonical form, matching the `assets.json` manifest
+ * key. This function path-strips (folders are not a resolution namespace — design (3) —
+ * so a stray `widgets/bag_slot.xml` still keys on its basename), then requires a
+ * trailing `.xml` (case-insensitive) and returns the stem with it removed (the backend
+ * matches by stem). A `src` WITHOUT `.xml` (or blank, or a bare `.xml`) returns `""` —
+ * NOT a valid component reference, so the renderer draws the `missing` placeholder.
+ * The editor's add-Component flow writes the `.xml` form for you (see ComponentPicker).
  */
 export function srcBasename(src: string | undefined): string {
   if (src === undefined) return "";
@@ -89,7 +95,11 @@ export function srcBasename(src: string | undefined): string {
   if (trimmed === "") return "";
   // Split on both separators; the last non-empty segment is the basename.
   const segments = trimmed.split(/[\\/]/);
-  return segments[segments.length - 1] ?? trimmed;
+  const basename = segments[segments.length - 1] ?? trimmed;
+  // Require the `.xml` extension. The captured stem (without it) is the get_component
+  // key; anything that isn't `*.xml` is not a valid component reference → "" (missing).
+  const match = /^(.+)\.xml$/i.exec(basename);
+  return match ? match[1] : "";
 }
 
 /**

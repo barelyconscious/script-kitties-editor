@@ -157,7 +157,7 @@ describe("extractShape — nested <Component data> objects", () => {
 
   it("folds the child component's shape under the data key as an object", () => {
     const shape = extractShape(
-      tree('<View><Component src="button" data="buttonProps"/></View>'),
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
       resolve,
     );
     expect(shape.scalars.size).toBe(0);
@@ -169,19 +169,19 @@ describe("extractShape — nested <Component data> objects", () => {
   });
 
   it("records the data key present-but-empty without a resolver", () => {
-    const shape = extractShape(tree('<View><Component src="button" data="buttonProps"/></View>'));
+    const shape = extractShape(tree('<View><Component src="button.xml" data="buttonProps"/></View>'));
     expect(shape.objects.has("buttonProps")).toBe(true);
     expect(buildModel(shape)).toEqual({ buttonProps: {} });
   });
 
   it("records present-but-empty when the child src can't be resolved", () => {
-    const shape = extractShape(tree('<View><Component src="ghost" data="props"/></View>'), resolve);
+    const shape = extractShape(tree('<View><Component src="ghost.xml" data="props"/></View>'), resolve);
     expect(buildModel(shape)).toEqual({ props: {} });
   });
 
   it("ignores non-bare data keys in v1 (no $./dotted forms)", () => {
     const shape = extractShape(
-      tree('<View><Component src="button" data="$.shared"/></View>'),
+      tree('<View><Component src="button.xml" data="$.shared"/></View>'),
       resolve,
     );
     expect(shape.objects.size).toBe(0);
@@ -190,7 +190,7 @@ describe("extractShape — nested <Component data> objects", () => {
   it("guards include cycles via the ancestry seed", () => {
     // A → A self-include: seeding ancestry with the component's own basename stops
     // the recursion folding itself in forever.
-    const selfRef = tree('<View><Component src="a" data="self"/></View>');
+    const selfRef = tree('<View><Component src="a.xml" data="self"/></View>');
     const resolveSelf = (name: string) => (name === "a" ? selfRef : undefined);
     const shape = extractShape(selfRef, resolveSelf, new Set(["a"]));
     expect(buildModel(shape)).toEqual({ self: {} });
@@ -199,7 +199,7 @@ describe("extractShape — nested <Component data> objects", () => {
   it("scaffolds the data object into the model text additively", () => {
     const text = scaffoldModelText(
       "{}",
-      tree('<View><Component src="button" data="buttonProps"/></View>'),
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
       resolve,
     );
     expect(JSON.parse(text as string)).toEqual({ buttonProps: { label: "label", tint: "tint" } });
@@ -209,7 +209,7 @@ describe("extractShape — nested <Component data> objects", () => {
     const current = JSON.stringify({ buttonProps: { label: "Save" } });
     const text = scaffoldModelText(
       current,
-      tree('<View><Component src="button" data="buttonProps"/></View>'),
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
       resolve,
     );
     // `tint` is added; the user's `label` value is preserved (additive merge).
@@ -226,7 +226,7 @@ describe("reconcileModel — prune stale keys inside data objects", () => {
     const current = JSON.stringify({ buttonProps: { label: "Save", tint: "old" } });
     const text = scaffoldModelText(
       current,
-      tree('<View><Component src="button" data="buttonProps"/></View>'),
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
       resolve,
     );
     expect(JSON.parse(text as string)).toEqual({ buttonProps: { label: "Save" } });
@@ -244,7 +244,7 @@ describe("reconcileModel — prune stale keys inside data objects", () => {
     const current = JSON.stringify({ buttonProps: { label: "Save" } });
     const text = scaffoldModelText(
       current,
-      tree('<View><Component src="button" data="buttonProps"/></View>'),
+      tree('<View><Component src="button.xml" data="buttonProps"/></View>'),
       resolve,
     );
     expect(text).toBeNull();
@@ -260,7 +260,7 @@ describe("reconcileModel — orphaned data objects (data-key rename/removal)", (
     const current = JSON.stringify({ oldProps: { label: "Save" } });
     const text = scaffoldModelText(
       current,
-      tree('<View><Component src="button" data="newProps"/></View>'),
+      tree('<View><Component src="button.xml" data="newProps"/></View>'),
       resolve,
     );
     expect(JSON.parse(text as string)).toEqual({ newProps: { label: "label" } });

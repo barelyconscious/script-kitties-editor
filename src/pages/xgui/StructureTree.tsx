@@ -243,11 +243,7 @@ function TreeRow({
               // type icon is also swapped for a warning glyph below). Selection still
               // wins so the selected row reads clearly; an open right-click menu holds
               // the hover tint so the acted-on row stays visibly anchored.
-              selected
-                ? "bg-muted"
-                : menuOpen
-                  ? "bg-muted/60"
-                  : missingId && "bg-amber-500/10",
+              selected ? "bg-muted" : menuOpen ? "bg-muted/60" : missingId && "bg-amber-500/10",
             )}
           >
             {/* Indented row content. Lock/eye no longer occupy a far-left gutter; they
@@ -391,18 +387,24 @@ function TreeRow({
                   <ContextMenu.Label className="px-2 py-1 text-muted-foreground">
                     Add child
                   </ContextMenu.Label>
-                  {addable.map((childTag) => (
-                    <ContextMenu.Item
-                      key={childTag}
-                      onSelect={() => onAdd(node.nodeId, childTag)}
-                      className="cursor-pointer rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
-                    >
-                      {`<${childTag}>`}
-                      {childTag === "Component" && (
-                        <span className="ml-1 text-muted-foreground">…</span>
-                      )}
-                    </ContextMenu.Item>
-                  ))}
+                  {addable.map((childTag) => {
+                    // Each add option carries the SAME type icon + accent color the
+                    // tree row uses for that tag, so the menu reads in the same visual
+                    // language as the tree it adds into.
+                    const ChildIcon = TAG_ICON[childTag];
+                    return (
+                      <ContextMenu.Item
+                        key={childTag}
+                        onSelect={() => onAdd(node.nodeId, childTag)}
+                        className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                      >
+                        <ChildIcon className={cn("size-3 shrink-0", tagColorClass(childTag))} />
+                        <span className={cn("font-medium font-mono", tagColorClass(childTag))}>
+                          {childTag}
+                        </span>
+                      </ContextMenu.Item>
+                    );
+                  })}
                   {/* Separate the Add group from the element-level actions below
                       (lock/hide/delete) so they don't read as one undifferentiated list. */}
                   {(canToggle || removable) && (
@@ -501,20 +503,26 @@ function AddMenu({
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-50 mt-1 min-w-36 overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground text-xs shadow-md ring-1 ring-foreground/10">
             <p className="px-2 py-1 text-muted-foreground">Add child</p>
-            {addable.map((childTag) => (
-              <button
-                key={childTag}
-                type="button"
-                onClick={() => {
-                  onAdd(node.nodeId, childTag);
-                  setOpen(false);
-                }}
-                className="block w-full cursor-pointer rounded px-2 py-1 text-left hover:bg-muted"
-              >
-                {`<${childTag}>`}
-                {childTag === "Component" && <span className="ml-1 text-muted-foreground">…</span>}
-              </button>
-            ))}
+            {addable.map((childTag) => {
+              // Mirror the right-click menu: same per-tag icon + accent color as the tree.
+              const ChildIcon = TAG_ICON[childTag];
+              return (
+                <button
+                  key={childTag}
+                  type="button"
+                  onClick={() => {
+                    onAdd(node.nodeId, childTag);
+                    setOpen(false);
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-left hover:bg-muted"
+                >
+                  <ChildIcon className={cn("size-3 shrink-0", tagColorClass(childTag))} />
+                  <span className={cn("font-medium font-mono", tagColorClass(childTag))}>
+                    {childTag}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}

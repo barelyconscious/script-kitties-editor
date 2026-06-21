@@ -9,6 +9,7 @@ import {
   Redo2,
   Save,
   Undo2,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -105,6 +106,14 @@ export function TabWorkspace({
   // default, editable) and a read-only STATS graph. Per-tab state, defaults to
   // the script so the tab opens as a code lens.
   const [creatureView, setCreatureView] = useState<"script" | "chart">("script");
+
+  // The data column's width — matched by the toolbar's data header so "Data" sits
+  // over the pane and the divider continues the column border. Creatures get a
+  // wider form than the flat-type field grid.
+  const dataWidthClass = isCreature ? "w-[28rem]" : "w-72";
+  // Whether to show the script file name in the toolbar: every non-bespoke tab
+  // except a creature currently showing its stats chart (which has no script).
+  const showScript = !isBespoke && (!isCreature || creatureView === "script");
 
   const bus = useSaveBus();
 
@@ -222,95 +231,142 @@ export function TabWorkspace({
               className={cn("flex h-full min-h-0 flex-col", hidden && "hidden")}
               onBlur={commitUndoStep}
             >
-              {/* Per-tab toolbar: flank toggles + dirty dot + save + status. */}
-              <div className="flex items-center gap-1 border-b px-2 py-1.5">
-                {/* No Data/Script split for bespoke (script-less) editors, so the
-                data-pane toggle is hidden for them. */}
+              {/* Combined header row: the data-pane toggle + "Data" over the data
+              column, and the script file name + status + save controls over the
+              script column. The per-pane headers were folded up here, so this
+              border-b is the single separator for both columns. */}
+              <div className="flex items-stretch border-b">
+                {/* Data column header: the toggle + "Data" label, width-matched to
+                the data pane so the label sits over it and the divider continues
+                the column border. Bespoke (script-less) editors have no data split,
+                so they show no data header. */}
                 {!isBespoke && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title={dataOpen ? "Hide data pane" : "Show data pane"}
-                    aria-pressed={dataOpen}
-                    onClick={() => setDataOpen((v) => !v)}
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5",
+                      dataOpen && cn(dataWidthClass, "shrink-0 border-r"),
+                    )}
                   >
-                    {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-                  </Button>
-                )}
-                {/* Creatures get a segmented control to swap the center region between
-                the aiController script and the stats graph. */}
-                {isCreature && (
-                  <div className="ml-1 flex items-center gap-0.5 rounded-md border p-0.5">
-                    <ViewToggleButton
-                      active={creatureView === "script"}
-                      onClick={() => setCreatureView("script")}
-                      Icon={FileCode2}
-                      label="Script"
-                    />
-                    <ViewToggleButton
-                      active={creatureView === "chart"}
-                      onClick={() => setCreatureView("chart")}
-                      Icon={LineChart}
-                      label="Stats"
-                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title={dataOpen ? "Hide data pane" : "Show data pane"}
+                      aria-pressed={dataOpen}
+                      onClick={() => setDataOpen((v) => !v)}
+                    >
+                      {dataOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+                    </Button>
+                    {dataOpen && (
+                      <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                        Data
+                      </span>
+                    )}
                   </div>
                 )}
-                {/* The object name is NOT repeated here: it already shows on the tab
-                (TabBar) and in the Data pane's Details/Name field, so a toolbar copy
-                was a redundant third instance. The unsaved-changes dot likewise lives
-                on the tab, so the toolbar doesn't repeat it either. */}
-                {status && status.message.length > 0 && (
-                  <span
-                    role="status"
-                    className={cn(
-                      "ml-2 truncate text-xs",
-                      status.ok ? "text-muted-foreground" : "font-medium text-destructive",
-                    )}
-                    title={status.message}
-                  >
-                    {status.message}
-                  </span>
-                )}
-                <div className="ml-auto flex items-center gap-2">
-                  <AutoSaveIndicator status={autoStatus} />
-                  {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
-                    editor is mounted; scripts undo inside Monaco, not here. Sits with
-                    the save controls on the right. */}
-                  {undoTarget && (
-                    <div className="flex items-center">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Undo (Ctrl+Z)"
-                        disabled={!undoTarget.canUndo}
-                        onClick={() => undoTarget.undo()}
+
+                {/* Script column header: the script file name + share badges on the
+                left; the creature Script/Stats toggle, auto-save indicator, undo/redo
+                and Save on the right. The object name is NOT repeated here — it's on
+                the tab and in the Data pane's Name field. */}
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5">
+                  {showScript && (
+                    <>
+                      <span
+                        className="truncate font-mono text-sm"
+                        title={tab.scriptName || undefined}
                       >
-                        <Undo2 />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Redo (Ctrl+Shift+Z)"
-                        disabled={!undoTarget.canRedo}
-                        onClick={() => undoTarget.redo()}
-                      >
-                        <Redo2 />
-                      </Button>
-                    </div>
+                        {tab.scriptName || "No script"}
+                      </span>
+                      {scriptReach > 1 && (
+                        <span
+                          className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs"
+                          title={`This script is shared by ${scriptReach} game objects — edits affect all of them.`}
+                        >
+                          shared by {scriptReach} objects
+                        </span>
+                      )}
+                      {alsoOpenElsewhere && (
+                        <span
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-600 text-xs dark:text-amber-400"
+                          title="This file is also open in another tab. Saving here will refresh that tab (you'll be warned if it has unsaved edits)."
+                        >
+                          <Users className="size-3" />
+                          also open in another tab
+                        </span>
+                      )}
+                    </>
                   )}
-                  {/* Scripts save manually; bundles/packs are script-less, so the
-                  button only appears when the tab actually has a script. */}
-                  {bus.hasManualTarget && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!bus.manualDirty}
-                      onClick={() => void handleSaveScript()}
+                  {status && status.message.length > 0 && (
+                    <span
+                      role="status"
+                      className={cn(
+                        "truncate text-xs",
+                        status.ok ? "text-muted-foreground" : "font-medium text-destructive",
+                      )}
+                      title={status.message}
                     >
-                      <Save />
-                      Save Script
-                    </Button>
+                      {status.message}
+                    </span>
                   )}
+                  <div className="ml-auto flex items-center gap-2">
+                    {/* Creatures swap the center region between the aiController
+                    script and the stats graph. The toggle sits on the right with the
+                    save controls, off the script-name side. */}
+                    {isCreature && (
+                      <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                        <ViewToggleButton
+                          active={creatureView === "script"}
+                          onClick={() => setCreatureView("script")}
+                          Icon={FileCode2}
+                          label="Script"
+                        />
+                        <ViewToggleButton
+                          active={creatureView === "chart"}
+                          onClick={() => setCreatureView("chart")}
+                          Icon={LineChart}
+                          label="Stats"
+                        />
+                      </div>
+                    )}
+                    <AutoSaveIndicator status={autoStatus} />
+                    {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
+                    editor is mounted; scripts undo inside Monaco, not here. */}
+                    {undoTarget && (
+                      <div className="flex items-center">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Undo (Ctrl+Z)"
+                          disabled={!undoTarget.canUndo}
+                          onClick={() => undoTarget.undo()}
+                        >
+                          <Undo2 />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Redo (Ctrl+Shift+Z)"
+                          disabled={!undoTarget.canRedo}
+                          onClick={() => undoTarget.redo()}
+                        >
+                          <Redo2 />
+                        </Button>
+                      </div>
+                    )}
+                    {/* Scripts save manually; bundles/packs are script-less, so the
+                    button only appears when the tab actually has a script. */}
+                    {bus.hasManualTarget && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!bus.manualDirty}
+                        onClick={() => void handleSaveScript()}
+                      >
+                        <Save />
+                        Save Script
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -358,11 +414,7 @@ export function TabWorkspace({
                           creatureView === "chart" && "hidden",
                         )}
                       >
-                        <ScriptPane
-                          scriptName={tab.scriptName}
-                          reach={scriptReach}
-                          alsoOpenElsewhere={alsoOpenElsewhere}
-                        />
+                        <ScriptPane scriptName={tab.scriptName} />
                       </div>
                       {creatureView === "chart" && <CreatureChartPane />}
                     </section>
@@ -384,11 +436,7 @@ export function TabWorkspace({
                       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
                       aria-label="Script"
                     >
-                      <ScriptPane
-                        scriptName={tab.scriptName}
-                        reach={scriptReach}
-                        alsoOpenElsewhere={alsoOpenElsewhere}
-                      />
+                      <ScriptPane scriptName={tab.scriptName} />
                     </section>
                   </>
                 )}
@@ -454,6 +502,9 @@ function ViewToggleButton({
   );
 }
 
+// The Data column body. Its "Data" header now lives in the toolbar (folded up
+// with the script header), so this renders just the scrolling content region —
+// `label` stays as the section's accessible name.
 function Pane({
   label,
   className,
@@ -466,9 +517,6 @@ function Pane({
 }) {
   return (
     <section className={cn("flex min-h-0 flex-col bg-background", className)} aria-label={label}>
-      <header className="border-b px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {label}
-      </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
     </section>
   );

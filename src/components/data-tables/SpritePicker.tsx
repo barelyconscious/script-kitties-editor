@@ -51,7 +51,7 @@ export function SpritePicker({
         <button
           type="button"
           disabled={disabled}
-          className="flex h-8.5 w-full items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-left text-sm shadow-xs hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+          className="flex h-8.25 w-full items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-left text-sm shadow-xs hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
         >
           <Sprite name={value} className="size-5 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-muted-foreground">

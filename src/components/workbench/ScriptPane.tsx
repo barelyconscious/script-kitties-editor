@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { FileWarning, Loader2, Users } from "lucide-react";
+import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { useRequestSave, useSaveTarget } from "./saveBus";
@@ -26,14 +26,6 @@ import { useScriptSync } from "./scriptSync";
 export interface ScriptPaneProps {
   /** The script FILE this tab points at — "" when the object is script-less. */
   scriptName: string;
-  /** How many game objects point at `scriptName` (incl. this one). >1 ⇒ shared. */
-  reach: number;
-  /**
-   * Whether ANOTHER currently-open tab shows the SAME script file. Distinct from
-   * `reach` (static count of game objects): this is the dynamic "also open in
-   * another tab" signal. When true a save here may refresh the sibling tab.
-   */
-  alsoOpenElsewhere: boolean;
 }
 
 type LoadState =
@@ -42,7 +34,7 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "contents" };
 
-export function ScriptPane({ scriptName, reach, alsoOpenElsewhere }: ScriptPaneProps) {
+export function ScriptPane({ scriptName }: ScriptPaneProps) {
   // A stable identity for THIS pane instance, used as the publish `originId` so a
   // pane can skip reacting to its own save.
   const originId = useId();
@@ -160,9 +152,11 @@ export function ScriptPane({ scriptName, reach, alsoOpenElsewhere }: ScriptPaneP
     requestSave();
   }, [requestSave]);
 
+  // The script file name + share badges that used to head this pane now live in
+  // the tab toolbar (folded up with the Data header), so the pane is just the
+  // full-bleed editor.
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScriptHeader scriptName={scriptName} reach={reach} alsoOpenElsewhere={alsoOpenElsewhere} />
       <div className="min-h-0 flex-1">
         {load.kind === "contents" ? (
           <ScriptEditor value={value} onChange={setValue} onSave={handleEditorSave} />
@@ -174,41 +168,6 @@ export function ScriptPane({ scriptName, reach, alsoOpenElsewhere }: ScriptPaneP
           />
         )}
       </div>
-    </div>
-  );
-}
-
-function ScriptHeader({
-  scriptName,
-  reach,
-  alsoOpenElsewhere,
-}: {
-  scriptName: string;
-  reach: number;
-  alsoOpenElsewhere: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2 border-b px-3 py-1.5">
-      <span className="truncate font-mono text-sm" title={scriptName || undefined}>
-        {scriptName || "No script"}
-      </span>
-      {reach > 1 && (
-        <span
-          className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs"
-          title={`This script is shared by ${reach} game objects — edits affect all of them.`}
-        >
-          shared by {reach} objects
-        </span>
-      )}
-      {alsoOpenElsewhere && (
-        <span
-          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-600 text-xs dark:text-amber-400"
-          title="This file is also open in another tab. Saving here will refresh that tab (you'll be warned if it has unsaved edits)."
-        >
-          <Users className="size-3" />
-          also open in another tab
-        </span>
-      )}
     </div>
   );
 }

@@ -31,12 +31,15 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Keyboard,
   LayoutGrid,
   Lock,
   type LucideIcon,
   MonitorPlay,
   Plug,
   Plus,
+  Pointer,
+  SquareStack,
   Trash2,
   TriangleAlert,
   Type,
@@ -45,6 +48,7 @@ import {
 import { ContextMenu } from "radix-ui";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { hasFocusHandlers, isHitTestable, isModal } from "../../lib/guiInteraction";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { useEditorStore } from "./editorState";
@@ -165,6 +169,62 @@ export function StructureTree() {
         excludeName={open.name}
       />
     </div>
+  );
+}
+
+/**
+ * The read-only interaction badges for one tree row. Each icon reflects a
+ * capability the `worlds-cpp` XGUI runtime derives from the element's raw attrs
+ * (see {@link import("../../lib/guiInteraction")}):
+ *
+ *   - pointer   → hit-testable (the engine tests it under the cursor): it has a
+ *                 mouse handler, a tooltip, or is modal.
+ *   - keyboard  → has focus handlers (`onKeyPressed`/`onFocus`/`onBlur`) — the
+ *                 handler-only focus signal (modal is shown by its own badge
+ *                 rather than lighting up "keyboard").
+ *   - modal     → declared `modal` (captures input, blocks/overlays beneath it).
+ *
+ * Rendered only for capabilities the element actually has, so an inert element
+ * shows nothing. Icons are muted and non-interactive (plain spans with a
+ * `title`) — they inform, they don't act.
+ */
+function InteractionBadges({ node }: { node: GuiNode }) {
+  const hitTestable = isHitTestable(node);
+  const focusHandlers = hasFocusHandlers(node);
+  const modal = isModal(node);
+
+  if (!hitTestable && !focusHandlers && !modal) return null;
+
+  return (
+    <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground/60">
+      {hitTestable && (
+        <span
+          role="img"
+          aria-label="Hit-testable"
+          title="Hit-testable — the engine tests this element under the cursor (it has a mouse handler, a tooltip, or is modal)."
+        >
+          <Pointer className="size-3" />
+        </span>
+      )}
+      {focusHandlers && (
+        <span
+          role="img"
+          aria-label="Has focus handlers"
+          title="Has focus handlers (onKeyPressed / onFocus / onBlur) — this element can receive keyboard focus."
+        >
+          <Keyboard className="size-3" />
+        </span>
+      )}
+      {modal && (
+        <span
+          role="img"
+          aria-label="Modal"
+          title="Modal — captures input and blocks elements beneath it (also receives focus)."
+        >
+          <SquareStack className="size-3" />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -302,6 +362,12 @@ function TreeRow({
                   {label}
                 </span>
               </button>
+
+              {/* Read-only interaction badges — the engine-derived capabilities of
+                  this element (hit-testable / has focus handlers / modal). Always
+                  visible (like the missing-id warning), muted so they don't compete
+                  with the identity label or the actionable lock/hide/add affordances. */}
+              <InteractionBadges node={node} />
 
               {canToggle && (
                 // Lock toggle — a right-side affordance. Unlocked: muted, hover-only.

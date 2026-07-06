@@ -590,7 +590,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           ...state.open,
           root: nextRoot,
           controllerFileName: action.fileName,
-          // Seed the controller starter template (the `return function(view) … end`
+          // Seed the controller starter template (the `return function(view, model) … end`
           // wrapper the runtime calls) rather than an empty buffer, so the author
           // starts from the right shape. F11's Save writes this to the new `.lua`.
           controllerText: NEW_CONTROLLER_TEMPLATE,

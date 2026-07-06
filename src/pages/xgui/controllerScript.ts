@@ -10,11 +10,16 @@ import { toComponentBasename } from "./guiTree";
 
 /**
  * The starter body a freshly-added controller is seeded with. The runtime calls
- * a controller as `controller(view)` and expects it to return its handler table,
- * so we scaffold that shape (an empty table) rather than an empty file — the
- * author fills in the table instead of remembering the wrapper.
+ * a controller as `controller(view, model)` — `model` is optional (Lua has no
+ * optional-param syntax, so `function(view, model)` *is* the optional form; the
+ * runtime may pass one arg or two) — and expects it to return its handler table.
+ * Controllers commonly call `view:setModel(...)` to set/project the model, so we
+ * scaffold that shape (the wrapper, a commented `setModel` hint, and an empty
+ * handler table) rather than an empty file — the author fills in the table
+ * instead of remembering the wrapper.
  */
-export const NEW_CONTROLLER_TEMPLATE = `return function(view)
+export const NEW_CONTROLLER_TEMPLATE = `return function(view, model)
+    -- view:setModel(...)
     return {}
 end
 `;

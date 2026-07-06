@@ -184,7 +184,7 @@ export function PropertiesPanel() {
               <FieldRow label="computed id">
                 <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
                   <span
-                    className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
+                    className="min-w-0 flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
                     title={computed || "no id set"}
                   >
                     {computed || "—"}

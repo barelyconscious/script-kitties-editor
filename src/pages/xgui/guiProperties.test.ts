@@ -184,12 +184,17 @@ describe("fieldsForTag", () => {
     expect(layer?.kind).toBe("text");
   });
 
-  it("gives Event editable name + handler as plain text fields (thin model)", () => {
-    // Events are now edited in the Properties panel (the dedicated events panel is
-    // gone): name→handler, both verbatim literal strings, not bindable/compound.
+  it("gives Event a plain-text name + a handler-kind handler (thin model)", () => {
+    // Events are edited in the Properties panel (the dedicated events panel is gone):
+    // name→handler, both verbatim literal strings. `name` is a plain literal; `handler`
+    // is kind `handler` (#504) so it shares the element handlers' controller-function
+    // dropdown — an Event handler is still a controller function name. Neither is
+    // grouped (Event has no Interaction section).
     const fields = fieldsForTag("Event");
     expect(fields.map((f) => f.name)).toEqual(["name", "handler"]);
-    expect(fields.every((f) => f.kind === "text")).toBe(true);
+    expect(fields.find((f) => f.name === "name")?.kind).toBe("text");
+    expect(fields.find((f) => f.name === "handler")?.kind).toBe("handler");
+    expect(fields.every((f) => f.group === undefined)).toBe(true);
   });
 
   it("gives the root View a scopeName text field first, then an onKeyPressed handler", () => {
@@ -271,9 +276,11 @@ describe("interaction fields (B1)", () => {
         expect(byName.get(h)?.kind).toBe("handler");
         expect(byName.get(h)?.group).toBe(INTERACTION_GROUP);
       }
-      // modal is a plain boolean (the no-token affordance is the panel's job, #504).
+      // modal is a plain boolean flagged literalOnly so the panel drops its {token}
+      // affordance (the engine reads it pre-binding — a token there is a lint, #504).
       expect(byName.get("modal")?.kind).toBe("boolean");
       expect(byName.get("modal")?.group).toBe(INTERACTION_GROUP);
+      expect(byName.get("modal")?.literalOnly).toBe(true);
       // tooltip is a component ref (a `.xml` basename via the picker).
       expect(byName.get("tooltip")?.kind).toBe("componentRef");
       expect(byName.get("tooltip")?.group).toBe(INTERACTION_GROUP);

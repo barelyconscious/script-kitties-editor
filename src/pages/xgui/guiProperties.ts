@@ -168,14 +168,17 @@ export type FieldKind =
    * An interaction HANDLER name (`onMouseClicked`, `onFocus`, …): a LITERAL-only
    * string naming a controller function — NO `{token}` affordance (binding a handler
    * would change WHICH function fires, not how the element looks; a `{}` here is a
-   * lint, not a binding). Rendered plainly for now; #504 adds the controller-function
-   * dropdown.
+   * lint, not a binding). Rendered as a dropdown of the open component's controller
+   * function names ({@link import("./controllerScript").exportedFunctionNames}) that
+   * still allows free typing (hot reload may add the function later), with a
+   * soft-warning state for an unknown name (#504).
    */
   | "handler"
   /**
-   * A COMPONENT reference (the `tooltip` attr): a component basename chosen via the
-   * component picker. Literal-only (structural). Rendered plainly for now; #504 adds
-   * the picker.
+   * A COMPONENT reference (the `tooltip` attr): a component chosen via the shared
+   * {@link import("./ComponentPicker").ComponentPicker}. Literal-only (structural).
+   * The stored value is the canonical `.xml`-suffixed ref the engine resolves on
+   * (`tooltip="gui.kittypacks-tooltip.xml"`), exactly what the picker emits (#504).
    */
   | "componentRef";
 
@@ -194,6 +197,13 @@ export type PropertyField = {
    * concern (#504) — the schema only tags the membership.
    */
   group?: string;
+  /**
+   * When set, the field NEVER offers a `{token}` affordance — it is a plain
+   * literal. Used for `modal`: the engine reads it via `as_bool` PRE-binding, so a
+   * `{token}` there is a lint, not a binding (#504). A generic flag rather than
+   * name-matching, so any future literal-only boolean opts in the same way.
+   */
+  literalOnly?: boolean;
 };
 
 /**
@@ -225,7 +235,7 @@ const INTERACTION_FIELDS: readonly PropertyField[] = [
   { name: "onKeyPressed", label: "onKeyPressed", kind: "handler", group: INTERACTION_GROUP },
   { name: "onFocus", label: "onFocus", kind: "handler", group: INTERACTION_GROUP },
   { name: "onBlur", label: "onBlur", kind: "handler", group: INTERACTION_GROUP },
-  { name: "modal", label: "modal", kind: "boolean", group: INTERACTION_GROUP },
+  { name: "modal", label: "modal", kind: "boolean", group: INTERACTION_GROUP, literalOnly: true },
   { name: "tooltip", label: "tooltip", kind: "componentRef", group: INTERACTION_GROUP },
   { name: "tooltipData", label: "tooltipData", kind: "binding", group: INTERACTION_GROUP },
 ];
@@ -370,9 +380,13 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
         ...INTERACTION_FIELDS,
       ];
     case "Event":
+      // The `handler` names a controller function (fired with the event payload at
+      // call time), so it gets the SAME controller-function dropdown as the element
+      // interaction handlers (#504) — a literal-only name, warn-on-unknown. `name` is
+      // the event key the runtime dispatches on, a plain literal.
       return [
         { name: "name", label: "name", kind: "text" },
-        { name: "handler", label: "handler", kind: "text" },
+        { name: "handler", label: "handler", kind: "handler" },
       ];
     case "GridLayout":
       // A non-visual control element: no id, no position/size. `dataCollection` is a

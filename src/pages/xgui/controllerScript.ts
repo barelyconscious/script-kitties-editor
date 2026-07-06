@@ -44,3 +44,35 @@ export function normalizeControllerFileName(input: string): string {
   if (trimmed === "") return "";
   return trimmed.endsWith(".lua") ? trimmed : `${trimmed}.lua`;
 }
+
+/**
+ * The controller-function names a controller source EXPORTS — the candidate
+ * handler names the Properties panel's `handler` dropdown offers (#504) and the
+ * handler-exists lint checks (B4). A controller is shaped as
+ * `return function(view) … return { name = function(self, mouse) … end, … } end`,
+ * so its exports are the keys of the returned table literal.
+ *
+ * This is a REGEX-level parse, deliberately not a Lua parser: it matches every
+ * `name = function(…)` assignment in the source and returns the `name`s in
+ * source order, de-duplicated. That captures the returned-table keys (the real
+ * exports) AND any handler assigned to a named local (`local onClick =
+ * function…`) — both are plausible handler targets, and this powers a dropdown +
+ * a warn-only hint, not correctness, so a superset of names is acceptable and
+ * safe. `return function(view)` (the outer wrapper) is NOT matched, since it has
+ * no `name =` before `function`.
+ */
+export function exportedFunctionNames(source: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const re = /(\w+)\s*=\s*function\b/g;
+  let match: RegExpExecArray | null = re.exec(source);
+  while (match !== null) {
+    const name = match[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      names.push(name);
+    }
+    match = re.exec(source);
+  }
+  return names;
+}

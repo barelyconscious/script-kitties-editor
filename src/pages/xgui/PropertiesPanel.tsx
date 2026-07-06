@@ -22,16 +22,17 @@
  *   "Colors and the palette".
  */
 
-import { Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ChevronRight, Copy, Lock, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { colorCodeToCss } from "../../lib/guiBinding";
-import type { GuiNode } from "../../lib/guiNode";
+import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { ComponentPicker } from "./ComponentPicker";
+import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 import {
   deriveRows,
@@ -46,7 +47,6 @@ import {
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
   computedId,
-  type FieldKind,
   fieldsForTag,
   formatCompound,
   isBoundField,
@@ -211,10 +211,10 @@ export function PropertiesPanel() {
           {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
 
           {/* Well-known fields for the tag (position/size suppressed for a grid
-            child — the parent GridLayout owns its geometry). */}
-          {fieldsForTag(node.tag, parentTag).map((field) => (
-            <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
-          ))}
+            child — the parent GridLayout owns its geometry). Ungrouped fields
+            render inline; fields tagged with a `group` collapse under a section
+            header below (schema-driven — grouped generically by the group key). */}
+          <SchemaFields node={node} parentTag={parentTag} onSet={setAttr} />
 
           {/* Freeform override rows (Component overrides + any unrecognized attr).
             Keyed by nodeId so switching the selected element re-derives fresh
@@ -359,6 +359,105 @@ function BindingField({ value, onCommit }: { value: string; onCommit: (next: str
   );
 }
 
+/**
+ * The tag's well-known fields, split into inline (ungrouped) rows and collapsible
+ * grouped sections. The split is SCHEMA-DRIVEN — fields are grouped generically by
+ * their {@link PropertyField.group} key (in first-appearance order), so the panel
+ * never hardcodes "Interaction". Ungrouped fields render exactly as before; each
+ * group renders under a {@link FieldGroup} section header.
+ */
+function SchemaFields({
+  node,
+  parentTag,
+  onSet,
+}: {
+  node: GuiNode;
+  parentTag: GuiTag | undefined;
+  onSet: (name: string, value: string) => void;
+}) {
+  const fields = fieldsForTag(node.tag, parentTag);
+  const ungrouped: PropertyField[] = [];
+  const groupOrder: string[] = [];
+  const grouped = new Map<string, PropertyField[]>();
+  for (const field of fields) {
+    if (!field.group) {
+      ungrouped.push(field);
+      continue;
+    }
+    const existing = grouped.get(field.group);
+    if (existing) {
+      existing.push(field);
+    } else {
+      grouped.set(field.group, [field]);
+      groupOrder.push(field.group);
+    }
+  }
+
+  return (
+    <>
+      {ungrouped.map((field) => (
+        <SchemaField key={field.name} node={node} field={field} onSet={onSet} />
+      ))}
+      {groupOrder.map((group) => (
+        // Keyed by nodeId + group so switching the selected element re-derives the
+        // section's default collapsed/expanded state for the new node (a fresh mount)
+        // rather than carrying the previous node's toggle across.
+        <FieldGroup
+          key={`${node.nodeId}:${group}`}
+          title={group}
+          fields={grouped.get(group) ?? []}
+          node={node}
+          onSet={onSet}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A collapsible section for a group of schema fields (e.g. "Interaction"). The
+ * section is COLLAPSED by default when NONE of its fields carry a value on the node,
+ * and EXPANDED when any is set — so an element that already wires up interaction
+ * opens showing it, while a plain element keeps the section tucked away. The
+ * initial state is computed once on mount; the parent keys this by nodeId so a node
+ * switch remounts with a freshly-computed default.
+ */
+function FieldGroup({
+  title,
+  fields,
+  node,
+  onSet,
+}: {
+  title: string;
+  fields: PropertyField[];
+  node: GuiNode;
+  onSet: (name: string, value: string) => void;
+}) {
+  const anySet = fields.some((f) => (node.attrs[f.name] ?? "").trim() !== "");
+  const [open, setOpen] = useState(anySet);
+
+  return (
+    <div className="mt-3 border-t pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="mb-1 flex w-full items-center gap-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide transition-colors hover:text-foreground"
+      >
+        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+        {title}
+        {!open && anySet && <span className="ml-1 size-1.5 rounded-full bg-sky-500" />}
+      </button>
+      {open && (
+        <div>
+          {fields.map((field) => (
+            <SchemaField key={field.name} node={node} field={field} onSet={onSet} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Render one schema field by its kind. */
 function SchemaField({
   node,
@@ -372,23 +471,22 @@ function SchemaField({
   const value = node.attrs[field.name] ?? "";
   return (
     <FieldRow label={field.label}>
-      <FieldControl kind={field.kind} name={field.name} value={value} onSet={onSet} />
+      <FieldControl field={field} value={value} onSet={onSet} />
     </FieldRow>
   );
 }
 
 /** The input control for a given field kind. */
 function FieldControl({
-  kind,
-  name,
+  field,
   value,
   onSet,
 }: {
-  kind: FieldKind;
-  name: string;
+  field: PropertyField;
   value: string;
   onSet: (name: string, value: string) => void;
 }) {
+  const { name, kind } = field;
   switch (kind) {
     case "binding":
       // A whole-value binding (data / dataCollection / tooltipData) — edits the inner
@@ -403,7 +501,15 @@ function FieldControl({
     case "sprite":
       return <SpriteField name={name} value={value} onSet={onSet} />;
     case "boolean":
-      return <BooleanField name={name} value={value} onSet={onSet} />;
+      // `literalOnly` (modal) drops the {token} affordance — the engine reads it
+      // pre-binding, so a token there is a lint, not a binding.
+      return (
+        <BooleanField name={name} value={value} onSet={onSet} literalOnly={field.literalOnly} />
+      );
+    case "handler":
+      return <HandlerField name={name} value={value} onSet={onSet} />;
+    case "componentRef":
+      return <ComponentRefField name={name} value={value} onSet={onSet} />;
     default:
       return (
         <Input
@@ -414,6 +520,115 @@ function FieldControl({
         />
       );
   }
+}
+
+/** Shared styling for a handler input whose typed name isn't a known controller function. */
+const handlerWarnClass = "border-amber-500/60 bg-amber-500/10";
+
+/**
+ * An interaction HANDLER field: a dropdown of the open component's controller
+ * function names that STILL allows free typing (a native `<datalist>`), since a hot
+ * reload may add the function after the handler is wired. There is NO `{token}`
+ * affordance (a handler names which function fires, not how the element looks).
+ *
+ * A typed name that isn't among the controller's exported functions gets a
+ * SOFT-WARNING state (amber input + hint) but is never blocked. The warning is
+ * suppressed when we have no function list to check against — a controller not yet
+ * loaded (its text lazy-loads on first Controller-tab view) or a controller-less
+ * component — so a fresh panel never false-warns.
+ */
+function HandlerField({
+  name,
+  value,
+  onSet,
+}: {
+  name: string;
+  value: string;
+  onSet: (name: string, value: string) => void;
+}) {
+  const { state } = useEditorStore();
+  const source = state.open?.controllerText ?? "";
+  const names = useMemo(() => exportedFunctionNames(source), [source]);
+  const listId = useId();
+  const trimmed = value.trim();
+  // Only warn when we HAVE a list to check against: an empty list means "not loaded"
+  // or "no controller", where an unknown name isn't actually knowable.
+  const unknown = names.length > 0 && trimmed !== "" && !names.includes(trimmed);
+
+  return (
+    <div className="space-y-1">
+      <Input
+        list={listId}
+        value={value}
+        onChange={(e) => onSet(name, e.currentTarget.value)}
+        placeholder="controller function"
+        className={cn("h-7 font-mono text-xs", unknown && handlerWarnClass)}
+      />
+      <datalist id={listId}>
+        {names.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      {unknown && (
+        <p className="text-[10px] text-amber-500">
+          Not a known controller function — it may be added on reload.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A COMPONENT-reference field (the `tooltip` attr): the current component shown as a
+ * button that opens the shared {@link ComponentPicker}, plus a clear affordance. The
+ * picker emits the canonical `.xml`-suffixed ref (`gui.kittypacks-tooltip.xml`) — the
+ * exact form the engine resolves on — which is stored verbatim; the display strips the
+ * extension for readability. Literal-only (structural): no `{token}` affordance.
+ */
+function ComponentRefField({
+  name,
+  value,
+  onSet,
+}: {
+  name: string;
+  value: string;
+  onSet: (name: string, value: string) => void;
+}) {
+  const { state } = useEditorStore();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const current = value.trim();
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        className="flex h-7 min-w-0 flex-1 items-center rounded-md border px-2 text-left text-xs transition-colors hover:bg-muted"
+      >
+        <span
+          className={cn("min-w-0 flex-1 truncate font-mono", !current && "text-muted-foreground")}
+        >
+          {current ? srcBasename(current) : "Choose component…"}
+        </span>
+      </button>
+      {current && (
+        <button
+          type="button"
+          aria-label="Clear tooltip component"
+          onClick={() => onSet(name, "")}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+        >
+          <X className="size-3" />
+        </button>
+      )}
+      <ComponentPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={(src) => onSet(name, src)}
+        excludeName={state.open?.name}
+      />
+    </div>
+  );
 }
 
 /** Shared styling for an input whose value is a `{token}` binding. */
@@ -458,17 +673,39 @@ function CompoundField({
   );
 }
 
-/** A boolean property (true/false) that also accepts a `{token}`. */
+/**
+ * A boolean property (true/false). By default it ALSO accepts a `{token}` (the
+ * select carries a token option + a free-text input). When `literalOnly` is set
+ * (e.g. `modal`, which the engine reads pre-binding), the token affordance is
+ * dropped entirely — just the true/false/default select, no token input.
+ */
 function BooleanField({
   name,
   value,
   onSet,
+  literalOnly,
 }: {
   name: string;
   value: string;
   onSet: (name: string, value: string) => void;
+  literalOnly?: boolean;
 }) {
   const bound = isBoundField(value);
+
+  if (literalOnly) {
+    return (
+      <select
+        value={value === "true" || value === "false" ? value : ""}
+        onChange={(e) => onSet(name, e.currentTarget.value)}
+        className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+      >
+        <option value="">default</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+
   return (
     <div className="flex items-center gap-1.5">
       <select

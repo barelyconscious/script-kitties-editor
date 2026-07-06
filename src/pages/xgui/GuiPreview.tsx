@@ -36,7 +36,7 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model"
  */
 
-import { type CSSProperties, memo, useMemo, useRef } from "react";
+import { type CSSProperties, memo, useMemo, useRef, useState } from "react";
 import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
@@ -54,6 +54,7 @@ import {
   mountDecision,
   type PlaceholderReason,
   resolveChildRoot,
+  srcBasename,
 } from "../../lib/guiComponentMount";
 import {
   computeBoxGeometry,
@@ -73,8 +74,22 @@ import {
 import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
 import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
+import {
+  pickTopmostRect,
+  placeTooltip,
+  type StageBounds,
+  type StageRect,
+  screenRectToStageRect,
+  tooltipSizeFromRoot,
+} from "../../lib/guiTooltipPlacement";
 import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
+import {
+  createTooltipRegistry,
+  type TooltipRegistry,
+  TooltipRegistryProvider,
+  useTooltipProvider,
+} from "./guiTooltipRegistry";
 
 /** The DOM attribute marking a `<Component>` mount's missing/recursive placeholder. */
 export const PLACEHOLDER_ATTR = "data-gui-placeholder";
@@ -249,6 +264,15 @@ const GuiBox = memo(function GuiBox({
   const textureName = textureToLoad(attrs.texture, !unresolved.has("texture"));
   const textureUrl = useSprite(textureName);
 
+  // Tooltip simulation (task 515): a box that authors a non-empty `tooltip=` registers
+  // itself as a hover provider (its live screen rect + tooltip ref + scope-resolved
+  // `tooltipData`) so the preview can show its card — this is the ONLY way a
+  // pointer-events-none grid cell can drive a tooltip. A no-op for boxes without a
+  // tooltip. Called unconditionally (before the `visible` early return) per hooks rules;
+  // a hidden box's ref stays null, so its snapshot rect is null and it never shows.
+  const boxRef = useRef<HTMLDivElement>(null);
+  useTooltipProvider(boxKey, node, boxRef, scope);
+
   // `visible="false"` (literal or bound) hides the box; any other value shows it.
   if (attrs.visible?.trim().toLowerCase() === "false") return null;
 
@@ -314,6 +338,7 @@ const GuiBox = memo(function GuiBox({
 
   return (
     <div
+      ref={boxRef}
       {...(suppressNodeId ? {} : { [NODE_ID_ATTR]: node.nodeId })}
       data-gui-tag={node.tag}
       data-gui-waiting={waiting ? "" : undefined}
@@ -636,6 +661,94 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
   );
 });
 
+/** The tooltip overlay's z-index — above every ranked box (whose z-indices are small). */
+const TOOLTIP_Z = 2_147_483_000;
+
+/** The fixed stage bounds the tooltip placement flips/clamps against. */
+const TOOLTIP_STAGE: StageBounds = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
+
+type TooltipCardProps = {
+  /** The tooltip component ref (`tooltip=` value, e.g. `gui.card.xml`). */
+  src: string;
+  /** The provider's scope-resolved `tooltipData` — the card's fresh root model. */
+  data: unknown;
+  /** The provider's rect in stage-logical coords (placement anchors to it). */
+  anchor: StageRect;
+  palette: Palette;
+};
+
+/**
+ * The tooltip card overlay (task 515). Rendered INSIDE the stage's coordinate space
+ * (so it scales with zoom like the runtime card will), `pointer-events-none` (so it
+ * can never steal hover from its provider — structurally no flicker loop), and above
+ * everything (a large z-index in the stage's root stacking context).
+ *
+ * It resolves `src` through the SAME {@link useComponent} cache and renders the
+ * component tree via the SAME child-render path a nested `<Component>` uses
+ * ({@link renderChildren}), seated in a fresh View frame from the resolved `data`
+ * (a `null` datum → {@link emptyItemScope}, matching the empty-grid-cell rule). A
+ * missing/blank ref reuses the shared {@link ComponentPlaceholder}. The card's size is
+ * its root's authored ABSOLUTE size ({@link tooltipSizeFromRoot}); {@link placeTooltip}
+ * positions it below-right of the provider, flipping at the stage bottom and clamping
+ * to 1280×768.
+ */
+function TooltipCard({ src, data, anchor, palette }: TooltipCardProps) {
+  const basename = srcBasename(src);
+  const entry = useComponent(basename || null);
+  const root = entry.status === "ok" ? entry.root : null;
+  // The card's own size — its root's absolute size (or the default when the root lacks
+  // an absolute size; the loader lint nudges authors toward one).
+  const size = useMemo(() => tooltipSizeFromRoot(root?.attrs.size), [root]);
+  // The card's fresh root model: the resolved data seated as a View frame. A `null`
+  // datum uses emptyItemScope so tokens collapse to "" (no waiting flash), mirroring
+  // the empty-grid-cell path (caveat 5).
+  const scope = useMemo(() => (data === null ? emptyItemScope() : viewScope(data)), [data]);
+  // The card's own nested z-order map (its boxes ranked among their siblings).
+  const zOrder = useMemo(() => (root ? computeZOrder(root, data) : EMPTY_ZORDER), [root, data]);
+  // Seed the cycle guard with the card's own basename so a self-including <Component>
+  // inside the card is caught as recursive.
+  const ancestry = useMemo<ReadonlySet<string>>(
+    () => (basename ? new Set([basename]) : EMPTY_ANCESTRY),
+    [basename],
+  );
+
+  // In flight — render nothing (no placeholder flash), same posture as ComponentMount.
+  if (entry.status === "loading") return null;
+
+  const place = placeTooltip(anchor, size, TOOLTIP_STAGE);
+  const wrapperStyle: CSSProperties = {
+    position: "absolute",
+    left: `${place.x}px`,
+    top: `${place.y}px`,
+    width: `${size.width}px`,
+    height: `${size.height}px`,
+    pointerEvents: "none",
+    zIndex: TOOLTIP_Z,
+  };
+
+  // Blank/unresolvable ref → the shared missing placeholder, at the card's box.
+  if (basename === "" || entry.status !== "ok") {
+    return (
+      <div style={wrapperStyle}>
+        <ComponentPlaceholder reason="missing" src={src} />
+      </div>
+    );
+  }
+
+  // ok: mount the tooltip tree. The inner wrapper is inset-0 so the card's child boxes
+  // position against the card box (exactly the ComponentMount child-mount shape).
+  return (
+    <div style={wrapperStyle}>
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ position: "absolute", zIndex: 0 }}
+      >
+        {renderChildren(entry.root.children, null, scope, palette, "", zOrder, ancestry)}
+      </div>
+    </div>
+  );
+}
+
 export type GuiPreviewProps = {
   /** The parsed component tree to render. Its root is expected to be `<View>`. */
   root: GuiNode;
@@ -775,6 +888,24 @@ export function GuiPreview({
   interacting = false,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
+  // Tooltip simulation (task 515). The per-preview provider registry is ref-owned so a
+  // box registering/unregistering never re-renders; it is handed to every box via
+  // context. Created lazily once (a fresh registry per preview instance).
+  const registryRef = useRef<TooltipRegistry | null>(null);
+  if (registryRef.current === null) registryRef.current = createTooltipRegistry();
+  const registry = registryRef.current;
+  // The stage element, for converting a provider's screen rect into stage-logical space.
+  const stageRef = useRef<HTMLDivElement>(null);
+  // The tooltip currently shown (anchor in stage-logical coords), or null. This is the
+  // ONLY state a hover flips — `content` is memoized separately, so showing/hiding a
+  // tooltip never re-renders the box tree.
+  const [tooltip, setTooltip] = useState<{ src: string; data: unknown; anchor: StageRect } | null>(
+    null,
+  );
+  // The provider key currently shown — used to skip redundant setState while the pointer
+  // moves within the SAME provider (the anchor is provider-bounds, not cursor, so it's
+  // stable). A ref so comparing it doesn't itself re-render.
+  const hoverKeyRef = useRef<string | null>(null);
   // A single View-frame scope for the whole tree: every box resolves its `{$.x}`
   // bindings against this one model object. Memoized on `model` so a pan/zoom/selection
   // re-render (which leaves the model untouched) reuses the same scope object —
@@ -845,7 +976,41 @@ export function GuiPreview({
   // handler — the only render is the store writeback the host performs from `onDragMove`.
   const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
 
+  // Tooltip hover controller (task 515). Hide the shown card (if any) and forget the
+  // shown provider. A no-op setState guard keeps this cheap to call on every move.
+  const clearTooltip = () => {
+    if (hoverKeyRef.current !== null) {
+      hoverKeyRef.current = null;
+      setTooltip(null);
+    }
+  };
+
+  // Rect-test the pointer (SCREEN coords — getBoundingClientRect is screen-space, so
+  // zoom/pan is free) against the registered providers and show the topmost's card.
+  // Suppressed while an element drag is active. The anchor is the hit provider's rect
+  // converted ONCE into stage-logical space, so the pure placement helper works in a
+  // single coordinate space.
+  const updateTooltipHover = (clientX: number, clientY: number) => {
+    if (drag.current) {
+      clearTooltip();
+      return;
+    }
+    const hit = pickTopmostRect(registry.snapshot(), clientX, clientY);
+    if (!hit) {
+      clearTooltip();
+      return;
+    }
+    if (hit.key === hoverKeyRef.current) return; // same provider — stable anchor
+    const stageEl = stageRef.current;
+    if (!stageEl) return;
+    const anchor = screenRectToStageRect(hit.rect, stageEl.getBoundingClientRect(), scale);
+    hoverKeyRef.current = hit.key;
+    setTooltip({ src: hit.src, data: hit.data, anchor });
+  };
+
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Any press hides a shown tooltip (engine parity: press dismisses the card).
+    clearTooltip();
     // View-pan gesture (space+left / middle-mouse): the host's viewport handler owns
     // it. Yield — don't start an element drag, don't change selection. For a
     // PRIMARY-button pan (space+left) the browser will synthesize a trailing `click`,
@@ -888,6 +1053,9 @@ export function GuiPreview({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Tooltip hover runs on every stage move (grid cells are pointer-events-none, so
+    // their moves bubble here). It self-suppresses while a drag is active.
+    updateTooltipHover(event.clientX, event.clientY);
     const active = drag.current;
     if (!active || !onDragMove) return;
     // Screen-pixel delta ÷ scale = logical-pixel delta. The stage is rendered with
@@ -919,54 +1087,70 @@ export function GuiPreview({
   };
 
   return (
-    // The stage is the preview canvas: selection is by click (and later
-    // drag/F7). Keyboard-driven selection is the tree panel's job (F9), so the
-    // canvas intentionally has no key handler and is not a button/role.
-    // biome-ignore lint/a11y/noStaticElementInteractions: preview canvas selected by click; keyboard selection lives in the tree panel (F9)
-    // biome-ignore lint/a11y/useKeyWithClickEvents: preview canvas selected by click; keyboard selection lives in the tree panel (F9)
-    <div
-      data-gui-stage=""
-      onClick={handleClick}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      className="relative overflow-visible text-[#b9b2a5]"
-      style={{
-        position: "relative",
-        width: `${STAGE_WIDTH}px`,
-        height: `${STAGE_HEIGHT}px`,
-        // Solid stage (479). The 1280×768 stage is a flat, opaque artboard color —
-        // the blueprint graph-paper grid now lives BEHIND the stage, on the clipping
-        // viewport (see GuiPreviewHost), so the solid stage reads as an artboard
-        // sitting on a blueprint canvas. Rendered GUI boxes sit on top of this flat
-        // fill and stay legible. (Task 478 painted the grid ON the stage; 479 flips
-        // it back to a solid fill and moves the grid to the viewport backdrop.)
-        backgroundColor: "#1b1b1f",
-        // View transform (473): a single `translate(panX, panY) scale(scale)` on the
-        // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
-        // The transform belongs ONLY on the stage — a transform on an intermediate
-        // box would warp that box's child geometry and break the drag-delta math.
-        // `top left` origin makes the pan (in viewport screen px) place the stage's
-        // top-left exactly at (panX, panY) within the clipping viewport — fit-and-
-        // center bakes the centering into pan.
-        transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
-        transformOrigin: "top left",
-        // PERF: while a pan gesture is in flight, promote the stage to its own
-        // compositor layer so each frame just re-composites a cached bitmap rather
-        // than REPAINTING the entire nested box tree (every box + texture). Dropped
-        // when idle so static/zoomed content rasterizes sharp (a pan never scales, so
-        // the promotion costs no sharpness during the gesture). See `interacting`.
-        willChange: interacting ? "transform" : undefined,
-        // The stage forms the root stacking context for the whole tree (`position:
-        // relative` + a numeric `z-index`). Its direct children are ranked among
-        // themselves by `layer` within it; each of those children in turn forms its
-        // own context for its subtree (the nested z-order model).
-        zIndex: 0,
-      }}
-    >
-      {content}
-    </div>
+    // The registry context reaches every box below (incl. pointer-events-none grid
+    // cells and mounted <Component> children) so they can register as tooltip providers.
+    <TooltipRegistryProvider value={registry}>
+      {/* The stage is the preview canvas: selection is by click (and later
+        drag/F7). Keyboard-driven selection is the tree panel's job (F9), so the
+        canvas intentionally has no key handler and is not a button/role. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: preview canvas selected by click; keyboard selection lives in the tree panel (F9) */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: preview canvas selected by click; keyboard selection lives in the tree panel (F9) */}
+      <div
+        ref={stageRef}
+        data-gui-stage=""
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={clearTooltip}
+        className="relative overflow-visible text-[#b9b2a5]"
+        style={{
+          position: "relative",
+          width: `${STAGE_WIDTH}px`,
+          height: `${STAGE_HEIGHT}px`,
+          // Solid stage (479). The 1280×768 stage is a flat, opaque artboard color —
+          // the blueprint graph-paper grid now lives BEHIND the stage, on the clipping
+          // viewport (see GuiPreviewHost), so the solid stage reads as an artboard
+          // sitting on a blueprint canvas. Rendered GUI boxes sit on top of this flat
+          // fill and stay legible. (Task 478 painted the grid ON the stage; 479 flips
+          // it back to a solid fill and moves the grid to the viewport backdrop.)
+          backgroundColor: "#1b1b1f",
+          // View transform (473): a single `translate(panX, panY) scale(scale)` on the
+          // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
+          // The transform belongs ONLY on the stage — a transform on an intermediate
+          // box would warp that box's child geometry and break the drag-delta math.
+          // `top left` origin makes the pan (in viewport screen px) place the stage's
+          // top-left exactly at (panX, panY) within the clipping viewport — fit-and-
+          // center bakes the centering into pan.
+          transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
+          transformOrigin: "top left",
+          // PERF: while a pan gesture is in flight, promote the stage to its own
+          // compositor layer so each frame just re-composites a cached bitmap rather
+          // than REPAINTING the entire nested box tree (every box + texture). Dropped
+          // when idle so static/zoomed content rasterizes sharp (a pan never scales, so
+          // the promotion costs no sharpness during the gesture). See `interacting`.
+          willChange: interacting ? "transform" : undefined,
+          // The stage forms the root stacking context for the whole tree (`position:
+          // relative` + a numeric `z-index`). Its direct children are ranked among
+          // themselves by `layer` within it; each of those children in turn forms its
+          // own context for its subtree (the nested z-order model).
+          zIndex: 0,
+        }}
+      >
+        {content}
+        {/* The tooltip overlay: inside the stage transform (scales with zoom),
+          pointer-events-none, on top. Only renders while a provider is hovered. */}
+        {tooltip ? (
+          <TooltipCard
+            src={tooltip.src}
+            data={tooltip.data}
+            anchor={tooltip.anchor}
+            palette={palette}
+          />
+        ) : null}
+      </div>
+    </TooltipRegistryProvider>
   );
 }
 

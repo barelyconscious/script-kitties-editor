@@ -47,7 +47,7 @@ import {
   Zap,
 } from "lucide-react";
 import { ContextMenu } from "radix-ui";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import {
   componentsVersion,
@@ -61,7 +61,15 @@ import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 import { collectTooltipBasenames, type Lint, lintTree, worstSeverity } from "./guiLints";
 import { interactionHandlerFields, nodeHasId, srcBasename } from "./guiProperties";
-import { allowedChildTags, findNode, makeChildNode, treeNodePrimaryLabel } from "./guiTreeEdit";
+import { type DropPlan, type DropZone, dropPlanForPointer } from "./guiTreeDnd";
+import {
+  allowedChildTags,
+  canMoveTo,
+  findNode,
+  makeChildNode,
+  nodePath,
+  treeNodePrimaryLabel,
+} from "./guiTreeEdit";
 
 /** Empty lint map reused for the no-open-component case (stable identity). */
 const NO_LINTS: ReadonlyMap<string, Lint[]> = new Map();
@@ -169,6 +177,78 @@ export function StructureTree() {
     [root, exportedFunctions, resolveTooltip],
   );
 
+  // ── Drag-and-drop re-parenting (task 513) ──────────────────────────────────
+  // Pointer-based (not HTML5 DnD — unreliable in WKWebView), mirroring the
+  // preview's drag-to-move: a press on a row body ARMS a gesture; only once the
+  // pointer crosses a small threshold does it become a drag (so a plain click
+  // still selects). All pointer handlers live on the scroll container (below);
+  // rows only carry a `data-tree-node-id` back-ref and render the affordance.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The live gesture: which node is (potentially) being dragged, where the press
+  // began, whether it has crossed the drag threshold, and its pointerId (for
+  // capture/release). A ref, not state — arming and threshold-tracking must not
+  // re-render the tree on every pointermove.
+  const gestureRef = useRef<{
+    nodeId: string;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
+  // The last LEGAL drop plan computed during the drag (or null over an illegal /
+  // empty spot), read on pointerup to commit — kept in a ref so pointerup sees the
+  // freshest value without depending on the async `dropTarget` state.
+  const planRef = useRef<DropPlan | null>(null);
+  // Swallow the click synthesized after a drag gesture so it doesn't re-run
+  // selection on whatever row the pointer came up over (mirrors the preview's
+  // suppressNextClick).
+  const suppressClickRef = useRef(false);
+  // Auto-scroll direction while dragging near the container's edges: -1 up, 0
+  // none, 1 down. Driven by a rAF loop so it keeps scrolling while the pointer is
+  // held still in the edge band (pointermove alone would stall).
+  const autoScrollRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  // The node being dragged (dims its row) and the current drop target row + zone
+  // (drives the insertion line / into-ring). State — these ARE visual.
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ nodeId: string; zone: DropZone } | null>(null);
+
+  // Tear down a gesture completely: release capture, stop auto-scroll, clear the
+  // refs and the visual state. Shared by pointerup, Escape, and unmount.
+  const endGesture = useCallback(() => {
+    const g = gestureRef.current;
+    if (g && scrollRef.current?.hasPointerCapture(g.pointerId)) {
+      scrollRef.current.releasePointerCapture(g.pointerId);
+    }
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    autoScrollRef.current = 0;
+    gestureRef.current = null;
+    planRef.current = null;
+    setDraggingNodeId(null);
+    setDropTarget(null);
+  }, []);
+
+  // Escape cancels an in-flight drag cleanly (no move dispatched); the trailing
+  // click is suppressed so the cancel doesn't also re-select. Only mounted while a
+  // drag is active.
+  useEffect(() => {
+    if (draggingNodeId === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        suppressClickRef.current = true;
+        endGesture();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [draggingNodeId, endGesture]);
+
+  // Safety net: if the tree unmounts mid-drag, release capture / cancel the rAF.
+  useEffect(() => endGesture, [endGesture]);
+
   if (!open) {
     return (
       <div className="flex flex-1 items-center justify-center p-4 text-center text-muted-foreground text-xs">
@@ -178,6 +258,143 @@ export function StructureTree() {
   }
 
   const selectedNodeId = state.selectedNodeId;
+  const rootNode = open.root;
+
+  // ── Drag choreography (thin; all zone/index math is in guiTreeDnd, all legality
+  //    in canMoveTo) ──────────────────────────────────────────────────────────
+  const DRAG_THRESHOLD = 4; // px the pointer must travel before a press becomes a drag
+  const AUTO_SCROLL_EDGE = 28; // px band at the container's top/bottom that auto-scrolls
+  const AUTO_SCROLL_SPEED = 8; // px/frame while in the edge band
+
+  const runAutoScroll = () => {
+    if (rafRef.current != null) return;
+    const step = () => {
+      const dir = autoScrollRef.current;
+      const el = scrollRef.current;
+      if (dir !== 0 && el) el.scrollTop += dir * AUTO_SCROLL_SPEED;
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+  };
+
+  // Set the auto-scroll direction from the pointer's proximity to the container's
+  // top/bottom edge (the rAF loop reads this each frame).
+  const updateAutoScroll = (clientY: number) => {
+    const el = scrollRef.current;
+    if (!el) {
+      autoScrollRef.current = 0;
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (clientY < rect.top + AUTO_SCROLL_EDGE) autoScrollRef.current = -1;
+    else if (clientY > rect.bottom - AUTO_SCROLL_EDGE) autoScrollRef.current = 1;
+    else autoScrollRef.current = 0;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Left button only — right-click falls through to the context menu, and a new
+    // press clears any stale click-suppression from a drag that ended off-tree.
+    if (e.button !== 0) return;
+    suppressClickRef.current = false;
+    const target = e.target as HTMLElement;
+    // Never initiate a drag from a control (collapse chevron, lock/visibility
+    // toggles, add-child button) — those own their own clicks.
+    if (target.closest("[data-no-drag]")) return;
+    const rowEl = target.closest<HTMLElement>("[data-tree-node-id]");
+    const nodeId = rowEl?.dataset.treeNodeId;
+    // The root <View> is never draggable (nothing may be its sibling).
+    if (!nodeId || nodeId === rootNode.nodeId) return;
+    gestureRef.current = {
+      nodeId,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      pointerId: e.pointerId,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = gestureRef.current;
+    if (!g) return;
+    // Promote press → drag only once the pointer clears the threshold, so a plain
+    // click (no movement) still selects.
+    if (!g.moved) {
+      if (Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < DRAG_THRESHOLD) return;
+      g.moved = true;
+      setDraggingNodeId(g.nodeId);
+      scrollRef.current?.setPointerCapture(g.pointerId);
+      runAutoScroll();
+    }
+    updateAutoScroll(e.clientY);
+    // Hit-test the row under the pointer (capture retargets events but not
+    // elementFromPoint). Affordance overlays are pointer-events-none so they don't
+    // shadow the row.
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const rowEl = el?.closest<HTMLElement>("[data-tree-node-id]") ?? null;
+    const targetId = rowEl?.dataset.treeNodeId;
+    if (!rowEl || !targetId) {
+      planRef.current = null;
+      setDropTarget(null);
+      return;
+    }
+    const targetNode = findNode(rootNode, targetId);
+    if (!targetNode) {
+      planRef.current = null;
+      setDropTarget(null);
+      return;
+    }
+    const path = nodePath(rootNode, targetId);
+    const parent = path && path.length >= 2 ? path[path.length - 2] : null;
+    const rect = rowEl.getBoundingClientRect();
+    const plan = dropPlanForPointer(
+      { top: rect.top, height: rect.height },
+      e.clientY,
+      targetNode,
+      parent,
+    );
+    // Legality lives entirely in canMoveTo — an illegal zone shows NO affordance
+    // and a pointerup there is a no-op.
+    if (!canMoveTo(rootNode, g.nodeId, plan.targetParentId)) {
+      planRef.current = null;
+      setDropTarget(null);
+      return;
+    }
+    planRef.current = plan;
+    setDropTarget((prev) =>
+      prev && prev.nodeId === targetId && prev.zone === plan.zone
+        ? prev
+        : { nodeId: targetId, zone: plan.zone },
+    );
+  };
+
+  const handlePointerUp = () => {
+    const g = gestureRef.current;
+    if (!g) return;
+    const moved = g.moved;
+    const plan = planRef.current;
+    endGesture();
+    if (!moved) return; // a plain click — let the row's select onClick run
+    // A drag happened: suppress the trailing click, and commit if we ended over a
+    // legal zone.
+    suppressClickRef.current = true;
+    if (plan) {
+      dispatch({
+        type: "moveNode",
+        nodeId: g.nodeId,
+        targetParentId: plan.targetParentId,
+        index: plan.index,
+      });
+      // Keep the moved node selected (its nodeId survives the move).
+      dispatch({ type: "select", nodeId: g.nodeId });
+    }
+  };
+
+  const handleClickCapture = (e: React.MouseEvent) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      e.stopPropagation();
+    }
+  };
 
   const handleAdd = (parentNodeId: string, tag: GuiTag) => {
     if (tag === "Component") {
@@ -240,7 +457,23 @@ export function StructureTree() {
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto py-1">
+    // The scroll container owns ALL drag pointer handlers (rows just carry a
+    // data-tree-node-id back-ref): pointerdown arms, pointermove promotes past the
+    // threshold + hit-tests, pointerup commits. `touch-none` so a touch drag isn't
+    // stolen by the browser's scroll gesture; `select-none` while dragging so the
+    // gesture doesn't paint a text selection across rows.
+    <div
+      ref={scrollRef}
+      className={cn(
+        "min-h-0 flex-1 touch-none overflow-y-auto py-1",
+        draggingNodeId !== null && "select-none",
+      )}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onClickCapture={handleClickCapture}
+    >
       <ul>
         <TreeRow
           node={open.root}
@@ -249,6 +482,8 @@ export function StructureTree() {
           lockedNodeIds={state.lockedNodeIds}
           hiddenNodeIds={state.hiddenNodeIds}
           lints={lints}
+          draggingNodeId={draggingNodeId}
+          dropTarget={dropTarget}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
           onAddHandler={handleAddHandler}
@@ -363,6 +598,10 @@ type TreeRowProps = {
   lockedNodeIds: Set<string>;
   hiddenNodeIds: Set<string>;
   lints: ReadonlyMap<string, Lint[]>;
+  /** The node currently being dragged (dims its row), or null when idle (task 513). */
+  draggingNodeId: string | null;
+  /** The active drop target row + zone, driving this row's affordance (task 513). */
+  dropTarget: { nodeId: string; zone: DropZone } | null;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onAddHandler: (nodeId: string, attr: string) => void;
@@ -378,6 +617,8 @@ function TreeRow({
   lockedNodeIds,
   hiddenNodeIds,
   lints,
+  draggingNodeId,
+  dropTarget,
   onSelect,
   onAdd,
   onAddHandler,
@@ -427,22 +668,51 @@ function TreeRow({
   // on every row, so the menu is always present.
   const hasMenu = true;
 
+  // Drag-and-drop (task 513): this row dims while it is the one being dragged, and
+  // shows the drop affordance (insertion line for before/after, into-ring) when it
+  // is the current drop target. `dropZone` is null unless THIS row is targeted.
+  const isDragging = node.nodeId === draggingNodeId;
+  const dropZone = dropTarget?.nodeId === node.nodeId ? dropTarget.zone : null;
+  // The insertion line indents to where the new sibling would sit (the row's own
+  // content offset), so before/after read at the right depth.
+  const indentRem = 0.25 + depth * INDENT_REM;
+
   return (
     <li>
       <ContextMenu.Root onOpenChange={setMenuOpen}>
         <ContextMenu.Trigger asChild>
           <div
+            // The drag back-ref: the container's pointer handlers hit-test rows by
+            // this id (task 513). The whole row is the drag handle (minus its
+            // controls, tagged data-no-drag) and, via the select button, selects.
+            data-tree-node-id={node.nodeId}
             // A row is selected by click and right-clicked to add. The whole row is
             // a button so keyboard focus + Enter selects it.
             className={cn(
-              "group flex w-full items-center py-0.5 pr-2 pl-1 text-left text-[13px] transition-colors hover:bg-muted/60",
+              "group relative flex w-full items-center py-0.5 pr-2 pl-1 text-left text-[13px] transition-colors hover:bg-muted/60",
               // A missing-id element tints the whole row a muted warning color (its
               // type icon is also swapped for a warning glyph below). Selection still
               // wins so the selected row reads clearly; an open right-click menu holds
               // the hover tint so the acted-on row stays visibly anchored.
               selected ? "bg-muted" : menuOpen ? "bg-muted/60" : missingId && "bg-amber-500/10",
+              // The dragged row dims for the duration of the gesture.
+              isDragging && "opacity-40",
+              // The into-target row gets a ring in the selection color family.
+              dropZone === "into" && "ring-2 ring-primary ring-inset",
             )}
           >
+            {/* Before/after insertion line — a 2px bar between rows, indented to the
+                row's content so it reads at the right depth. pointer-events-none so
+                it never shadows the row during hit-testing. */}
+            {(dropZone === "before" || dropZone === "after") && (
+              <div
+                className={cn(
+                  "pointer-events-none absolute right-0 z-10 h-0.5 bg-primary",
+                  dropZone === "before" ? "top-0" : "bottom-0",
+                )}
+                style={{ left: `${indentRem}rem` }}
+              />
+            )}
             {/* Indented row content. Lock/eye no longer occupy a far-left gutter; they
                 live in the right-hand affordance group (below) so the tree reclaims the
                 horizontal space, and the root `<View>` carries neither. */}
@@ -453,6 +723,7 @@ function TreeRow({
               {hasChildren ? (
                 <button
                   type="button"
+                  data-no-drag
                   aria-label={collapsed ? "Expand" : "Collapse"}
                   onClick={() => setCollapsed((c) => !c)}
                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
@@ -518,6 +789,7 @@ function TreeRow({
                 // reads at a glance without a dedicated left column.
                 <button
                   type="button"
+                  data-no-drag
                   aria-label={locked ? `Unlock ${tag}` : `Lock ${tag}`}
                   aria-pressed={locked}
                   title={
@@ -542,6 +814,7 @@ function TreeRow({
                 // its subtree from the preview.
                 <button
                   type="button"
+                  data-no-drag
                   aria-label={hidden ? `Show ${tag} in preview` : `Hide ${tag} from preview`}
                   aria-pressed={hidden}
                   title={
@@ -694,6 +967,8 @@ function TreeRow({
               lockedNodeIds={lockedNodeIds}
               hiddenNodeIds={hiddenNodeIds}
               lints={lints}
+              draggingNodeId={draggingNodeId}
+              dropTarget={dropTarget}
               onSelect={onSelect}
               onAdd={onAdd}
               onAddHandler={onAddHandler}
@@ -726,7 +1001,7 @@ function AddMenu({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0" data-no-drag>
       <button
         type="button"
         aria-label="Add child"

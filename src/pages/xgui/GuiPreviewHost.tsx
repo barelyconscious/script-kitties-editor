@@ -114,6 +114,23 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
   const [grabbing, setGrabbing] = useState(false);
   const [grabReady, setGrabReady] = useState(false);
 
+  // Fit-and-center the stage — but ONLY when the viewport is actually measurable
+  // (task 518). Xgui hides the inactive tab's pane with `display:none` while keeping
+  // this host MOUNTED, which collapses the viewport to 0x0. `fitView(0,0)` would bake
+  // a DEGENERATE transform (computeFitScale falls back to its tiny/1 scale and the
+  // centering pans go negative), and on unhide the browser PAINTS that one frame
+  // before the ResizeObserver re-fits to the real size — the "everything jumps to the
+  // top-left" flash. Guarding every fit call site on a >0 viewport means a hidden pane
+  // KEEPS its last good view; the first non-zero measure after unhide re-fits to the
+  // SAME value, so there is nothing to flash.
+  // Accepted edge: if the container is RESIZED while hidden (and the user hadn't
+  // adjusted), the first unhide frame shows the stale-but-valid transform before the
+  // observer's re-fit — a benign one-frame reflow, not the degenerate top-left flash.
+  const fitIfMeasurable = useCallback((el: HTMLElement | null) => {
+    if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
+    setView(fitView(el.clientWidth, el.clientHeight));
+  }, []);
+
   // Measure the viewport once and keep `view` reconciled with the container size.
   // On the FIRST measure (and any resize while the user hasn't adjusted) we fit and
   // center; once the user has zoomed/panned, a resize leaves their view untouched.
@@ -122,13 +139,13 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
     if (!el) return;
     const measure = () => {
       if (userAdjusted.current) return; // preserve the user's manual view across resizes
-      setView(fitView(el.clientWidth, el.clientHeight));
+      fitIfMeasurable(el);
     };
     measure();
     const obs = new ResizeObserver(measure);
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [fitIfMeasurable]);
 
   // Opening a DIFFERENT component re-fits and re-centers, clearing any manual view.
   // Keyed on the open component's STABLE identity (`open.path`), NOT the `root`
@@ -137,19 +154,20 @@ export function GuiPreviewHost({ root, model }: GuiPreviewHostProps) {
   // replaces `root`, so keying on `root` mis-reads any edit as "a component opened"
   // and snaps the view back to fit, discarding the user's zoom/pan. The path only
   // changes when a different file is opened, which is exactly "opened a component".
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit is keyed on the opened component's stable identity (openComponentKey), not the viewport ref/setter.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fit is keyed on the opened component's stable identity (openComponentKey), not the viewport ref or the stable fitIfMeasurable helper.
   useEffect(() => {
-    const el = viewportRef.current;
     userAdjusted.current = false;
-    if (el) setView(fitView(el.clientWidth, el.clientHeight));
+    // A component can be opened while a non-View tab is active (viewport hidden → 0x0).
+    // fitIfMeasurable bails on the 0-size measure and leaves the view; userAdjusted is
+    // cleared, so the observer's first non-zero measure after unhide performs the fit.
+    fitIfMeasurable(viewportRef.current);
   }, [openComponentKey]);
 
   // Reset to fit-and-center (the "Fit" control + the auto-fit default).
   const handleFit = useCallback(() => {
-    const el = viewportRef.current;
     userAdjusted.current = false;
-    if (el) setView(fitView(el.clientWidth, el.clientHeight));
-  }, []);
+    fitIfMeasurable(viewportRef.current);
+  }, [fitIfMeasurable]);
 
   // Zoom to exactly 100% (the "100%" control), keeping the viewport center fixed so
   // the jump is anchored on what the user is looking at rather than the top-left.

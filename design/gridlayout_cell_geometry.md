@@ -19,12 +19,27 @@ Three implementations disagreed on who controls a grid cell's geometry:
 | Concern | Owner |
 |---|---|
 | **Grid placement** | the **parent** element's `position`/`size`. The grid is a stamping macro, not an element — the parent's box *is* the grid's box. Want the grid moved/inset? Move the wrapper panel (which real screens have anyway — it's the container's chrome). |
-| **Cell size** | **`cellSize` on the `<GridLayout>`** — a full UDim2 (`cellSize="0,0,64,64"` = fixed pixels; `cellSize="0.25,0.5,0,0"` = proportional to the parent). **Absent → even area division** (current preview behavior). This is not a second mode: "explicit size, else fill your share" is the same convention every ordinary element already follows. Rel components resolve against the **parent** (the one unambiguous reference box). |
+| **Cell size** | **`cellSize` on the `<GridLayout>`** — a **literal pixel pair** `cellSize="w,h"` (matching `gutter="gx,gy"`'s format). **Absent → even area division** (current preview behavior). The split is clean: *proportional cells = omit cellSize* (area division is gutter-aware and fits the parent); *fixed cells = pixels* (extent emergent, may overflow — fine, no clipping). **REVISED 2026-07-06 (Matt):** the earlier full-UDim2 form is dropped — a rel component + gutters overflows the parent (`C·(rel·parentW) + (C−1)·g > parentW`), the gutter-shed the author actually wants is exactly what area division computes, so rel bought nothing and added a footgun. |
 | **Cell positions** | **grid-computed, always**: `index · (cell + gutter)` from the parent's content-box origin, rel/abs accumulating per axis exactly as `guiGridGeometry`'s existing axis math does. |
 | **Template geometry** | **none** — the template child owns appearance only. A `position`/`size` authored on a grid child is dead (the editor suppresses the fields; a lint nudges a stray `size` toward `cellSize` on the grid). |
 
 The layout knob family on `<GridLayout>` is therefore: `rows`, `columns`, `gutter`,
 `dataCollection`, `cellSize` — all layout policy on the one element that *is* the layout.
+
+## Grid structure is LITERAL-ONLY — no runtime bindings (locked, Matt 2026-07-06)
+
+`rows`, `columns`, `gutter`, and `cellSize` **cannot carry `{token}` bindings, and never
+will under this contract.** The reason is structural, not incidental: `AddGridLayout`
+stamps the template and bakes each cell's `Dim` **once, at load** — grid structure lives
+entirely outside the runtime binding system, and a bound structural attr would require
+re-stamping the subtree on model change (a different, unbuilt machine). Same class as
+`modal` (read pre-binding via `as_bool`). Only `dataCollection` is grammar — a scope
+path, resolved at stamp time.
+
+The editor makes this unmissable rather than silently wrong: the schema marks these
+fields literal-only (no token affordance), the preview parses them as literals (never
+through the binding resolver), and a `{token}` authored into any of the four is an
+ERROR lint ("grid structure is stamped at load — it cannot bind").
 
 ## Alternatives rejected
 
@@ -45,10 +60,10 @@ The layout knob family on `<GridLayout>` is therefore: `rows`, `columns`, `gutte
 
 ## Changes each side owes
 
-**Engine (`worlds-cpp`, Matt/engineer):** `XGridLayout::CellSize()` parse; replace the
-two hardcoded lines in `AddGridLayout` — `SetSize(resolved cellSize, default = parent
-share)`, position accumulates `(cellW+gx)·c` / `(cellH+gy)·r` with the rel/abs axis
-split. Small, contained.
+**Engine (`worlds-cpp`, Matt/engineer):** `XGridLayout::CellSize()` — a two-int parse
+like `Gutter()`; replace the two hardcoded lines in `AddGridLayout` — `SetSize(w,h)`
+(default = the parent-share division), position `((w+gx)·c, (h+gy)·r)`. Pure pixel
+math, no binding resolution. Small, contained.
 
 **Editor (this repo — task queued):** `cellSize` compound field on the GridLayout
 schema; `guiGridGeometry` gains the explicit-cellSize branch (absent → existing area

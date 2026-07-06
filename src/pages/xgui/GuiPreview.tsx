@@ -67,7 +67,6 @@ import {
 import {
   cellGeometry,
   cellGeometryFixed,
-  parseCellSize,
   parseGridDimension,
   parseGutter,
 } from "../../lib/guiGridGeometry";
@@ -583,12 +582,14 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
   // still draws its template chrome).
   const collection = resolveWholeTokenValue(node.attrs[DATA_COLLECTION_ATTR] ?? "", scope);
 
-  // An explicit `cellSize` switches the grid from area-division to FIXED pixel cells.
-  // It is a LITERAL pixel pair `"w,h"` — grid structure is stamped at load and cannot
-  // bind, so it is read RAW (never through the binding resolver; a `{token}` here is an
-  // ERROR lint). Absent/blank/invalid → area division, the historical default (see
+  // An explicit `cellSize` switches the grid from area-division to FIXED cells. It is a
+  // LITERAL full UDim2 `"relX,relY,absX,absY"` — grid structure is stamped at load and
+  // cannot bind, so it is read RAW (never through the binding resolver; a `{token}` here
+  // is an ERROR lint, and its fields fall back to 0 via parseUDim2 downstream).
+  // Absent/blank → area division, the historical default (see
   // design/gridlayout_cell_geometry.md).
-  const cellSize = parseCellSize(node.attrs.cellSize);
+  const cellSizeAttr = node.attrs.cellSize;
+  const cellSize = cellSizeAttr !== undefined && cellSizeAttr.trim() !== "" ? cellSizeAttr : null;
 
   const stamps = stampGrid(collection, rows, columns);
   const isComponentTemplate = template.tag === "Component";
@@ -601,7 +602,7 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
       {stamps.map((stamp) => {
         const geometry =
           cellSize !== null
-            ? cellGeometryFixed(stamp.index, columns, cellSize.w, cellSize.h, gutter.x, gutter.y)
+            ? cellGeometryFixed(stamp.index, columns, cellSize, gutter.x, gutter.y)
             : cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
         // Each cell binds the item as a composite scope OVER the View frame, so a
         // bare `{field}` reads the item while `{$.x}` still reaches the model. A

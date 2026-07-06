@@ -395,18 +395,20 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
       // grammar token (a bare key is unresolvable under the strict grammar).
       // rows/columns/gutter/cellSize are `literalOnly` LITERALS: grid structure is
       // stamped once at load, OUTSIDE the runtime binding system, so a `{token}` in any
-      // of them can never resolve (it is an ERROR lint). `cellSize` is a literal pixel
-      // pair `"w,h"` (matching `gutter`) that fixes each cell's size; absent/invalid, the
-      // grid divides its parent's content box evenly. Only `dataCollection` is grammar (a
-      // scope path resolved at stamp time). All of this is layout policy on the one
-      // element that IS the layout (design req 5 + design/gridlayout_cell_geometry.md,
-      // "Grid structure is LITERAL-ONLY").
+      // of them can never resolve (it is an ERROR lint). `cellSize` is a full UDim2
+      // `"relX,relY,absX,absY"` — the system's ONE dimension grammar, edited through the
+      // same four-input `compound` UI as `position`/`size` (literalOnly suppresses the
+      // per-field token affordance) — that fixes each cell's size; absent/blank, the grid
+      // divides its parent's content box evenly. Only `dataCollection` is grammar (a scope
+      // path resolved at stamp time). All of this is layout policy on the one element that
+      // IS the layout (design req 5 + design/gridlayout_cell_geometry.md, "Grid structure
+      // is LITERAL-ONLY").
       return [
         { name: "dataCollection", label: "dataCollection", kind: "binding" },
         { name: "rows", label: "rows", kind: "text", literalOnly: true },
         { name: "columns", label: "columns", kind: "text", literalOnly: true },
         { name: "gutter", label: "gutter", kind: "text", literalOnly: true },
-        { name: "cellSize", label: "cellSize", kind: "text", literalOnly: true },
+        { name: "cellSize", label: "cellSize", kind: "compound", literalOnly: true },
       ];
     default: {
       const _never: never = tag;

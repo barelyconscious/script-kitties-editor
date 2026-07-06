@@ -47,18 +47,20 @@
  *     system, so a bound structural attr never resolves). `dataCollection` is exempt —
  *     it IS grammar (a scope path resolved at stamp time). See
  *     design/gridlayout_cell_geometry.md, "Grid structure is LITERAL-ONLY".
- * 11. A present, non-empty, token-free `cellSize` on a GridLayout that isn't exactly a
- *     numeric pixel pair `"w,h"` → WARNING (it silently degrades to area division;
- *     {@link parseCellSize} returns null). The four-field UDim2 form (`"0,0,64,64"`)
- *     gets a did-you-mean suggesting the pixel pair. Doesn't double-fire with rule 10:
- *     a braced value errors there and is skipped here. See task 510.
+ * 11. A present, non-empty, token-free `cellSize` on a GridLayout with FEWER than four
+ *     comma fields → WARNING (`cellSize` is a full UDim2 `"relX,relY,absX,absY"`; a short
+ *     value is read by {@link parseUDim2} with the missing fields as 0, so a 2-field
+ *     `"64,64"` becomes a 6400%-rel cell, not 64px). A 2-field numeric value gets a
+ *     did-you-mean suggesting the UDim2 (`"64,64"` → `"0,0,64,64"`); other short counts
+ *     get a generic message. Four well-formed fields (blanks → 0) do NOT fire. Doesn't
+ *     double-fire with rule 10: a braced value errors there and is skipped here. See
+ *     design/gridlayout_cell_geometry.md.
  *
  * @see design/xgui_ta.md — interaction attributes; the ENGINE files cited in
  *   {@link import("../../lib/guiInteraction")} are the source of truth on disagreement.
  */
 
 import { isWholeToken, parseScopeRef } from "../../lib/guiBinding";
-import { parseCellSize } from "../../lib/guiGridGeometry";
 import {
   FOCUS_HANDLER_ATTRS,
   hasTooltip,
@@ -293,8 +295,8 @@ function gridStructureLints(node: GuiNode, out: Lint[]): void {
       });
       continue; // rule 11 doesn't double-fire on a token value that already errored.
     }
-    // Rule 11: a present, non-empty, token-free cellSize that isn't exactly a pixel pair.
-    if (attr === "cellSize" && parseCellSize(value) === null) {
+    // Rule 11: a present, non-empty, token-free cellSize with FEWER than four fields.
+    if (attr === "cellSize" && value.split(",").length < 4) {
       out.push({
         severity: "warning",
         attr,
@@ -305,20 +307,21 @@ function gridStructureLints(node: GuiNode, out: Lint[]): void {
 }
 
 /**
- * Rule 11's message for a malformed `cellSize`. A cellSize is a pixel pair `"w,h"`; a
- * value that doesn't parse as exactly two numbers renders zero-sized cells (it silently
- * falls back to area division after {@link parseCellSize} returns null). The common
- * mistake is the UDim2 FOUR-field form (`"0,0,64,64"`) authors reach for by muscle
- * memory — so a value that is exactly four numeric fields gets a did-you-mean pointing at
- * the last two (the absolute/pixel pair): `"a,b,w,h"` → suggest `"w,h"`.
+ * Rule 11's message for a short `cellSize`. A cellSize is a full UDim2
+ * `"relX,relY,absX,absY"` (four fields); a value with fewer fields is read by
+ * {@link parseUDim2} with the missing fields as 0, so it renders wrongly rather than as
+ * the author intended. The common mistake is the TWO-field pixel pair authors reach for
+ * by muscle memory (`"64,64"`, which becomes a 6400%-rel cell) — so an exactly-two
+ * numeric-field value gets a did-you-mean pointing at the full UDim2 (`"64,64"` →
+ * `"0,0,64,64"`, the fixed-pixel form). Other short counts get a generic message.
  */
 function malformedCellSizeMessage(value: string): string {
   const parts = value.split(",").map((p) => p.trim());
-  if (parts.length === 4 && parts.every((p) => p !== "" && Number.isFinite(Number(p)))) {
-    const suggestion = `${parts[2]},${parts[3]}`;
-    return `cellSize is a pixel pair "w,h" (e.g. "64,64") — this looks like a UDim2; did you mean "${suggestion}"?`;
+  if (parts.length === 2 && parts.every((p) => p !== "" && Number.isFinite(Number(p)))) {
+    const suggestion = `0,0,${parts[0]},${parts[1]}`;
+    return `cellSize is a UDim2 "relX,relY,absX,absY" — did you mean "${suggestion}"?`;
   }
-  return `cellSize must be a pixel pair "w,h" (e.g. "64,64").`;
+  return `cellSize is a UDim2 "relX,relY,absX,absY" (four comma fields) — this has ${parts.length}.`;
 }
 
 /** Rule 8: a bare grid-item token used outside any GridLayout subtree is likely a `$.` mistake. */

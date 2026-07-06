@@ -402,37 +402,42 @@ describe("grid structure literal-only lint (rule 10)", () => {
   });
 });
 
-describe("malformed cellSize lint (rule 11)", () => {
-  it("warns on the four-field UDim2 form with a did-you-mean pixel pair", () => {
-    const warn = find(lint(node("GridLayout", { cellSize: "0,0,64,64" })), "cellSize", "warning");
+describe("short cellSize lint (rule 11)", () => {
+  it("warns on a 2-field numeric value with a did-you-mean full UDim2", () => {
+    // cellSize is a full UDim2; "64,64" reads as rel fields (a 6400% cell), not 64px.
+    const warn = find(lint(node("GridLayout", { cellSize: "64,64" })), "cellSize", "warning");
     expect(warn).toBeDefined();
-    expect(warn?.message).toContain("looks like a UDim2");
-    expect(warn?.message).toContain('did you mean "64,64"');
+    expect(warn?.message).toContain("UDim2");
+    expect(warn?.message).toContain('did you mean "0,0,64,64"');
   });
 
-  it("pulls the actual abs fields into the four-field suggestion", () => {
-    const warn = find(lint(node("GridLayout", { cellSize: "0.5,0,32,48" })), "cellSize", "warning");
-    expect(warn?.message).toContain('did you mean "32,48"');
+  it("pulls the actual fields into the did-you-mean suggestion", () => {
+    const warn = find(lint(node("GridLayout", { cellSize: " 32 , 96 " })), "cellSize", "warning");
+    expect(warn?.message).toContain('did you mean "0,0,32,96"');
   });
 
   it.each([
     "64",
     ",48",
     "abc,5",
-    "64,64,",
-  ])("warns generically on another malformed value (%s)", (value) => {
+    "64,64,64", // three fields
+  ])("warns generically on another short/malformed value (%s)", (value) => {
     const warn = find(lint(node("GridLayout", { cellSize: value })), "cellSize", "warning");
     expect(warn).toBeDefined();
-    expect(warn?.message).toContain('pixel pair "w,h"');
-    expect(warn?.message).not.toContain("UDim2");
+    expect(warn?.message).toContain("four comma fields");
+    expect(warn?.message).not.toContain("did you mean");
   });
 
-  it("does NOT fire on a valid pixel pair", () => {
+  it("does NOT fire on a well-formed four-field UDim2 (incl. blanks → 0)", () => {
     expect(
-      find(lint(node("GridLayout", { cellSize: "64,64" })), "cellSize", "warning"),
+      find(lint(node("GridLayout", { cellSize: "0,0,64,64" })), "cellSize", "warning"),
     ).toBeUndefined();
     expect(
-      find(lint(node("GridLayout", { cellSize: " 32 , 96 " })), "cellSize", "warning"),
+      find(lint(node("GridLayout", { cellSize: "0.25,0.25,0,0" })), "cellSize", "warning"),
+    ).toBeUndefined();
+    // Blank fields are well-formed (parseUDim2 reads them as 0) — four fields, no warning.
+    expect(
+      find(lint(node("GridLayout", { cellSize: "0,0,,64" })), "cellSize", "warning"),
     ).toBeUndefined();
   });
 
@@ -444,18 +449,19 @@ describe("malformed cellSize lint (rule 11)", () => {
   it("does NOT double-fire with rule 10 on a token value (rule 10 errors; rule 11 stays silent)", () => {
     const lints = lint(node("GridLayout", { cellSize: "{w},{h}" }));
     expect(find(lints, "cellSize", "error")).toBeDefined();
-    // No rule-11 "pixel pair" warning on a value rule 10 already errored on. (A separate
-    // bare-token warning may still fire — that's rule 8, not this rule.)
-    const pixelPairWarn = lints.find(
-      (l) => l.attr === "cellSize" && l.severity === "warning" && l.message.includes("pixel pair"),
+    // No rule-11 "four comma fields" warning on a value rule 10 already errored on. (A
+    // separate bare-token warning may still fire — that's rule 8, not this rule.)
+    const shortWarn = lints.find(
+      (l) =>
+        l.attr === "cellSize" &&
+        l.severity === "warning" &&
+        l.message.includes("four comma fields"),
     );
-    expect(pixelPairWarn).toBeUndefined();
+    expect(shortWarn).toBeUndefined();
   });
 
   it("only fires on a GridLayout element, not other tags", () => {
-    expect(
-      find(lint(node("Panel", { cellSize: "0,0,64,64" })), "cellSize", "warning"),
-    ).toBeUndefined();
+    expect(find(lint(node("Panel", { cellSize: "64,64" })), "cellSize", "warning")).toBeUndefined();
   });
 });
 

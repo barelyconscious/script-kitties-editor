@@ -499,7 +499,11 @@ function FieldControl({
       // entry per character.
       return <BindingField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
-      return <CompoundField name={name} value={value} onSet={onSet} />;
+      // `literalOnly` (grid `cellSize`) drops the per-field {token} affordance — grid
+      // structure is stamped at load, so a token can never bind (it is an ERROR lint).
+      return (
+        <CompoundField name={name} value={value} onSet={onSet} literalOnly={field.literalOnly} />
+      );
     case "color":
       return <ColorField name={name} value={value} onSet={onSet} />;
     case "sprite":
@@ -648,15 +652,21 @@ const boundInputClass = "border-sky-500/60 bg-sky-500/10 font-mono text-sky-300"
  * `position`/`size` as four labeled inputs (scale-x, scale-y, offset-x,
  * offset-y). Each field accepts a literal OR a `{token}`; bound fields are
  * styled distinctly. The serialized attr stays the comma form.
+ *
+ * When `literalOnly` is set (grid `cellSize`, whose structure is stamped at load and
+ * cannot bind), each field drops the `{token}` affordance — no bound styling, and the
+ * placeholder advertises "literal only" — mirroring the literal-only text field.
  */
 function CompoundField({
   name,
   value,
   onSet,
+  literalOnly,
 }: {
   name: string;
   value: string;
   onSet: (name: string, value: string) => void;
+  literalOnly?: boolean;
 }) {
   const fields = parseCompound(value);
   const setField = (key: keyof CompoundFields, fieldValue: string) => {
@@ -672,9 +682,12 @@ function CompoundField({
             <Input
               value={fieldValue}
               onChange={(e) => setField(key, e.currentTarget.value)}
-              placeholder="0 or {token}"
+              placeholder={literalOnly ? "0" : "0 or {token}"}
               aria-label={label}
-              className={cn("h-7 text-xs", isBoundField(fieldValue) && boundInputClass)}
+              className={cn(
+                "h-7 text-xs",
+                !literalOnly && isBoundField(fieldValue) && boundInputClass,
+              )}
             />
           </div>
         );

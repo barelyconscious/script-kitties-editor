@@ -323,7 +323,7 @@ describe("resolveAttrs (whole node bag)", () => {
       {
         text: "HP {health}",
         backgroundColor: "Accent",
-        textColor: "{missingColor}",
+        color: "{missingColor}",
         size: "{missingRatio},1,0,0",
       },
       scope,
@@ -331,9 +331,9 @@ describe("resolveAttrs (whole node bag)", () => {
     );
     expect(result.attrs.text).toBe("HP 15");
     expect(result.attrs.backgroundColor).toBe("255,210,40,255");
-    expect(result.attrs.textColor).toBe("{missingColor}");
+    expect(result.attrs.color).toBe("{missingColor}");
     expect(result.attrs.size).toBe("{missingRatio},1,0,0");
-    expect([...result.unresolved].sort()).toEqual(["size", "textColor"]);
+    expect([...result.unresolved].sort()).toEqual(["color", "size"]);
   });
 
   it("preserves all keys and reports no unresolved when fully bound", () => {

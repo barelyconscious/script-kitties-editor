@@ -223,7 +223,7 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
         { name: "position", label: "position", kind: "compound" },
         { name: "size", label: "size", kind: "compound" },
         { name: "text", label: "text", kind: "text" },
-        { name: "textColor", label: "Text Color", kind: "color" },
+        { name: "color", label: "Text Color", kind: "color" },
         { name: "textAlign", label: "Text Align", kind: "text" },
         { name: "fontSize", label: "Font Size", kind: "text" },
         { name: "visible", label: "Visible", kind: "boolean" },

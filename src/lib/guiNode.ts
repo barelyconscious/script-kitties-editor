@@ -187,6 +187,40 @@ function tokenize(xml: string): Token[] {
 }
 
 /**
+ * Auto-migrate legacy attribute names at parse time.
+ *
+ * The editor historically wrote `textColor` on `<Text>` — but that was a typo:
+ * the shipped C++ engine reads `color` for every widget (`GUILoader.cpp:713`),
+ * so an authored `textColor` is silently dropped in-game. We rewrite it to
+ * `color` here (preserving its authored position) so a loaded component upgrades
+ * on its next save, and emit a WARN-ONLY lint so any straggler in the live gui
+ * tree — which isn't visible from this repo — is surfaced rather than dropped
+ * silently. If a node somehow carries both, the authored `color` wins and the
+ * legacy `textColor` is discarded.
+ */
+function normalizeLegacyAttrs(tag: string, attrs: Record<string, string>): Record<string, string> {
+  if (!("textColor" in attrs)) return attrs;
+
+  const idPart = attrs.id ? ` id="${attrs.id}"` : "";
+  console.warn(
+    `[xgui] <${tag}${idPart}> uses legacy "textColor"; the engine reads "color". ` +
+      'Migrating to "color" — save the component to persist the fix.',
+  );
+
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "textColor") {
+      // Slot `color` into `textColor`'s position — unless an authored `color`
+      // already exists, in which case keep that and drop the legacy alias.
+      if (!("color" in attrs)) next.color = value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
  * Parse XML text into a GuiNode tree.
  *
  * Mints a fresh session-only `nodeId` per node and stores every attribute as a
@@ -241,7 +275,7 @@ export function parseGui(xml: string): GuiNode {
     const node: GuiNode = {
       nodeId: mintNodeId(),
       tag,
-      attrs: token.attrs,
+      attrs: normalizeLegacyAttrs(tag, token.attrs),
       children: [],
     };
 

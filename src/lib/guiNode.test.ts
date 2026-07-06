@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type GuiNode, GuiParseError, mintNodeId, parseGui, serializeGui } from "./guiNode";
 
 /**
@@ -113,11 +113,11 @@ describe("parseGui + serializeGui round-trip", () => {
 describe("attrs are raw, verbatim strings", () => {
   it("stores {token}, palette names, and comma-strings untouched", () => {
     const root = parseGui(`<View>
-      <Text id="money" text="{money}" textColor="TextDefault" position="1,0,0,5"/>
+      <Text id="money" text="{money}" color="TextDefault" position="1,0,0,5"/>
     </View>`);
     const text = root.children[0];
     expect(text.attrs.text).toBe("{money}");
-    expect(text.attrs.textColor).toBe("TextDefault");
+    expect(text.attrs.color).toBe("TextDefault");
     expect(text.attrs.position).toBe("1,0,0,5");
   });
 
@@ -139,6 +139,50 @@ describe("attrs are raw, verbatim strings", () => {
     expect(serialized).toContain(`text="a &lt; b &amp; c &gt; d &quot;q&quot;"`);
     // And it parses back to the same decoded value.
     expect(parseGui(serialized).children[0].attrs.text).toBe('a < b & c > d "q"');
+  });
+});
+
+describe("legacy attribute migration (textColor -> color)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rewrites textColor to color at parse time", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = parseGui(`<View><Text id="hp" textColor="255,0,0,255"/></View>`);
+    const text = root.children[0];
+    expect(text.attrs.color).toBe("255,0,0,255");
+    expect("textColor" in text.attrs).toBe(false);
+  });
+
+  it("preserves the authored attribute position when migrating", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const xml = `<View><Text text="{n}" textColor="TextDefault" fontSize="18"/></View>`;
+    const serialized = serializeGui(parseGui(xml));
+    expect(serialized).toContain(`<Text text="{n}" color="TextDefault" fontSize="18"/>`);
+  });
+
+  it("emits a warn-only lint flagging the residual textColor", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    parseGui(`<View><Text id="hp" textColor="255,0,0,255"/></View>`);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("textColor");
+    expect(warn.mock.calls[0][0]).toContain(`id="hp"`);
+  });
+
+  it("keeps an authored color and drops the legacy textColor when both exist", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = parseGui(`<View><Text color="1,1,1,255" textColor="9,9,9,255"/></View>`);
+    const text = root.children[0];
+    expect(text.attrs.color).toBe("1,1,1,255");
+    expect("textColor" in text.attrs).toBe(false);
+  });
+
+  it("does not warn or alter nodes without textColor", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = parseGui(`<View><Text color="1,1,1,255"/></View>`);
+    expect(root.children[0].attrs.color).toBe("1,1,1,255");
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

@@ -77,7 +77,7 @@ function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
 }
 
-/** Default text color when `textColor` is absent (design default). */
+/** Default text color when `color` is absent (design default). */
 const DEFAULT_TEXT_COLOR = "185,178,165,255";
 
 /** Map a resolved `textAlign` value to its CSS `text-align`. */
@@ -265,7 +265,7 @@ const GuiBox = memo(function GuiBox({
   // intentional per-box stacking context supersedes the old "no z-index on
   // wrappers" rule: nesting the contexts is exactly the desired grouping.)
   const zIndex = zOrder.get(boxKey);
-  const textColor = isText ? colorCodeToCss(attrs.textColor ?? DEFAULT_TEXT_COLOR) : undefined;
+  const textColor = isText ? colorCodeToCss(attrs.color ?? DEFAULT_TEXT_COLOR) : undefined;
   const fontSize = isText ? Number(attrs.fontSize) : Number.NaN;
 
   // Highlight via outline + box-shadow ONLY (drawn in-flow, no extra DOM). Avoid

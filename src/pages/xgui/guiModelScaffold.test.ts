@@ -31,7 +31,7 @@ describe("extractShape — token kinds", () => {
     const shape = extractShape(
       tree(
         '<View><Panel backgroundColor="{barColor}" visible="{isOpen}" fontSize="{fs}" ' +
-          'borderColor="{bc}" borderSize="{bs}" textColor="{tc}" textAlign="{ta}" ' +
+          'borderColor="{bc}" borderSize="{bs}" color="{tc}" textAlign="{ta}" ' +
           'layer="{lyr}" id="literalId" controller="ctrl"/></View>',
       ),
     );

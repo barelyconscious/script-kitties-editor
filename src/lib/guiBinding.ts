@@ -218,7 +218,7 @@ export function resolveTypedProp(raw: string, scope: ResolveScope): Resolved {
 }
 
 /**
- * Resolve a COLOR property (`backgroundColor`, `borderColor`, `textColor`) to an
+ * Resolve a COLOR property (`backgroundColor`, `borderColor`, `color`) to an
  * `r,g,b,a` code string, applying the full three-step rule:
  *
  *   1. `{token}` → bind from the model (whole-value). The bound value is taken as
@@ -339,7 +339,7 @@ export function resolveCompoundProp(raw: string, scope: ResolveScope): Resolved 
  * The set of attribute names that are COLOR-typed — resolved via the palette
  * three-step rule rather than as plain typed values.
  */
-const COLOR_PROPS = new Set(["backgroundColor", "borderColor", "textColor"]);
+const COLOR_PROPS = new Set(["backgroundColor", "borderColor", "color"]);
 
 /** The set of attribute names that are STRING-typed — interpolation, not whole-value. */
 const STRING_PROPS = new Set(["text", "texture"]);

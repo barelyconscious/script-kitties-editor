@@ -149,10 +149,10 @@ describe("fieldsForTag", () => {
     expect(names).toContain("borderColor");
   });
 
-  it("gives Text a textColor and text field", () => {
+  it("gives Text a color and text field", () => {
     const names = fieldsForTag("Text").map((f) => f.name);
     expect(names).toContain("text");
-    expect(names).toContain("textColor");
+    expect(names).toContain("color");
   });
 
   it("does not list id or src among schema fields (handled specially)", () => {

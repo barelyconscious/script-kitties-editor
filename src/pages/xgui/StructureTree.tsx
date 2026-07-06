@@ -36,6 +36,7 @@ import {
   Lock,
   type LucideIcon,
   MonitorPlay,
+  OctagonAlert,
   Plug,
   Plus,
   Pointer,
@@ -46,14 +47,68 @@ import {
   Zap,
 } from "lucide-react";
 import { ContextMenu } from "radix-ui";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
+import {
+  componentsVersion,
+  loadComponentTree,
+  subscribeComponents,
+} from "../../lib/guiComponentCache";
 import { hasFocusHandlers, isHitTestable, isModal } from "../../lib/guiInteraction";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
+import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
-import { nodeHasId } from "./guiProperties";
+import { collectTooltipBasenames, type Lint, lintTree, worstSeverity } from "./guiLints";
+import { nodeHasId, srcBasename } from "./guiProperties";
 import { allowedChildTags, findNode, makeChildNode, treeNodePrimaryLabel } from "./guiTreeEdit";
+
+/** Empty lint map reused for the no-open-component case (stable identity). */
+const NO_LINTS: ReadonlyMap<string, Lint[]> = new Map();
+
+/**
+ * Resolve the tooltip components referenced anywhere in `root` to their parsed
+ * roots, for the tooltip lints (rules 5–6). Fetches each referenced basename via
+ * the shared {@link loadComponentTree} module cache (so it never double-fetches a
+ * child the preview already pulled) and re-fetches on cache invalidation. Returns a
+ * lookup `(tooltipRef) => root | null` keyed by the `.xml`-stripped basename; a
+ * still-loading or missing component reads as `null`, which skips its tooltip lints.
+ */
+function useTooltipComponentRoots(root: GuiNode | null): (tooltipRef: string) => GuiNode | null {
+  const version = useSyncExternalStore(subscribeComponents, componentsVersion);
+  // A stable string key so the effect only re-runs when the SET of referenced
+  // tooltip basenames actually changes (not on every unrelated tree edit).
+  const basenamesKey = useMemo(
+    () => (root ? collectTooltipBasenames(root).join("\n") : ""),
+    [root],
+  );
+  const [roots, setRoots] = useState<ReadonlyMap<string, GuiNode>>(() => new Map());
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger — when invalidateComponents() bumps it the effect must re-run against the cleared cache, even though the body doesn't read it (matches useComponent in guiComponentCache)
+  useEffect(() => {
+    const basenames = basenamesKey === "" ? [] : basenamesKey.split("\n");
+    if (basenames.length === 0) {
+      setRoots(new Map());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const next = new Map<string, GuiNode>();
+      await Promise.all(
+        basenames.map(async (basename) => {
+          const tree = await loadComponentTree(basename);
+          if (tree) next.set(basename, tree);
+        }),
+      );
+      if (!cancelled) setRoots(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [basenamesKey, version]);
+
+  return useCallback((ref: string) => roots.get(srcBasename(ref)) ?? null, [roots]);
+}
 
 /**
  * Per-tag accent color, shared by a row's type icon and its identity label so the
@@ -94,9 +149,25 @@ const TAG_ICON: Record<GuiTag, LucideIcon> = {
 export function StructureTree() {
   const { state, dispatch } = useEditorStore();
   const open = state.open;
+  const root = open?.root ?? null;
   // The parent a Component is being added under, while the picker is open. `null`
   // means the picker is closed.
   const [pickerParentId, setPickerParentId] = useState<string | null>(null);
+
+  // Interaction lints (task 506), computed off the raw tree and surfaced as per-row
+  // badges (the same treatment as the missing-id warning). The controller's exported
+  // functions drive the handler-exists lint (null until the controller text loads —
+  // eagerly on open, #506); referenced tooltip components drive the tooltip lints.
+  const resolveTooltip = useTooltipComponentRoots(root);
+  const exportedFunctions = useMemo(
+    () => (open?.controllerText != null ? exportedFunctionNames(open.controllerText) : null),
+    [open?.controllerText],
+  );
+  const lints = useMemo(
+    () =>
+      root ? lintTree(root, { exportedFunctions, resolveComponent: resolveTooltip }) : NO_LINTS,
+    [root, exportedFunctions, resolveTooltip],
+  );
 
   if (!open) {
     return (
@@ -152,6 +223,7 @@ export function StructureTree() {
           selectedNodeId={selectedNodeId}
           lockedNodeIds={state.lockedNodeIds}
           hiddenNodeIds={state.hiddenNodeIds}
+          lints={lints}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
           onRemove={handleRemove}
@@ -228,6 +300,33 @@ function InteractionBadges({ node }: { node: GuiNode }) {
   );
 }
 
+/**
+ * The interaction-lint badge for one tree row (task 506): a single icon reflecting
+ * the WORST severity among the node's lints — a red {@link OctagonAlert} when any
+ * lint is an error, an amber {@link TriangleAlert} when there are only warnings — with
+ * a `title` listing every message. Renders nothing for a clean node. Advisory only:
+ * these never block a save.
+ */
+function LintBadge({ lints }: { lints: readonly Lint[] }) {
+  const severity = worstSeverity(lints);
+  if (severity === null) return null;
+  const isError = severity === "error";
+  const Icon = isError ? OctagonAlert : TriangleAlert;
+  const title = lints
+    .map((l) => `${l.severity === "error" ? "Error" : "Warning"}: ${l.message}`)
+    .join("\n");
+  return (
+    <span
+      role="img"
+      aria-label={isError ? "Interaction errors" : "Interaction warnings"}
+      title={title}
+      className={cn("shrink-0", isError ? "text-red-500" : "text-amber-500")}
+    >
+      <Icon className="size-3" />
+    </span>
+  );
+}
+
 /** Indentation step per tree level, in rem. */
 const INDENT_REM = 0.75;
 
@@ -237,6 +336,7 @@ type TreeRowProps = {
   selectedNodeId: string | null;
   lockedNodeIds: Set<string>;
   hiddenNodeIds: Set<string>;
+  lints: ReadonlyMap<string, Lint[]>;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onRemove: (nodeId: string) => void;
@@ -250,6 +350,7 @@ function TreeRow({
   selectedNodeId,
   lockedNodeIds,
   hiddenNodeIds,
+  lints,
   onSelect,
   onAdd,
   onRemove,
@@ -275,6 +376,9 @@ function TreeRow({
   // lights up for imported components or an id the user deliberately cleared — which
   // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
   const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
+  // Interaction lints on this node (task 506) — rendered as a badge beside the
+  // engine-capability badges. Never blocks anything; purely advisory.
+  const nodeLints = lints.get(node.nodeId) ?? [];
   const addable = allowedChildTags(node);
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
@@ -368,6 +472,12 @@ function TreeRow({
                   visible (like the missing-id warning), muted so they don't compete
                   with the identity label or the actionable lock/hide/add affordances. */}
               <InteractionBadges node={node} />
+
+              {/* Interaction-lint badge (task 506): a red octagon for any error, an
+                  amber triangle for warnings only. The tooltip lists every message.
+                  Distinct from the missing-id warning (which owns the type-icon slot)
+                  so a node can surface both. Advisory only — never blocks a save. */}
+              <LintBadge lints={nodeLints} />
 
               {canToggle && (
                 // Lock toggle — a right-side affordance. Unlocked: muted, hover-only.
@@ -518,6 +628,7 @@ function TreeRow({
               selectedNodeId={selectedNodeId}
               lockedNodeIds={lockedNodeIds}
               hiddenNodeIds={hiddenNodeIds}
+              lints={lints}
               onSelect={onSelect}
               onAdd={onAdd}
               onRemove={onRemove}

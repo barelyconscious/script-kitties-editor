@@ -41,11 +41,13 @@ import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
   emptyItemScope,
-  flatRootScope,
+  gridItemScope,
   type Palette,
   type ResolvedAttrs,
   type ResolveScope,
   resolveAttrs,
+  resolveWholeTokenValue,
+  viewScope,
 } from "../../lib/guiBinding";
 import { type ComponentEntry, useComponent } from "../../lib/guiComponentCache";
 import {
@@ -107,9 +109,10 @@ type GuiBoxProps = {
   node: GuiNode;
   selectedNodeId: string | null;
   /**
-   * The flat scope this box renders in. Bare tokens resolve against the single
-   * model object (see {@link flatRootScope}). The stage passes the root model's
-   * scope; a mounted `<Component>` builds a fresh scope from its overrides.
+   * The scope this box renders in. `{$.x}` bindings resolve against the View frame
+   * (see {@link viewScope}); a GridLayout child renders against a
+   * {@link gridItemScope} composed over it. The stage passes the root View scope; a
+   * mounted `<Component>` builds a fresh View scope from its `data=`/overrides.
    */
   scope: ResolveScope;
   palette: Palette;
@@ -377,7 +380,8 @@ type ComponentMountProps = {
    * GRID CELL only: the grid item to seat as the mounted child's FULL fresh root,
    * bypassing `data=`/override resolution (locked decision). `undefined` → ordinary
    * mount (F6a child-root from data=/overrides). A present `{ item }` (even a `null`
-   * item) makes the child resolve against `flatRootScope(item)`.
+   * item) makes the child resolve against `viewScope(item)` (the item is the child
+   * View's own model, so its `{$.x}` bindings read it).
    */
   rootOverride?: { item: unknown };
 };
@@ -396,8 +400,8 @@ type ComponentMountProps = {
  *   2. {@link useComponent} fetches+parses the child. While loading, render nothing
  *      (no placeholder flash). On `missing` (absent / broken / unparseable) render
  *      the shared placeholder. On `ok`, mount the child subtree.
- *   3. The child mounts in a FRESH scope built from the parent-pre-resolved
- *      overrides (F6a): `flatRootScope(resolveChildRoot(...))`. The parent scope
+ *   3. The child mounts in a FRESH View scope built from the parent-pre-resolved
+ *      `data=`/overrides (F6a): `viewScope(resolveChildRoot(...))`. The parent scope
  *      does NOT cross the boundary — the child sees ONLY its props.
  *
  * The mounted child gets its OWN z-order map (its boxes' `layer`s order them among
@@ -434,11 +438,11 @@ function ComponentMount({
   );
   // A null grid item (an empty cell) uses emptyItemScope() so the mounted child's
   // {token}s resolve to "" with no waiting affordance — matching the non-Component
-  // cell path (caveat 5). flatRootScope(null) would MISS every token and paint the
-  // amber waiting state. Everything else resolves against the item as a flat root.
+  // cell path (caveat 5). viewScope(null) would MISS every token and paint the
+  // amber waiting state. Everything else seats the item as the child's fresh View
+  // frame, so the child's own `{$.x}` bindings read it.
   const childScope = useMemo(
-    () =>
-      rootOverride && rootOverride.item === null ? emptyItemScope() : flatRootScope(childRoot),
+    () => (rootOverride && rootOverride.item === null ? emptyItemScope() : viewScope(childRoot)),
     [rootOverride, childRoot],
   );
   // The child mounts as its own little stage: its boxes are positioned/ordered within
@@ -494,15 +498,16 @@ function ComponentMount({
   );
 }
 
-/** The attribute naming a GridLayout's iterable collection (a bare ROOT model key). */
+/** The attribute naming a GridLayout's iterable collection (a whole `{token}`, e.g. `{$.creatures}`). */
 const DATA_COLLECTION_ATTR = "dataCollection";
 
 type GridLayoutExpansionProps = {
   /** The `<GridLayout>` node — its single child is the cell TEMPLATE. */
   node: GuiNode;
   /**
-   * The flat scope the grid resolves `dataCollection` against. Grids cannot nest and
-   * nothing else pushes scope, so this is effectively the ROOT model scope.
+   * The scope the grid resolves `dataCollection` against — the enclosing View frame.
+   * Each cell renders against a {@link gridItemScope} composed OVER this scope, so a
+   * cell's bare `{field}` reads the item while `{$.x}` still reaches this View frame.
    */
   scope: ResolveScope;
   palette: Palette;
@@ -520,12 +525,15 @@ type GridLayoutExpansionProps = {
  *
  *   - `rows`/`columns` parse via {@link parseGridDimension} (default 1; an explicit
  *     `0` warns and renders nothing — no slots);
- *   - `dataCollection` resolves as a BARE ROOT KEY against the flat scope;
+ *   - `dataCollection` resolves as a whole `{token}` (e.g. `{$.creatures}`) against
+ *     the enclosing View scope;
  *   - {@link stampGrid} produces EXACTLY rows×columns descriptors (excess collection
  *     entries dropped; missing → `null` item);
  *   - each cell renders the template node with geometry from {@link cellGeometry}
- *     (the template's OWN position/size are ignored), against a flat scope built from
- *     the cell's item (a `null` item → empty scope, so every `{token}` resolves to "");
+ *     (the template's OWN position/size are ignored), against a {@link gridItemScope}
+ *     composing the cell's item OVER the View frame — so bare `{field}` reads the item
+ *     and `{$.x}` still reaches the model (a `null` item → empty scope, so every
+ *     `{token}` resolves to "");
  *   - cells carry NO `data-node-id` and live under a `pointer-events-none` wrapper, so
  *     a click/drag falls through to the GridLayout's parent box (cells are never
  *     individually selectable — locked decision Q4);
@@ -563,11 +571,11 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
   const columns = colsDim.value;
   const gutter = parseGutter(node.attrs.gutter);
 
-  // `dataCollection` is a bare ROOT key (no `{}`) — look it up directly in the flat
-  // scope (mirrors the `data=` resolution for nested components). A miss / non-array
-  // value yields all-`null` cells (the grid still draws its template chrome).
-  const collectionKey = (node.attrs[DATA_COLLECTION_ATTR] ?? "").trim();
-  const collection = collectionKey === "" ? undefined : scope.lookup(collectionKey);
+  // `dataCollection` is a whole `{token}` (e.g. `{$.creatures}`) — resolve it as a
+  // bound value in the enclosing View scope (mirrors the `data=` resolution for
+  // nested components). A miss / non-array value yields all-`null` cells (the grid
+  // still draws its template chrome).
+  const collection = resolveWholeTokenValue(node.attrs[DATA_COLLECTION_ATTR] ?? "", scope);
 
   const stamps = stampGrid(collection, rows, columns);
   const isComponentTemplate = template.tag === "Component";
@@ -579,12 +587,13 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
     <div className="pointer-events-none absolute inset-0">
       {stamps.map((stamp) => {
         const geometry = cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
-        // Each cell binds the item as a FRESH flat scope. A `null` item (an empty
-        // cell) uses emptyItemScope() so every {token} resolves to "" with
-        // resolved: true — the template chrome renders literally with NO waiting
-        // affordance (caveat 5). flatRootScope(null) would instead MISS every token
-        // and paint the amber waiting state, which an empty cell must not show.
-        const cellScope = stamp.item === null ? emptyItemScope() : flatRootScope(stamp.item);
+        // Each cell binds the item as a composite scope OVER the View frame, so a
+        // bare `{field}` reads the item while `{$.x}` still reaches the model. A
+        // `null` item (an empty cell) uses emptyItemScope() so every {token} resolves
+        // to "" with resolved: true — the template chrome renders literally with NO
+        // waiting affordance (caveat 5). gridItemScope(null, …) would instead MISS a
+        // bare token and paint the amber waiting state, which an empty cell must not show.
+        const cellScope = stamp.item === null ? emptyItemScope() : gridItemScope(stamp.item, scope);
         return (
           <GuiBox
             // Distinct per-cell React key (the template node id repeats across cells).
@@ -729,10 +738,11 @@ function nodeIdAtPoint(
  * {@link nodeIdAtPoint} (locked boxes are click-through) — the one piece that needs
  * a browser — and the resulting node id is handed to `onSelect`.
  *
- * A flat {@link ResolveScope} is built from `model` once (see
- * {@link flatRootScope}) and threaded down to every box; each box resolves its
- * bare tokens against that single model. A mounted `<Component>` builds its own
- * fresh scope from its overrides at the boundary.
+ * A {@link ResolveScope} for the `<View>` frame is built from `model` once (see
+ * {@link viewScope}) and threaded down to every box; each box resolves its `{$.x}`
+ * bindings against that model. A GridLayout child layers a {@link gridItemScope}
+ * over it (bare `{field}` → item); a mounted `<Component>` builds its own fresh View
+ * scope from its `data=`/overrides at the boundary.
  */
 export function GuiPreview({
   root,
@@ -748,11 +758,11 @@ export function GuiPreview({
   interacting = false,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
-  // A single flat scope for the whole tree: every box resolves its bare tokens
-  // against this one model object. Memoized on `model` so a pan/zoom/selection
+  // A single View-frame scope for the whole tree: every box resolves its `{$.x}`
+  // bindings against this one model object. Memoized on `model` so a pan/zoom/selection
   // re-render (which leaves the model untouched) reuses the same scope object —
   // keeping it referentially stable so the content memo below can rely on it.
-  const scope = useMemo(() => flatRootScope(model), [model]);
+  const scope = useMemo(() => viewScope(model), [model]);
   // Nested z-order: compute the `boxKey → z-index` map (each box ranked among its
   // siblings by resolved `layer`, ties → document order) up front, then hand it
   // down so each box can apply its rank. The flatten mirrors this render's tree, so

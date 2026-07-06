@@ -43,7 +43,7 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model".
  */
 
-import { flatRootScope, type ResolveScope, resolveTypedProp } from "./guiBinding";
+import { type ResolveScope, resolveTypedProp, viewScope } from "./guiBinding";
 import type { GuiNode } from "./guiNode";
 
 /** The attribute name carrying a box's paint order among its siblings. Bindable. */
@@ -130,12 +130,12 @@ export function resolveLayer(node: GuiNode, scope: ResolveScope): number {
  *
  * `root` is expected to be the `<View>` stage; its children are the first
  * participating boxes (the stage itself is not a box, so its children's
- * `parentKey` is `""`). `layer` tokens resolve against the single flat model —
- * identical to how the renderer resolves the rest of a box's attributes.
+ * `parentKey` is `""`). `layer` tokens resolve against the View frame (a `{$.x}`
+ * binding) — identical to how the renderer resolves the rest of a box's attributes.
  */
 export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   const boxes: FlatBox[] = [];
-  const scope = flatRootScope(model);
+  const scope = viewScope(model);
 
   /**
    * Visit the visual children of `parent` in document order. Each child is one box;

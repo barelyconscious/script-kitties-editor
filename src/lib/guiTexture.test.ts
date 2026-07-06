@@ -8,12 +8,12 @@
  * the result to `useSprite`), so it is exercised here without rendering.
  */
 import { describe, expect, it } from "vitest";
-import { flatRootScope, resolveAttrs } from "./guiBinding";
+import { resolveAttrs, viewScope } from "./guiBinding";
 import { textureToLoad } from "./guiGeometry";
 
 /** Resolve a node's attrs, then run the texture-load decision the renderer makes. */
 function textureNameFor(rawAttrs: Record<string, string>, model: unknown): string | null {
-  const { attrs, unresolved } = resolveAttrs(rawAttrs, flatRootScope(model), {});
+  const { attrs, unresolved } = resolveAttrs(rawAttrs, viewScope(model), {});
   return textureToLoad(attrs.texture, !unresolved.has("texture"));
 }
 
@@ -25,12 +25,14 @@ describe("texture resolution → load decision", () => {
   });
 
   it("loads an INTERPOLATED texture once its embedded token resolves", () => {
-    // texture="icon_{type}.png" with model {type:"bite"} → icon_bite.png.
-    expect(textureNameFor({ texture: "icon_{type}.png" }, { type: "bite" })).toBe("icon_bite.png");
+    // texture="icon_{$.type}.png" with model {type:"bite"} → icon_bite.png.
+    expect(textureNameFor({ texture: "icon_{$.type}.png" }, { type: "bite" })).toBe(
+      "icon_bite.png",
+    );
   });
 
   it("loads a whole-{token}-BOUND texture (resolved to a filename)", () => {
-    expect(textureNameFor({ texture: "{spriteName}" }, { spriteName: "gui_kittycoin.png" })).toBe(
+    expect(textureNameFor({ texture: "{$.spriteName}" }, { spriteName: "gui_kittycoin.png" })).toBe(
       "gui_kittycoin.png",
     );
   });
@@ -38,11 +40,11 @@ describe("texture resolution → load decision", () => {
   it("loads NOTHING for an interpolated texture whose token is unbound", () => {
     // The unresolved value keeps its literal {token} — not a real filename — so the
     // box paints no texture (and its waiting-for-binding affordance fires instead).
-    expect(textureNameFor({ texture: "icon_{type}.png" }, {})).toBeNull();
+    expect(textureNameFor({ texture: "icon_{$.type}.png" }, {})).toBeNull();
   });
 
   it("loads NOTHING for an unbound whole-{token} texture", () => {
-    expect(textureNameFor({ texture: "{spriteName}" }, {})).toBeNull();
+    expect(textureNameFor({ texture: "{$.spriteName}" }, {})).toBeNull();
   });
 
   it("loads NOTHING when the texture attribute is absent", () => {

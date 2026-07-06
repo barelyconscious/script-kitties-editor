@@ -358,6 +358,50 @@ describe("grid template geometry lint (rule 9)", () => {
   });
 });
 
+describe("grid structure literal-only lint (rule 10)", () => {
+  it.each([
+    "rows",
+    "columns",
+    "gutter",
+    "cellSize",
+  ])("flags a {token} in %s as an ERROR", (attr) => {
+    const lints = lint(node("GridLayout", { [attr]: "{n}" }));
+    const err = find(lints, attr, "error");
+    expect(err).toBeDefined();
+    expect(err?.message).toContain("stamped at load");
+  });
+
+  it.each(["{", "}", "a{b}", "{$.rows}"])("fires on a brace anywhere (%s)", (value) => {
+    expect(find(lint(node("GridLayout", { rows: value })), "rows", "error")).toBeDefined();
+  });
+
+  it("does NOT flag dataCollection — it IS grammar (a scope path)", () => {
+    const lints = lint(node("GridLayout", { dataCollection: "{$.items}" }));
+    expect(find(lints, "dataCollection", "error")).toBeUndefined();
+  });
+
+  it.each([
+    ["rows", "3"],
+    ["columns", "4"],
+    ["gutter", "8,8"],
+    ["cellSize", "64,64"],
+  ])("does NOT fire on a literal %s value", (attr, value) => {
+    expect(find(lint(node("GridLayout", { [attr]: value })), attr, "error")).toBeUndefined();
+  });
+
+  it("ignores an empty/absent structural attr", () => {
+    expect(find(lint(node("GridLayout", { rows: "" })), "rows", "error")).toBeUndefined();
+    expect(
+      find(lint(node("GridLayout", { dataCollection: "{$.x}" })), "cellSize", "error"),
+    ).toBeUndefined();
+  });
+
+  it("only fires on a GridLayout element, not other tags", () => {
+    // A `cellSize` attr on a non-grid node isn't structural — no rule-10 error.
+    expect(find(lint(node("Panel", { cellSize: "{w}" })), "cellSize", "error")).toBeUndefined();
+  });
+});
+
 describe("collectTooltipBasenames", () => {
   it("collects distinct .xml-stripped basenames across the tree", () => {
     const root = node("View", { id: "view" }, [

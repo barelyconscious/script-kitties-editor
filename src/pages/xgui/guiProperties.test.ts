@@ -213,7 +213,7 @@ describe("fieldsForTag", () => {
     expect(onKeyPressed.group).toBe(INTERACTION_GROUP);
   });
 
-  it("gives GridLayout dataCollection (binding) + rows/columns/gutter (text) + cellSize (compound), in order", () => {
+  it("gives GridLayout dataCollection (binding) + rows/columns/gutter/cellSize (literal-only text), in order", () => {
     const fields = fieldsForTag("GridLayout");
     expect(fields.map((f) => f.name)).toEqual([
       "dataCollection",
@@ -223,9 +223,17 @@ describe("fieldsForTag", () => {
       "cellSize",
     ]);
     // dataCollection is a whole-value binding — committed on blur (not per keystroke) so
-    // a half-typed path doesn't spam the additive scaffold; rows/columns/gutter are plain text;
-    // cellSize is a compound UDim2 (per-field tokens) fixing each cell's size.
-    expect(fields.map((f) => f.kind)).toEqual(["binding", "text", "text", "text", "compound"]);
+    // a half-typed path doesn't spam the additive scaffold. rows/columns/gutter/cellSize are
+    // all plain text (cellSize is a literal pixel pair "w,h", not a compound UDim2).
+    expect(fields.map((f) => f.kind)).toEqual(["binding", "text", "text", "text", "text"]);
+    // Grid STRUCTURE is stamped at load — it cannot bind — so all four structural attrs are
+    // literalOnly; only dataCollection (grammar, resolved at stamp time) is not.
+    const byName = new Map(fields.map((f) => [f.name, f]));
+    expect(byName.get("dataCollection")?.literalOnly).toBeUndefined();
+    expect(byName.get("rows")?.literalOnly).toBe(true);
+    expect(byName.get("columns")?.literalOnly).toBe(true);
+    expect(byName.get("gutter")?.literalOnly).toBe(true);
+    expect(byName.get("cellSize")?.literalOnly).toBe(true);
   });
 
   it("never exposes position/size on a GridLayout (it's a non-visual control)", () => {

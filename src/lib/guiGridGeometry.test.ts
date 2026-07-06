@@ -4,6 +4,7 @@ import {
   cellGeometry,
   cellGeometryFixed,
   type GridDimension,
+  parseCellSize,
   parseGridDimension,
   parseGutter,
 } from "./guiGridGeometry";
@@ -108,60 +109,44 @@ describe("cellGeometry — regression lock (absent cellSize path is byte-identic
 });
 
 describe("cellGeometryFixed", () => {
-  it("fixed pixel cells: size is the cellSize UDim2 verbatim, positions grid-computed", () => {
-    // cellSize 0,0,64,64 (fixed 64px), no gutter, 3 columns.
-    const cell = "0,0,64,64";
-    expect(cellGeometryFixed(0, 3, cell)).toEqual({ position: "0,0,0,0", size: "0,0,64,64" });
-    expect(cellGeometryFixed(1, 3, cell)).toEqual({ position: "0,0,64,0", size: "0,0,64,64" });
+  it("fixed pixel cells: size is the pixel pair, positions grid-computed (no gutter)", () => {
+    // cellSize 64×64, no gutter, 3 columns. Every cell size is 0,0,64,64 (rel always 0).
+    expect(cellGeometryFixed(0, 3, 64, 64)).toEqual({ position: "0,0,0,0", size: "0,0,64,64" });
+    expect(cellGeometryFixed(1, 3, 64, 64)).toEqual({ position: "0,0,64,0", size: "0,0,64,64" });
     // index 4 = row 1, col 1 → posX abs = 1*64, posY abs = 1*64.
-    expect(cellGeometryFixed(4, 3, cell)).toEqual({ position: "0,0,64,64", size: "0,0,64,64" });
+    expect(cellGeometryFixed(4, 3, 64, 64)).toEqual({ position: "0,0,64,64", size: "0,0,64,64" });
   });
 
   it("folds the gutter into position: index·(cell + gutter) per axis", () => {
-    // cellSize 0,0,64,64, gutter 10,10, 3 columns. col 2 → posAbsX = 2*(64+10) = 148.
-    expect(cellGeometryFixed(2, 3, "0,0,64,64", 10, 10)).toEqual({
+    // cellSize 64×64, gutter 10,10, 3 columns. col 2 → posAbsX = 2*(64+10) = 148.
+    expect(cellGeometryFixed(2, 3, 64, 64, 10, 10)).toEqual({
       position: "0,0,148,0",
       size: "0,0,64,64",
     });
     // index 4 = row 1, col 1 → posAbsX = 1*74, posAbsY = 1*74.
-    expect(cellGeometryFixed(4, 3, "0,0,64,64", 10, 10)).toEqual({
+    expect(cellGeometryFixed(4, 3, 64, 64, 10, 10)).toEqual({
       position: "0,0,74,74",
       size: "0,0,64,64",
     });
   });
 
-  it("proportional cellSize: rel accumulates against the parent, abs from gutter only", () => {
-    // cellSize 0.25,0.25,0,0 (quarter of parent), 3 columns. col 2 → posRelX = 2*0.25 = 0.5.
-    expect(cellGeometryFixed(2, 3, "0.25,0.25,0,0")).toEqual({
-      position: "0.5,0,0,0",
-      size: "0.25,0.25,0,0",
-    });
-    // With a gutter, the abs offset is purely the gutter (rel cell contributes no abs).
-    expect(cellGeometryFixed(1, 3, "0.25,0.25,0,0", 8, 8)).toEqual({
-      position: "0.25,0,8,0",
-      size: "0.25,0.25,0,0",
+  it("non-square cells: width and height are independent pixels", () => {
+    // cellSize 20×40, gutter 5,0, 2 columns. col 1 → posAbsX = 1*(20+5) = 25, posAbsY = 0.
+    expect(cellGeometryFixed(1, 2, 20, 40, 5, 0)).toEqual({
+      position: "0,0,25,0",
+      size: "0,0,20,40",
     });
   });
 
-  it("mixed rel+abs cellSize accumulates both parts per axis", () => {
-    // cellSize 0.1,0,20,40, gutter 5,0, 2 columns. col 1 → posRelX = 0.1, posAbsX = 20+5 = 25.
-    expect(cellGeometryFixed(1, 2, "0.1,0,20,40", 5, 0)).toEqual({
-      position: "0.1,0,25,0",
-      size: "0.1,0,20,40",
-    });
-  });
-
-  it("an unresolved/missing field falls back to 0 (parseUDim2 fallback)", () => {
-    // A field left as a {token} (unresolved) or omitted parses to 0.
-    expect(cellGeometryFixed(1, 2, "0,0,{w},64")).toEqual({
-      position: "0,0,0,0",
-      size: "0,0,0,64",
-    });
-    expect(cellGeometryFixed(1, 2, "0,0,64")).toEqual({ position: "0,0,64,0", size: "0,0,64,0" });
+  it("size is always rel=0 (pure pixels — never overflows via a rel component)", () => {
+    // Whatever the pixel size, both rel fields of position and size stay 0.
+    const g = cellGeometryFixed(5, 3, 48, 48, 4, 4);
+    expect(g.size.startsWith("0,0,")).toBe(true);
+    expect(g.position.startsWith("0,0,")).toBe(true);
   });
 
   it("produces strings computeBoxGeometry consumes unchanged", () => {
-    const { position, size } = cellGeometryFixed(1, 3, "0,0,64,64", 10, 10);
+    const { position, size } = cellGeometryFixed(1, 3, 64, 64, 10, 10);
     expect(computeBoxGeometry(position, size)).toEqual({
       position: "absolute",
       left: "calc(0% + 74px)",
@@ -169,6 +154,32 @@ describe("cellGeometryFixed", () => {
       width: "calc(0% + 64px)",
       height: "calc(0% + 64px)",
     });
+  });
+});
+
+describe("parseCellSize", () => {
+  it("parses a literal pixel pair", () => {
+    expect(parseCellSize("64,48")).toEqual({ w: 64, h: 48 });
+    expect(parseCellSize(" 32 , 96 ")).toEqual({ w: 32, h: 96 });
+  });
+
+  it("absent/blank → null (caller falls back to area division)", () => {
+    expect(parseCellSize(undefined)).toBeNull();
+    expect(parseCellSize("")).toBeNull();
+    expect(parseCellSize("   ")).toBeNull();
+  });
+
+  it("wholly non-numeric (incl. a {token}) → null (area division), never a bound value", () => {
+    // Grid structure can't bind: a token is not resolved here — it simply falls back.
+    expect(parseCellSize("{w},{h}")).toBeNull();
+    expect(parseCellSize("abc")).toBeNull();
+  });
+
+  it("present-but-partial defaults the missing/garbage field to 0 (tolerant, like gutter)", () => {
+    expect(parseCellSize("64")).toEqual({ w: 64, h: 0 });
+    expect(parseCellSize("64,")).toEqual({ w: 64, h: 0 });
+    expect(parseCellSize("64,abc")).toEqual({ w: 64, h: 0 });
+    expect(parseCellSize(",48")).toEqual({ w: 0, h: 48 });
   });
 });
 

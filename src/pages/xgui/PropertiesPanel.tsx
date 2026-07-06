@@ -515,12 +515,18 @@ function FieldControl({
     case "componentRef":
       return <ComponentRefField name={name} value={value} onSet={onSet} />;
     default:
+      // A `literalOnly` text field (grid structure: rows/columns/gutter/cellSize) drops
+      // the `{token}` affordance — the value is stamped at load, so a token can never
+      // bind (it is an ERROR lint). Everything else advertises literal-or-token.
       return (
         <Input
           value={value}
           onChange={(e) => onSet(name, e.currentTarget.value)}
-          placeholder="literal or {token}"
-          className={cn("h-7 text-xs", isBoundField(value) && boundInputClass)}
+          placeholder={field.literalOnly ? "literal only" : "literal or {token}"}
+          className={cn(
+            "h-7 text-xs",
+            !field.literalOnly && isBoundField(value) && boundInputClass,
+          )}
         />
       );
   }

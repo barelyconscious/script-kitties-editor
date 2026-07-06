@@ -393,17 +393,20 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
       // fills its parent). `dataCollection` is a whole-value BINDING
       // (`dataCollection="{$.creatures}"`) — the field edits the path and stores the
       // grammar token (a bare key is unresolvable under the strict grammar).
-      // rows/columns/gutter are plain text. `cellSize` is a compound UDim2 (per-field
-      // tokens like any compound) that fixes each cell's size; absent, the grid divides
-      // its parent's content box evenly. The grid LAYS OUT its repeated child, so all of
-      // this is layout policy on the one element that IS the layout (design req 5 +
-      // design/gridlayout_cell_geometry.md).
+      // rows/columns/gutter/cellSize are `literalOnly` LITERALS: grid structure is
+      // stamped once at load, OUTSIDE the runtime binding system, so a `{token}` in any
+      // of them can never resolve (it is an ERROR lint). `cellSize` is a literal pixel
+      // pair `"w,h"` (matching `gutter`) that fixes each cell's size; absent/invalid, the
+      // grid divides its parent's content box evenly. Only `dataCollection` is grammar (a
+      // scope path resolved at stamp time). All of this is layout policy on the one
+      // element that IS the layout (design req 5 + design/gridlayout_cell_geometry.md,
+      // "Grid structure is LITERAL-ONLY").
       return [
         { name: "dataCollection", label: "dataCollection", kind: "binding" },
-        { name: "rows", label: "rows", kind: "text" },
-        { name: "columns", label: "columns", kind: "text" },
-        { name: "gutter", label: "gutter", kind: "text" },
-        { name: "cellSize", label: "cellSize", kind: "compound" },
+        { name: "rows", label: "rows", kind: "text", literalOnly: true },
+        { name: "columns", label: "columns", kind: "text", literalOnly: true },
+        { name: "gutter", label: "gutter", kind: "text", literalOnly: true },
+        { name: "cellSize", label: "cellSize", kind: "text", literalOnly: true },
       ];
     default: {
       const _never: never = tag;

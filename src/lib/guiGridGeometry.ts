@@ -27,16 +27,14 @@
  * PURE: no React, no DOM. The caller (`GuiPreview`) maps a cell index → its
  * `{ position, size }` here, then renders the template node with that geometry.
  *
- * A grid may instead author an explicit `cellSize` UDim2, in which case cells are a
- * FIXED size and positions accumulate `index·(cell+gutter)` — see
- * {@link cellGeometryFixed}. Absent `cellSize`, the area-division default here runs
- * unchanged.
+ * A grid may instead author an explicit `cellSize` — a LITERAL pixel pair `"w,h"` — in
+ * which case cells are a FIXED size and positions accumulate `index·(cell+gutter)` per
+ * axis; see {@link cellGeometryFixed} + {@link parseCellSize}. Absent (or invalid)
+ * `cellSize`, the area-division default here runs unchanged.
  *
  * @see design/gridLayout_element_design_prompt.md — "Calculating Position and Size".
  * @see design/gridlayout_cell_geometry.md — the settled cell size/position contract.
  */
-
-import { parseUDim2 } from "./guiGeometry";
 
 /** A cell's geometry as the raw `position`/`size` comma strings the renderer consumes. */
 export type CellGeometry = {
@@ -107,47 +105,75 @@ export function cellGeometry(
 
 /**
  * The geometry for the cell at 0-based `index` when the grid authors an EXPLICIT
- * `cellSize` (design/gridlayout_cell_geometry.md). Unlike the area-division
- * {@link cellGeometry}, every cell is the SAME fixed size — the resolved `cellSize`
- * UDim2 verbatim — and positions accumulate `index·(cell + gutter)` per axis from the
- * parent's content-box origin.
+ * `cellSize` — a LITERAL pixel pair `"w,h"` (design/gridlayout_cell_geometry.md,
+ * REVISED 2026-07-06). Unlike the area-division {@link cellGeometry}, every cell is the
+ * SAME fixed pixel size — `cellW × cellH` — and positions accumulate `index·(cell +
+ * gutter)` per axis from the parent's content-box origin.
  *
- * `cellSize` is a UDim2 whose `rel` fields resolve against the PARENT box (the one
- * unambiguous reference box — the grid fills its parent), so passing it straight
- * through as the cell `size` gives the renderer exactly that: {@link computeBoxGeometry}
- * resolves a cell's `rel` against the parent it renders into. `abs` fields are pixels.
+ * `cellSize` is a pure pixel pair (NO relative component — a rel cell + gutters just
+ * overflows the parent, and the gutter-shed the author wants is exactly what area
+ * division already computes, so rel bought nothing). The cell `size` is therefore a
+ * `rel=0, abs=px` UDim2, and positions are pure pixel offsets. The grid may overflow
+ * its parent — that is fine, there is no clipping.
  *
- * The derivation (per axis, columns shown; rows identical with `gy`): a cell's width is
- * the UDim2 `relX·100% + absX px`. The cell in column `c` (0-based) sits at left
- * `c·(cellWidth + gx) = (c·relX)·100% + c·(absX + gx) px`  →  position
- * `relX = c·cellRelX`, `absX = c·(cellAbsX + gx)`. Size is the cellSize UDim2 as-is.
- *   Worked check (cellSize `0,0,64,64`, gx=gy=10, columns=3): the cell at col 2 →
- *   position `0,_,148,_` (2·(64+10)), size `0,_,64,_`. Proportional cellSize
- *   `0.25,0.25,0,0` at col 2 → position `0.5,_,0,_`, size `0.25,_,0,_`.
+ * The derivation (per axis, columns shown; rows identical with `gy`): the cell in column
+ * `c` (0-based) sits at left `c·(cellW + gx) px`  →  position `rel=0, abs=c·(cellW+gx)`.
+ * Size is `rel=0, abs=cellW`.
+ *   Worked check (cellSize `64,64`, gx=gy=10, columns=3): the cell at col 2 →
+ *   position `0,0,148,0` (2·(64+10)), size `0,0,64,64`.
+ *
+ * Pure pixel math — no binding resolution, no {@link parseUDim2}: grid structure is
+ * literal-only (stamped once at load, outside the runtime binding system).
  *
  * @param index 0-based cell index in fill order (0 … rows·columns−1).
  * @param columns number of columns (≥ 1) — maps `index` → column/row.
- * @param cellSize the RESOLVED `cellSize` comma string (`relX,relY,absX,absY`);
- *   unresolved/missing fields fall back to `0` via {@link parseUDim2}.
+ * @param cellW cell width in pixels (from {@link parseCellSize}).
+ * @param cellH cell height in pixels (from {@link parseCellSize}).
  * @param gutterX horizontal px between columns (default 0).
  * @param gutterY vertical px between rows (default 0).
  */
 export function cellGeometryFixed(
   index: number,
   columns: number,
-  cellSize: string,
+  cellW: number,
+  cellH: number,
   gutterX = 0,
   gutterY = 0,
 ): CellGeometry {
-  const { relX, relY, absX, absY } = parseUDim2(cellSize);
   const column = index % columns;
   const row = Math.floor(index / columns);
-  const posX: Axis = { rel: column * relX, abs: column * (absX + gutterX) };
-  const posY: Axis = { rel: row * relY, abs: row * (absY + gutterY) };
+  const posX: Axis = { rel: 0, abs: column * (cellW + gutterX) };
+  const posY: Axis = { rel: 0, abs: row * (cellH + gutterY) };
   return {
     position: udim2(posX, posY),
-    size: udim2({ rel: relX, abs: absX }, { rel: relY, abs: absY }),
+    size: udim2({ rel: 0, abs: cellW }, { rel: 0, abs: cellH }),
   };
+}
+
+/**
+ * Parse a `cellSize="w,h"` attribute into its two pixel dimensions, or `null` when the
+ * attribute is absent/blank or fully unparseable (→ the caller falls back to the
+ * area-division default). Mirrors {@link parseGutter}'s tolerant per-field parse: a
+ * present-but-partial value (`"64,"`, `"64,abc"`) defaults its missing/garbage field to
+ * `0`; only a wholly missing or wholly non-numeric value yields `null`.
+ *
+ * `cellSize` is a LITERAL (grid structure is stamped at load — it cannot bind; a
+ * `{token}` here is an ERROR lint, not a binding), so this is a plain numeric parse
+ * rather than a binding resolution.
+ */
+export function parseCellSize(raw: string | undefined): { w: number; h: number } | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const parts = trimmed.split(",");
+  const w = Number((parts[0] ?? "").trim());
+  const h = Number((parts[1] ?? "").trim());
+  // A non-numeric WIDTH means the value can't define a fixed cell → fall back to area
+  // division rather than stamp a garbage cell. (`Number("")` is 0, so an OMITTED second
+  // field tolerantly defaults to 0 — matching parseGutter — while a non-numeric first
+  // field like "abc" bails.)
+  if (!Number.isFinite(w)) return null;
+  return { w, h: Number.isFinite(h) ? h : 0 };
 }
 
 /**

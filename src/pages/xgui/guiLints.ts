@@ -42,6 +42,11 @@
  *     from `cellSize` on the GridLayout; the template owns appearance only). Fires
  *     only on the template itself, not its descendants (which lay out normally
  *     within the cell). See design/gridlayout_cell_geometry.md.
+ * 10. A `{token}` (any brace) in a GridLayout's `rows`/`columns`/`gutter`/`cellSize`
+ *     → ERROR (grid structure is stamped ONCE at load, outside the runtime binding
+ *     system, so a bound structural attr never resolves). `dataCollection` is exempt —
+ *     it IS grammar (a scope path resolved at stamp time). See
+ *     design/gridlayout_cell_geometry.md, "Grid structure is LITERAL-ONLY".
  *
  * @see design/xgui_ta.md — interaction attributes; the ENGINE files cited in
  *   {@link import("../../lib/guiInteraction")} are the source of truth on disagreement.
@@ -256,6 +261,34 @@ function gridChildGeometryLints(node: GuiNode, isGridTemplate: boolean, out: Lin
   }
 }
 
+/**
+ * The GridLayout STRUCTURAL attributes that are literal-only — stamped once at load,
+ * outside the runtime binding system (rule 10). `dataCollection` is intentionally
+ * absent: it is grammar (a scope path resolved at stamp time), not structure.
+ */
+const GRID_STRUCTURE_ATTRS: readonly string[] = ["rows", "columns", "gutter", "cellSize"];
+
+/**
+ * Rule 10: a `{token}` in a GridLayout's `rows`/`columns`/`gutter`/`cellSize` is a dead
+ * binding — grid structure is baked once at load, outside the runtime binding system, so
+ * a braced structural attr never resolves. Fires only on the `<GridLayout>` element
+ * itself. `dataCollection` is exempt (it IS grammar).
+ */
+function gridStructureLints(node: GuiNode, out: Lint[]): void {
+  if (node.tag !== "GridLayout") return;
+  for (const attr of GRID_STRUCTURE_ATTRS) {
+    const value = node.attrs[attr];
+    if (value === undefined || value === "") continue;
+    if (value.includes("{") || value.includes("}")) {
+      out.push({
+        severity: "error",
+        attr,
+        message: `${attr}="${value}" can't bind — grid structure is stamped at load, outside the runtime binding system. Use a literal value.`,
+      });
+    }
+  }
+}
+
 /** Rule 8: a bare grid-item token used outside any GridLayout subtree is likely a `$.` mistake. */
 function bareTokenLints(node: GuiNode, insideGrid: boolean, out: Lint[]): void {
   if (insideGrid) return; // bare tokens are legitimate item scope inside a grid
@@ -306,6 +339,7 @@ export function nodeLints(node: GuiNode, grid: GridLintContext, ctx: LintContext
   modalLint(node, out);
   bareTokenLints(node, grid.insideGrid, out);
   gridChildGeometryLints(node, grid.isGridTemplate, out);
+  gridStructureLints(node, out);
   return out;
 }
 

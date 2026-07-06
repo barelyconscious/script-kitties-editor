@@ -19,7 +19,7 @@ Three implementations disagreed on who controls a grid cell's geometry:
 | Concern | Owner |
 |---|---|
 | **Grid placement** | the **parent** element's `position`/`size`. The grid is a stamping macro, not an element — the parent's box *is* the grid's box. Want the grid moved/inset? Move the wrapper panel (which real screens have anyway — it's the container's chrome). |
-| **Cell size** | **`cellSize` on the `<GridLayout>`** — a **literal pixel pair** `cellSize="w,h"` (matching `gutter="gx,gy"`'s format). **Absent → even area division** (current preview behavior). The split is clean: *proportional cells = omit cellSize* (area division is gutter-aware and fits the parent); *fixed cells = pixels* (extent emergent, may overflow — fine, no clipping). **REVISED 2026-07-06 (Matt):** the earlier full-UDim2 form is dropped — a rel component + gutters overflows the parent (`C·(rel·parentW) + (C−1)·g > parentW`), the gutter-shed the author actually wants is exactly what area division computes, so rel bought nothing and added a footgun. |
+| **Cell size** | **`cellSize` on the `<GridLayout>`** — a **full UDim2** `cellSize="relX,relY,absX,absY"` (`"0,0,64,64"` = fixed pixels), the system's ONE dimension grammar — cellSize is not an exception to it. Rel resolves against the **parent** like any size; the engine's hardcoded interim value is literally `Dim{0,0,64,64}`, so `CellSize()` is a plain Dim parse. **Absent → even area division** (the gutter-aware "fit the parent" mode). **Gutters never participate in size** — `cellW = relX·parentW + absX` verbatim; gutters space *positions* only (`pos = i·(cell + gutter)`), so rel cells + gutters can overflow the parent — documented behavior, the author's arithmetic, and legal like all overflow in this no-clipping model. **RE-REVISED 2026-07-06 (Matt):** an interim pixel-pair (`"w,h"`) form was tried and rejected same-day — "sometimes 2 fields, sometimes 4" broke the one-grammar rule and its tolerant parse turned the natural 4-field input into silent 0×0 cells. A 2-field value now draws a did-you-mean-UDim2 lint. |
 | **Cell positions** | **grid-computed, always**: `index · (cell + gutter)` from the parent's content-box origin, rel/abs accumulating per axis exactly as `guiGridGeometry`'s existing axis math does. |
 | **Template geometry** | **none** — the template child owns appearance only. A `position`/`size` authored on a grid child is dead (the editor suppresses the fields; a lint nudges a stray `size` toward `cellSize` on the grid). |
 
@@ -60,10 +60,11 @@ ERROR lint ("grid structure is stamped at load — it cannot bind").
 
 ## Changes each side owes
 
-**Engine (`worlds-cpp`, Matt/engineer):** `XGridLayout::CellSize()` — a two-int parse
-like `Gutter()`; replace the two hardcoded lines in `AddGridLayout` — `SetSize(w,h)`
-(default = the parent-share division), position `((w+gx)·c, (h+gy)·r)`. Pure pixel
-math, no binding resolution. Small, contained.
+**Engine (`worlds-cpp`, Matt/engineer):** `XGridLayout::CellSize()` — a plain 4-field
+Dim parse (the attribute IS a Dim; the hardcoded interim value is `Dim{0,0,64,64}`),
+read raw — never through the binding system; replace the two hardcoded lines in
+`AddGridLayout` — `SetSize(cellDim)` (default = the parent-share division), position
+accumulating per axis `rel = c·cellRel`, `abs = c·(cellAbs + gutter)`. Small, contained.
 
 **Editor (this repo — task queued):** `cellSize` compound field on the GridLayout
 schema; `guiGridGeometry` gains the explicit-cellSize branch (absent → existing area

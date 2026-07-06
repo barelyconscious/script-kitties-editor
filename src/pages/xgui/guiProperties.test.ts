@@ -188,10 +188,13 @@ describe("fieldsForTag", () => {
     expect(fields.every((f) => f.kind === "text")).toBe(true);
   });
 
-  it("gives the root View no editable fields", () => {
-    // The View is the component itself: its id is auto-set on create and its
-    // controller is wired via the Controller tab — neither shows in Properties.
-    expect(fieldsForTag("View")).toEqual([]);
+  it("gives the root View a scopeName text field", () => {
+    // scopeName publishes the View's frame under a name for `{$name.x}` reach
+    // (engine parses it on the root <View>). It is the FIRST panel field the View
+    // shows; id (auto-set) and controller (Controller tab) stay handled elsewhere.
+    const fields = fieldsForTag("View");
+    expect(fields.map((f) => f.name)).toEqual(["scopeName"]);
+    expect(fields[0].kind).toBe("text");
   });
 
   it("gives GridLayout dataCollection (modelKey) + rows/columns/gutter (text), in order", () => {
@@ -285,9 +288,16 @@ describe("freeformAttrs", () => {
   });
 
   it("does not surface the View's id or controller as freeform (managed elsewhere)", () => {
-    // The View shows no fields, but its structural attrs must be preserved on the
-    // node — not leaked into the freeform 'other properties' rows.
+    // The View's structural attrs must be preserved on the node — not leaked into
+    // the freeform 'other properties' rows.
     const n = node("View", { id: "view", controller: "bag_controller.lua" });
+    expect(freeformAttrs(n)).toEqual([]);
+  });
+
+  it("does not surface the View's scopeName as freeform (it's a schema field now)", () => {
+    // scopeName is a real schema field on the View, so it must render as a typed
+    // field — not fall through to the freeform 'other properties' rows.
+    const n = node("View", { id: "view", scopeName: "bag" });
     expect(freeformAttrs(n)).toEqual([]);
   });
 });

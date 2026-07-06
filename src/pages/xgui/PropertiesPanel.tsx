@@ -216,10 +216,10 @@ export function PropertiesPanel() {
           </FieldRow>
         )}
 
-        {/* The root View has no editable properties here — its id is auto-set on
-            create and its controller is wired via the Controller tab. Instead of a
-            dead-end note, offer the add-child actions so the panel is a starting
-            point rather than an empty surface. */}
+        {/* The root View's structural attrs are managed elsewhere (id auto-set on
+            create; controller via the Controller tab); its one schema field
+            (scopeName) renders via the map below. Offer the add-child actions here
+            so the panel is a starting point rather than a near-empty surface. */}
         {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
 
         {/* Well-known fields for the tag (position/size suppressed for a grid

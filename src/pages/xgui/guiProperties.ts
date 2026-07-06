@@ -202,11 +202,14 @@ export function fieldsForTag(tag: GuiTag, parentTag?: GuiTag): PropertyField[] {
 function fieldsForTagInner(tag: GuiTag): PropertyField[] {
   switch (tag) {
     case "View":
-      // The root View has NO editable properties in the panel. Its `id` is
-      // auto-set on create, and its `controller` is wired through the Controller
-      // tab's "Add script" flow — neither belongs here. Both attrs are preserved
-      // on the node (see specialAttrs) so they don't surface as freeform rows.
-      return [];
+      // `scopeName` publishes the View's frame under a name so descendants (and
+      // sibling components) can reach it via `{$name.x}` — the engine parses it on
+      // the root <View> (worlds-cpp GUILoader.cpp:154). It is a plain literal,
+      // stored verbatim, and is the FIRST panel field the View row shows (the B1
+      // interaction schema extends this with onKeyPressed later). The View's `id`
+      // (auto-set on create) and `controller` (wired via the Controller tab) are
+      // still handled elsewhere and stay preserved-only (see specialAttrs).
+      return [{ name: "scopeName", label: "scopeName", kind: "text" }];
     case "Panel":
       return [
         { name: "position", label: "position", kind: "compound" },

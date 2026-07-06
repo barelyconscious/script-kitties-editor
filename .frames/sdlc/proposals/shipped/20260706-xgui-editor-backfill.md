@@ -1,7 +1,7 @@
 ---
 name: "XGUI editor backfill: scope model + interaction attributes"
 description: "The C++ XGUI runtime now exists and has outrun the editor. This backfills two design threads into the editor — the View-as-scope-boundary model (scoped bindings, scopeName, controller signature) and the interaction attribute surface (handlers, modal, tooltips, badges, lints) — plus corrects two attribute contracts where the editor silently diverges from the shipped engine."
-status: planned
+status: shipped
 author: architect
 date_created: 2026-07-06
 reviewers:

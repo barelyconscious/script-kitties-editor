@@ -2295,11 +2295,185 @@ const selfApi = (): ApiItem => ({
   ],
 });
 
+// ---------------------------------------------------------------------------
+// XGUI interaction reference
+//
+// This section documents the GUI editor's INTERACTION surface — the handler,
+// `modal`, and tooltip ATTRIBUTES a GUI component element can carry, how the
+// worlds-cpp XGUI runtime derives hit-testing/focus from them, and the Lua
+// handler signatures a controller implements. These are XML attributes (not Lua
+// globals), but they live in this one tree so the reference pane and future
+// intellisense share a single source. Ground truth for the derivation rules is
+// the engine (see src/lib/guiInteraction.ts, which cites the engine file:line);
+// the prose here is kept tight — reference, not tutorial.
+// ---------------------------------------------------------------------------
+
+/** Which element tags accept the mouse + focus (non-key) input handlers. */
+const INPUT_HANDLER_TAGS = "Panel · Text · Component";
+/** onKeyPressed is additionally accepted on the root View (unfocused key events). */
+const KEY_HANDLER_TAGS = "View · Panel · Text · Component";
+
+const xguiInteraction = (): ApiItem => ({
+  name: "XGUI Interaction",
+  type: "namespace",
+  tags: ["xgui", "gui"],
+  documentation:
+    "GUI component interaction attributes — the mouse/key/focus handlers, `modal`, and tooltip attributes an element can carry, how the engine derives hit-testing and focus from them, and the Lua handler signatures. These are XML attributes on a component's elements (authored in the GUI editor), documented here so the reference and future intellisense share one source.",
+  examples: [
+    {
+      title: "Handler families (controller table)",
+      code: `return function(view)
+    return {
+        -- input handlers: mouse clicks/moves + focus/blur -> (self, mouse)
+        onBuyClicked = function(self, mouse) end,
+        -- key handler: onKeyPressed -> (self, input); 2nd arg not yet frozen engine-side
+        onKeyPressed = function(self, input) end,
+        -- <Event handler="..."> -> (payload); no self
+        onItemBought = function(payload) end,
+    }
+end`,
+    },
+  ],
+  members: [
+    {
+      name: "attributes",
+      type: "namespace",
+      documentation:
+        "The interaction attributes and which element tags accept each. Handler values are LITERAL controller-function names (never a {token}); `modal` is a literal boolean; `tooltip` is a component ref; `tooltipData` is a binding.",
+      members: [
+        {
+          name: "onMouseClicked",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires when the element is clicked. Input handler: function(self, mouse). Makes the element hit-testable.",
+        },
+        {
+          name: "onMouseEntered",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires when the cursor enters the element. Input handler: function(self, mouse). Makes the element hit-testable.",
+        },
+        {
+          name: "onMouseExited",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires when the cursor leaves the element. Input handler: function(self, mouse). Makes the element hit-testable.",
+        },
+        {
+          name: "onMouseMoved",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires as the cursor moves over the element. Input handler: function(self, mouse). Makes the element hit-testable.",
+        },
+        {
+          name: "onKeyPressed",
+          type: "property",
+          detail: KEY_HANDLER_TAGS,
+          documentation:
+            "Fires on a key press while the element is focused; the root View also receives UNFOCUSED key events. Key handler: function(self, input) — the 2nd arg is not yet frozen engine-side. Grants focus.",
+        },
+        {
+          name: "onFocus",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires when the element gains keyboard focus. Input handler: function(self, mouse). Grants focus.",
+        },
+        {
+          name: "onBlur",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Fires when the element loses keyboard focus. Input handler: function(self, mouse). Grants focus.",
+        },
+        {
+          name: "modal",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            "Literal boolean hit/focus policy. Read PRE-binding via pugixml as_bool, which inspects ONLY the first character: truthy for 1, t/T, y/Y (so true / yes / 1 all work). NOTE: \"on\" is FALSY ('o' isn't in the set). A {token} never resolves here — modal is read straight off the XML. A modal element is hit-testable AND receives focus.",
+        },
+        {
+          name: "tooltip",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            'A tooltip component reference (resolved by basename), e.g. tooltip="gui.kittypacks-tooltip.xml". A non-empty tooltip makes the element hit-testable — a tooltip-only element still eats clicks.',
+        },
+        {
+          name: "tooltipData",
+          type: "property",
+          detail: INPUT_HANDLER_TAGS,
+          documentation:
+            'A whole-value binding (e.g. tooltipData="{$.creature}") seeding the tooltip component\'s root model. Has no effect without a tooltip; a bare literal never binds (wrap the model path as {$.path}).',
+        },
+      ],
+    },
+    {
+      name: "derivation",
+      type: "namespace",
+      documentation:
+        "How the engine derives an element's capabilities from its raw attributes (ground truth: src/lib/guiInteraction.ts, mirroring the worlds-cpp XGUI runtime).",
+      members: [
+        {
+          name: "hit-testable",
+          type: "property",
+          documentation:
+            "The engine tests the element under the cursor when it has ANY mouse handler (onMouseClicked/Entered/Exited/Moved), OR a tooltip, OR is modal. The non-obvious clause: a tooltip-only element (no handlers) is STILL hit-testable — it eats clicks.",
+        },
+        {
+          name: "focusable",
+          type: "property",
+          documentation:
+            "The element can receive keyboard focus when it has a key/focus/blur handler (onKeyPressed / onFocus / onBlur), OR is modal — modal grants focus per XGUI.h:155. Mouse handlers do NOT grant focus.",
+        },
+      ],
+    },
+    {
+      name: "tooltips",
+      type: "namespace",
+      documentation:
+        "Conventions for tooltip components (v1). A tooltip is a separate component wired via a widget's tooltip attribute.",
+      members: [
+        {
+          name: "component ref",
+          type: "property",
+          documentation:
+            'tooltip is a component ref WITH the .xml suffix, resolved by basename anywhere in the gui tree — e.g. tooltip="gui.kittypacks-tooltip.xml".',
+        },
+        {
+          name: "tooltipData",
+          type: "property",
+          documentation:
+            "tooltipData is a binding like {$.creature} that seeds the tooltip component's root model, so its bound text/props resolve against that data.",
+        },
+        {
+          name: "pixel-sized root",
+          type: "property",
+          documentation:
+            "A tooltip component's root must be PIXEL-SIZED (absolute size, relative width/height zero) — a relative root size won't lay out predictably. The New-component dialog's Tooltip template scaffolds this.",
+        },
+        {
+          name: "no controller",
+          type: "property",
+          documentation:
+            "v1 tooltip components are presentation-only — no controller runs. A tooltip that declares a controller is flagged by the editor's lints.",
+        },
+      ],
+    },
+  ],
+});
+
 /**
  * The merged Lua API tree — the single source of truth.
  *
  * Order is reference-pane-friendly: language first, then types, then the
- * globals you actually call, then the contextual `self` object.
+ * globals you actually call, the contextual `self` object, and finally the XGUI
+ * interaction reference (GUI editor knowledge, not a Lua global).
  */
 export const GAME_API: ApiItem[] = [
   luaKeywords(),
@@ -2308,4 +2482,5 @@ export const GAME_API: ApiItem[] = [
   ...complexTypes(),
   ...globals(),
   selfApi(),
+  xguiInteraction(),
 ];

@@ -408,6 +408,19 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
 }
 
 /**
+ * The interaction HANDLER fields a node of `tag` exposes — the mouse/key/focus
+ * handlers grouped under {@link INTERACTION_GROUP} in the per-tag schema. Derived
+ * FROM the schema (not a re-listed set of attr names) so the structure tree's
+ * "Add handler" menu and the Properties panel never drift: whatever handlers a tag
+ * shows in the panel are exactly the ones the menu offers. Excludes the `<Event>`
+ * `handler` (it is ungrouped — the event's own handler, not an interaction attr),
+ * so `<Event>`/`<GridLayout>` return an empty list.
+ */
+export function interactionHandlerFields(tag: GuiTag): PropertyField[] {
+  return fieldsForTag(tag).filter((f) => f.kind === "handler" && f.group === INTERACTION_GROUP);
+}
+
+/**
  * The attribute names a node of `tag` handles SPECIALLY (rendered outside the
  * schema-driven field list): always `id`; plus `src` on `<Component>`. Used to
  * compute {@link freeformAttrs} — anything not in the schema and not special is

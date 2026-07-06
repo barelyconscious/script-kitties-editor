@@ -8,6 +8,7 @@ import {
   formatCompound,
   freeformAttrs,
   INTERACTION_GROUP,
+  interactionHandlerFields,
   isBoundField,
   nodeHasId,
   normalizeBinding,
@@ -527,5 +528,41 @@ describe("renameAttr", () => {
 describe("removeAttr", () => {
   it("removes the named attr", () => {
     expect(removeAttr({ a: "1", b: "2" }, "a")).toEqual({ b: "2" });
+  });
+});
+
+describe("interactionHandlerFields", () => {
+  it("offers the seven interaction handlers on hit-testable widgets", () => {
+    const names = interactionHandlerFields("Panel").map((f) => f.name);
+    expect(names).toEqual([
+      "onMouseClicked",
+      "onMouseEntered",
+      "onMouseExited",
+      "onMouseMoved",
+      "onKeyPressed",
+      "onFocus",
+      "onBlur",
+    ]);
+    // Text and Component carry the same interaction handler set.
+    expect(interactionHandlerFields("Text").map((f) => f.name)).toEqual(names);
+    expect(interactionHandlerFields("Component").map((f) => f.name)).toEqual(names);
+  });
+
+  it("offers only onKeyPressed on the root View", () => {
+    expect(interactionHandlerFields("View").map((f) => f.name)).toEqual(["onKeyPressed"]);
+  });
+
+  it("returns every field tagged as a grouped handler kind", () => {
+    for (const field of interactionHandlerFields("Panel")) {
+      expect(field.kind).toBe("handler");
+      expect(field.group).toBe(INTERACTION_GROUP);
+    }
+  });
+
+  it("offers nothing for tags with no interaction handlers", () => {
+    // <Event> carries a `handler` field, but it is UNGROUPED (the event's own
+    // handler, not an interaction attr), so it is excluded; GridLayout has none.
+    expect(interactionHandlerFields("Event")).toEqual([]);
+    expect(interactionHandlerFields("GridLayout")).toEqual([]);
   });
 });

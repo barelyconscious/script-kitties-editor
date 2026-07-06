@@ -416,11 +416,15 @@ function SchemaFields({
 
 /**
  * A collapsible section for a group of schema fields (e.g. "Interaction"). The
- * section is COLLAPSED by default when NONE of its fields carry a value on the node,
- * and EXPANDED when any is set — so an element that already wires up interaction
- * opens showing it, while a plain element keeps the section tucked away. The
- * initial state is computed once on mount; the parent keys this by nodeId so a node
- * switch remounts with a freshly-computed default.
+ * section is COLLAPSED by default when the node carries NONE of its fields, and
+ * EXPANDED when any is present — so an element that already wires up interaction
+ * opens showing it, while a plain element keeps the section tucked away. Presence
+ * (the attr KEY existing), not a non-empty value, is the test: the structure tree's
+ * "Add handler" writes an EMPTY handler attr then selects the node, and the present
+ * key must open the group so the author lands on the field to fill in. Clearing a
+ * field removes its attr (see {@link withAttr}), so an all-cleared group
+ * re-collapses on its next mount. The initial state is computed once on mount; the
+ * parent keys this by nodeId so a node switch remounts with a freshly-computed default.
  */
 function FieldGroup({
   title,
@@ -433,7 +437,7 @@ function FieldGroup({
   node: GuiNode;
   onSet: (name: string, value: string) => void;
 }) {
-  const anySet = fields.some((f) => (node.attrs[f.name] ?? "").trim() !== "");
+  const anySet = fields.some((f) => f.name in node.attrs);
   const [open, setOpen] = useState(anySet);
 
   return (

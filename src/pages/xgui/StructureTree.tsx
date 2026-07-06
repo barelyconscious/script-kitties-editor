@@ -60,7 +60,7 @@ import { ComponentPicker } from "./ComponentPicker";
 import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 import { collectTooltipBasenames, type Lint, lintTree, worstSeverity } from "./guiLints";
-import { nodeHasId, srcBasename } from "./guiProperties";
+import { interactionHandlerFields, nodeHasId, srcBasename } from "./guiProperties";
 import { allowedChildTags, findNode, makeChildNode, treeNodePrimaryLabel } from "./guiTreeEdit";
 
 /** Empty lint map reused for the no-open-component case (stable identity). */
@@ -214,6 +214,31 @@ export function StructureTree() {
     dispatch({ type: "removeNode", nodeId });
   };
 
+  // Add-handler action (task 507): wire an interaction handler onto a node by
+  // writing ONLY the XML attribute — an EMPTY value the author fills in with a
+  // controller function name in the Properties panel. Selecting the node opens its
+  // Interaction group (the present-but-empty attr expands it), so the author lands
+  // on the field. No `withAttr` here (that would delete an empty value) — we set the
+  // key directly so the handler attr exists on the node.
+  const handleAddHandler = (nodeId: string, attr: string) => {
+    const node = findNode(open.root, nodeId);
+    if (!node) return;
+    dispatch({ type: "setNodeAttrs", nodeId, attrs: { ...node.attrs, [attr]: "" } });
+    dispatch({ type: "select", nodeId });
+    // TODO(xgui interaction — PUNTED, task 507 / Matt): Lua controller stub injection
+    // is deliberately NOT done here. When it is built, adding a handler should ALSO
+    // inject a matching, empty stub into the component's controller table, keyed by
+    // the handler FAMILY:
+    //   • input handlers  (onMouseClicked / onMouseEntered / onMouseExited /
+    //                       onMouseMoved / onFocus / onBlur)  -> function(self, mouse)
+    //   • key handler     (onKeyPressed)                      -> function(self, input)
+    //                       — the 2nd arg is NOT yet frozen engine-side
+    //   • <Event> handlers (<Event handler="...">)            -> function(payload)
+    //                       — no `self`
+    // NEVER emit the aspirational (mouse, targetId, targetItemData, currentId) 4-arg
+    // form — that signature ships nowhere.
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-1">
       <ul>
@@ -226,6 +251,7 @@ export function StructureTree() {
           lints={lints}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
           onAdd={handleAdd}
+          onAddHandler={handleAddHandler}
           onRemove={handleRemove}
           onToggleLock={(nodeId) => dispatch({ type: "toggleLock", nodeId })}
           onToggleVisibility={(nodeId) => dispatch({ type: "toggleVisibility", nodeId })}
@@ -339,6 +365,7 @@ type TreeRowProps = {
   lints: ReadonlyMap<string, Lint[]>;
   onSelect: (nodeId: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
+  onAddHandler: (nodeId: string, attr: string) => void;
   onRemove: (nodeId: string) => void;
   onToggleLock: (nodeId: string) => void;
   onToggleVisibility: (nodeId: string) => void;
@@ -353,6 +380,7 @@ function TreeRow({
   lints,
   onSelect,
   onAdd,
+  onAddHandler,
   onRemove,
   onToggleLock,
   onToggleVisibility,
@@ -380,6 +408,11 @@ function TreeRow({
   // engine-capability badges. Never blocks anything; purely advisory.
   const nodeLints = lints.get(node.nodeId) ?? [];
   const addable = allowedChildTags(node);
+  // The interaction handlers this node can still gain — the tag's schema handlers
+  // (from guiProperties, not a re-listed set) minus the ones already on the node, so
+  // "Add handler" only offers unwired ones. Empty for tags with no interaction
+  // handlers (`<Event>`/`<GridLayout>`), which hides the submenu.
+  const addableHandlers = interactionHandlerFields(tag).filter((f) => !(f.name in node.attrs));
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
@@ -581,12 +614,44 @@ function TreeRow({
                       </ContextMenu.Item>
                     );
                   })}
-                  {/* Separate the Add group from the element-level actions below
-                      (lock/hide/delete) so they don't read as one undifferentiated list. */}
-                  {(canToggle || removable) && (
-                    <ContextMenu.Separator className="my-1 h-px bg-border" />
-                  )}
                 </>
+              )}
+              {addableHandlers.length > 0 && (
+                <>
+                  {addable.length > 0 && <ContextMenu.Separator className="my-1 h-px bg-border" />}
+                  {/* Add-handler submenu: wire an interaction handler onto this
+                      element (writes the empty XML attr; the Properties panel's
+                      Interaction group opens so the author names the controller
+                      function). Only unwired handlers valid for this tag are listed. */}
+                  <ContextMenu.Sub>
+                    <ContextMenu.SubTrigger className="flex cursor-default items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted data-[state=open]:bg-muted">
+                      <Pointer className="size-3 shrink-0 text-muted-foreground" />
+                      <span>Add handler</span>
+                      <ChevronRight className="ml-auto size-3 shrink-0 text-muted-foreground" />
+                    </ContextMenu.SubTrigger>
+                    <ContextMenu.Portal>
+                      <ContextMenu.SubContent
+                        sideOffset={2}
+                        className="z-50 min-w-44 overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground text-xs shadow-md ring-1 ring-foreground/10"
+                      >
+                        {addableHandlers.map((field) => (
+                          <ContextMenu.Item
+                            key={field.name}
+                            onSelect={() => onAddHandler(node.nodeId, field.name)}
+                            className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                          >
+                            <span className="font-medium font-mono">{field.name}</span>
+                          </ContextMenu.Item>
+                        ))}
+                      </ContextMenu.SubContent>
+                    </ContextMenu.Portal>
+                  </ContextMenu.Sub>
+                </>
+              )}
+              {/* Separate the Add groups from the element-level actions below
+                  (lock/hide/delete) so they don't read as one undifferentiated list. */}
+              {(canToggle || removable) && (addable.length > 0 || addableHandlers.length > 0) && (
+                <ContextMenu.Separator className="my-1 h-px bg-border" />
               )}
               {canToggle && (
                 <>
@@ -631,6 +696,7 @@ function TreeRow({
               lints={lints}
               onSelect={onSelect}
               onAdd={onAdd}
+              onAddHandler={onAddHandler}
               onRemove={onRemove}
               onToggleLock={onToggleLock}
               onToggleVisibility={onToggleVisibility}

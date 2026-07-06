@@ -31,7 +31,6 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Keyboard,
   LayoutGrid,
   Lock,
   type LucideIcon,
@@ -40,7 +39,6 @@ import {
   Plug,
   Plus,
   Pointer,
-  SquareStack,
   Trash2,
   TriangleAlert,
   Type,
@@ -54,7 +52,6 @@ import {
   loadComponentTree,
   subscribeComponents,
 } from "../../lib/guiComponentCache";
-import { hasFocusHandlers, isHitTestable, isModal } from "../../lib/guiInteraction";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
 import { exportedFunctionNames } from "./controllerScript";
@@ -506,62 +503,6 @@ export function StructureTree() {
 }
 
 /**
- * The read-only interaction badges for one tree row. Each icon reflects a
- * capability the `worlds-cpp` XGUI runtime derives from the element's raw attrs
- * (see {@link import("../../lib/guiInteraction")}):
- *
- *   - pointer   → hit-testable (the engine tests it under the cursor): it has a
- *                 mouse handler, a tooltip, or is modal.
- *   - keyboard  → has focus handlers (`onKeyPressed`/`onFocus`/`onBlur`) — the
- *                 handler-only focus signal (modal is shown by its own badge
- *                 rather than lighting up "keyboard").
- *   - modal     → declared `modal` (captures input, blocks/overlays beneath it).
- *
- * Rendered only for capabilities the element actually has, so an inert element
- * shows nothing. Icons are muted and non-interactive (plain spans with a
- * `title`) — they inform, they don't act.
- */
-function InteractionBadges({ node }: { node: GuiNode }) {
-  const hitTestable = isHitTestable(node);
-  const focusHandlers = hasFocusHandlers(node);
-  const modal = isModal(node);
-
-  if (!hitTestable && !focusHandlers && !modal) return null;
-
-  return (
-    <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground/60">
-      {hitTestable && (
-        <span
-          role="img"
-          aria-label="Hit-testable"
-          title="Hit-testable — the engine tests this element under the cursor (it has a mouse handler, a tooltip, or is modal)."
-        >
-          <Pointer className="size-3" />
-        </span>
-      )}
-      {focusHandlers && (
-        <span
-          role="img"
-          aria-label="Has focus handlers"
-          title="Has focus handlers (onKeyPressed / onFocus / onBlur) — this element can receive keyboard focus."
-        >
-          <Keyboard className="size-3" />
-        </span>
-      )}
-      {modal && (
-        <span
-          role="img"
-          aria-label="Modal"
-          title="Modal — captures input and blocks elements beneath it (also receives focus)."
-        >
-          <SquareStack className="size-3" />
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
  * The interaction-lint badge for one tree row (task 506): a single icon reflecting
  * the WORST severity among the node's lints — a red {@link OctagonAlert} when any
  * lint is an error, an amber {@link TriangleAlert} when there are only warnings — with
@@ -645,8 +586,8 @@ function TreeRow({
   // lights up for imported components or an id the user deliberately cleared — which
   // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
   const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
-  // Interaction lints on this node (task 506) — rendered as a badge beside the
-  // engine-capability badges. Never blocks anything; purely advisory.
+  // Interaction lints on this node (task 506) — rendered as a badge on the row.
+  // Never blocks anything; purely advisory.
   const nodeLints = lints.get(node.nodeId) ?? [];
   const addable = allowedChildTags(node);
   // The interaction handlers this node can still gain — the tag's schema handlers
@@ -770,12 +711,6 @@ function TreeRow({
                   {label}
                 </span>
               </button>
-
-              {/* Read-only interaction badges — the engine-derived capabilities of
-                  this element (hit-testable / has focus handlers / modal). Always
-                  visible (like the missing-id warning), muted so they don't compete
-                  with the identity label or the actionable lock/hide/add affordances. */}
-              <InteractionBadges node={node} />
 
               {/* Interaction-lint badge (task 506): a red octagon for any error, an
                   amber triangle for warnings only. The tooltip lists every message.

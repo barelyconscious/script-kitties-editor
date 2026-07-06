@@ -5,11 +5,13 @@ import {
   addChild,
   allowedChildTags,
   canAddChild,
+  canMoveTo,
   componentPickItems,
   EVENT_PLACEHOLDER_LABEL,
   filterPickItems,
   findNode,
   makeChildNode,
+  moveNode,
   nextAutoId,
   nodeLabel,
   nodePath,
@@ -21,6 +23,13 @@ import {
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
+}
+
+/** Child nodeIds under the node addressed by `parentId`, for terse assertions. */
+function childIds(root: GuiNode, parentId: string): string[] {
+  const parent = findNode(root, parentId);
+  if (!parent) throw new Error(`no node ${parentId}`);
+  return parent.children.map((c) => c.nodeId);
 }
 
 /** A node with explicit attrs, for label/attr-sensitive tests. */
@@ -199,7 +208,10 @@ describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
   });
 
   it("falls back to the bare tag name when a non-Event node has no id", () => {
-    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({ text: "Panel", placeholder: false });
+    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({
+      text: "Panel",
+      placeholder: false,
+    });
     expect(treeNodePrimaryLabel(nodeWith("Text", { id: "  " }))).toEqual({
       text: "Text",
       placeholder: false,
@@ -560,5 +572,169 @@ describe("componentPickItems / filterPickItems", () => {
   it("returns the full list for an empty query", () => {
     const items = componentPickItems(tree);
     expect(filterPickItems(items, "  ")).toEqual(items);
+  });
+});
+
+describe("moveNode — immutable re-parent / reorder", () => {
+  // A flat View with four Panel siblings, for reorder-within-parent cases.
+  const flat = (): GuiNode =>
+    node("root", "View", [
+      node("a", "Panel"),
+      node("b", "Panel"),
+      node("c", "Panel"),
+      node("d", "Panel"),
+    ]);
+
+  it("reorders EARLIER within a parent (index in the current array)", () => {
+    // Move d (idx 3) to index 1 → before b.
+    const next = moveNode(flat(), "d", "root", 1);
+    expect(childIds(next, "root")).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("reorders LATER within a parent, handling the remove-then-insert shift", () => {
+    // Move a (idx 0) to index 2 (current-array slot of c) → a lands before c.
+    const next = moveNode(flat(), "a", "root", 2);
+    expect(childIds(next, "root")).toEqual(["b", "a", "c", "d"]);
+  });
+
+  it("appends within a parent when index is the current length (later move)", () => {
+    // Move b (idx 1) to index 4 (== length) → append.
+    const next = moveNode(flat(), "b", "root", 4);
+    expect(childIds(next, "root")).toEqual(["a", "c", "d", "b"]);
+  });
+
+  it("clamps an over-large index to append", () => {
+    const next = moveNode(flat(), "a", "root", 99);
+    expect(childIds(next, "root")).toEqual(["b", "c", "d", "a"]);
+  });
+
+  it("is a NO-OP (same root reference) when the node would land on its own slot", () => {
+    const root = flat();
+    // Move b (idx 1) to index 1 (before itself) and to index 2 (before c) — both
+    // leave b exactly where it is.
+    expect(moveNode(root, "b", "root", 1)).toBe(root);
+    expect(moveNode(root, "b", "root", 2)).toBe(root);
+  });
+
+  it("re-parents a node ACROSS parents at the requested index", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("x", "Text"), node("y", "Text")]),
+      node("p2", "Panel", [node("z", "Text")]),
+    ]);
+    // Move x out of p1 and into p2 at index 0 → before z.
+    const next = moveNode(root, "x", "p2", 0);
+    expect(childIds(next, "p1")).toEqual(["y"]);
+    expect(childIds(next, "p2")).toEqual(["x", "z"]);
+  });
+
+  it("moves the WHOLE subtree and preserves its node objects (nodeIds survive)", () => {
+    const grandchild = node("gc", "Text");
+    const movingSubtree = node("p1", "Panel", [grandchild]);
+    const root = node("root", "View", [movingSubtree, node("p2", "Panel")]);
+    const next = moveNode(root, "p1", "p2", 0);
+    const moved = findNode(next, "p1");
+    // Same object identity for the moved subtree AND its descendant.
+    expect(moved).toBe(movingSubtree);
+    expect(moved?.children[0]).toBe(grandchild);
+    expect(childIds(next, "p2")).toEqual(["p1"]);
+  });
+
+  it("re-parents a node UP to an ancestor (target unaffected by the removal)", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("inner", "Panel", [node("t", "Text")])]),
+    ]);
+    // Move t up two levels to become a child of root at index 0.
+    const next = moveNode(root, "t", "root", 0);
+    expect(childIds(next, "root")).toEqual(["t", "p1"]);
+    expect(childIds(next, "inner")).toEqual([]);
+  });
+
+  it("does not mutate the original tree", () => {
+    const root = flat();
+    moveNode(root, "a", "root", 3);
+    expect(childIds(root, "root")).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("is a no-op for the root, an unknown node, an unknown target, or a cycle", () => {
+    const root = node("root", "View", [node("p", "Panel", [node("t", "Text")])]);
+    expect(moveNode(root, "root", "p", 0)).toBe(root); // root immovable
+    expect(moveNode(root, "ghost", "p", 0)).toBe(root); // unknown node
+    expect(moveNode(root, "t", "ghost", 0)).toBe(root); // unknown target
+    expect(moveNode(root, "p", "p", 0)).toBe(root); // self-target
+    expect(moveNode(root, "p", "t", 0)).toBe(root); // into own descendant
+  });
+});
+
+describe("canMoveTo — drop-legality predicate", () => {
+  it("rejects moving the root", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canMoveTo(root, "root", "p")).toBe(false);
+  });
+
+  it("rejects a self-target and a deep-descendant target (cycle)", () => {
+    const root = node("root", "View", [
+      node("p", "Panel", [node("inner", "Panel", [node("t", "Text")])]),
+    ]);
+    expect(canMoveTo(root, "p", "p")).toBe(false); // into itself
+    expect(canMoveTo(root, "p", "inner")).toBe(false); // into a child
+    expect(canMoveTo(root, "p", "t")).toBe(false); // into a deep descendant
+  });
+
+  it("allows an ordinary re-parent into a Panel", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("t", "Text")]),
+      node("p2", "Panel"),
+    ]);
+    expect(canMoveTo(root, "t", "p2")).toBe(true);
+  });
+
+  it("allows reordering a GridLayout within its OWN parent (self-exclusion)", () => {
+    // The View already holds this grid; a same-parent reorder must not fail the
+    // one-grid-per-container rule against the grid ITSELF.
+    const root = node("root", "View", [node("g", "GridLayout"), node("p", "Panel")]);
+    expect(canMoveTo(root, "g", "root")).toBe(true);
+  });
+
+  it("rejects moving a GridLayout into a container that ALREADY has a different grid", () => {
+    const root = node("root", "View", [
+      node("g1", "GridLayout"),
+      node("p", "Panel", [node("g2", "GridLayout")]),
+    ]);
+    // p already has g2, so g1 cannot join it (one grid per container).
+    expect(canMoveTo(root, "g1", "p")).toBe(false);
+  });
+
+  it("allows moving a Panel into an EMPTY grid but not an OCCUPIED one", () => {
+    const root = node("root", "View", [
+      node("panelA", "Panel"),
+      node("empty", "GridLayout"),
+      node("full", "GridLayout", [node("kid", "Panel")]),
+    ]);
+    expect(canMoveTo(root, "panelA", "empty")).toBe(true);
+    expect(canMoveTo(root, "panelA", "full")).toBe(false);
+  });
+
+  it("allows an Event only under the View, never under a Panel", () => {
+    const root = node("root", "View", [node("p", "Panel"), node("e", "Event")]);
+    expect(canMoveTo(root, "e", "root")).toBe(true); // self-exclusion: reorder under View
+    expect(canMoveTo(root, "e", "p")).toBe(false); // Event not allowed under Panel
+  });
+
+  it("rejects any child under a leaf (Text / Component / Event)", () => {
+    const root = node("root", "View", [
+      node("t", "Text"),
+      node("c", "Component"),
+      node("e", "Event"),
+      node("p", "Panel"),
+    ]);
+    expect(canMoveTo(root, "p", "t")).toBe(false);
+    expect(canMoveTo(root, "p", "c")).toBe(false);
+    expect(canMoveTo(root, "p", "e")).toBe(false);
+  });
+
+  it("rejects an unknown node or an unknown target", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canMoveTo(root, "ghost", "root")).toBe(false);
+    expect(canMoveTo(root, "p", "ghost")).toBe(false);
   });
 });

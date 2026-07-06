@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GuiNode } from "../../lib/guiNode";
 import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { type EditorState, editorReducer, type OpenComponent } from "./editorState";
+import { lockedKeysFor, nodeIdsForKeys } from "./elementLockStore";
 
 function node(tag: GuiNode["tag"] = "View"): GuiNode {
   return { nodeId: "n1", tag, attrs: {}, children: [] };
@@ -329,6 +330,131 @@ describe("editorReducer", () => {
 
   it("removeNode is a no-op when nothing is open", () => {
     expect(editorReducer(CLEAN, { type: "removeNode", nodeId: "x" })).toBe(CLEAN);
+  });
+
+  describe("moveNode (task 512)", () => {
+    // View → Panel(p1: t1,t2) + Panel(p2: t3), for reorder + re-parent cases.
+    function tree(): GuiNode {
+      return {
+        nodeId: "root",
+        tag: "View",
+        attrs: {},
+        children: [
+          {
+            nodeId: "p1",
+            tag: "Panel",
+            attrs: { id: "p1" },
+            children: [
+              { nodeId: "t1", tag: "Text", attrs: {}, children: [] },
+              { nodeId: "t2", tag: "Text", attrs: {}, children: [] },
+            ],
+          },
+          {
+            nodeId: "p2",
+            tag: "Panel",
+            attrs: { id: "p2" },
+            children: [{ nodeId: "t3", tag: "Text", attrs: {}, children: [] }],
+          },
+        ],
+      };
+    }
+    const opened = (): EditorState =>
+      editorReducer(CLEAN, { type: "open", component: openDoc({ root: tree() }) });
+
+    it("re-parents a node, marks dirty, and commits ONE undo step", () => {
+      const s = editorReducer(opened(), {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      expect(s.open?.root.children[0].children.map((c) => c.nodeId)).toEqual(["t2"]);
+      expect(s.open?.root.children[1].children.map((c) => c.nodeId)).toEqual(["t1", "t3"]);
+      expect(s.dirty).toBe(true);
+      expect(s.past).toHaveLength(1);
+    });
+
+    it("undoing a move restores the tree in one step", () => {
+      const moved = editorReducer(opened(), {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      const undone = editorReducer(moved, { type: "undo" });
+      expect(undone.open?.root.children[0].children.map((c) => c.nodeId)).toEqual(["t1", "t2"]);
+      expect(undone.open?.root.children[1].children.map((c) => c.nodeId)).toEqual(["t3"]);
+    });
+
+    it("preserves the selection (moved subtree keeps its nodeId)", () => {
+      const s = editorReducer(
+        { ...opened(), selectedNodeId: "t1" },
+        { type: "moveNode", nodeId: "t1", targetParentId: "p2", index: 0 },
+      );
+      expect(s.selectedNodeId).toBe("t1");
+    });
+
+    it("is a clean no-op on an ILLEGAL move (cycle) — no dirty, no history", () => {
+      const s0 = opened();
+      // Dropping p1 into its own child t1 is a cycle → canMoveTo rejects it.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p1",
+        targetParentId: "t1",
+        index: 0,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a clean no-op when the target's element rules forbid the child", () => {
+      const s0 = opened();
+      // A <Text> is a leaf — nothing may move under it.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p2",
+        targetParentId: "t1",
+        index: 0,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a no-op (same state) when the node would land on its own slot", () => {
+      const s0 = opened();
+      // Move p1 (idx 0) to index 1 (before p2) — p1 is already right before p2.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p1",
+        targetParentId: "root",
+        index: 1,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a no-op when nothing is open", () => {
+      expect(
+        editorReducer(CLEAN, { type: "moveNode", nodeId: "t1", targetParentId: "p2", index: 0 }),
+      ).toBe(CLEAN);
+    });
+
+    it("re-derives persisted lock keys onto the moved node's NEW index-path", () => {
+      // Lock t1, then re-parent it. The persisted-key derivation (lockedKeysFor,
+      // which the LockPersistence effect calls on every root change) must resolve to
+      // t1's NEW structural position — proving a save+reload restores the lock onto
+      // the right node rather than a stale index-path.
+      const s0 = editorReducer(opened(), { type: "toggleLock", nodeId: "t1" });
+      const moved = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      if (!moved.open) throw new Error("expected an open component after the move");
+      // t1 now lives at root→child1(p2)→child0 → index-path "1.0".
+      const keys = lockedKeysFor(moved.open.root, moved.lockedNodeIds);
+      expect(keys).toEqual(["1.0"]);
+      // And that key resolves back to t1 against the moved tree.
+      expect(nodeIdsForKeys(moved.open.root, keys)).toEqual(new Set(["t1"]));
+    });
   });
 
   it("stores an Event's name/handler verbatim (no validation/normalization)", () => {

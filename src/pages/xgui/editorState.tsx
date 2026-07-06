@@ -31,8 +31,9 @@
  *    ADDS a child to the node tree via `addChildNode` (a finer, intent-named
  *    tree-mutation action layered on the same dirty discipline as `replaceRoot`;
  *    the immutable append itself lives in the pure `guiTreeEdit` module so it is
- *    unit-tested without the store). Any tree mutation marks dirty. Delete /
- *    reparent are deferred (task 452 is ADD only), so no remove/move action yet.
+ *    unit-tested without the store). Any tree mutation marks dirty. DELETE flows
+ *    through `removeNode`; REPARENT/REORDER (drag-and-drop, task 512) through
+ *    `moveNode` (validated by `canMoveTo`) — both immutable ops in `guiTreeEdit`.
  *    `replaceRoot` remains the wholesale escape hatch for F9b/F7 writebacks.
  *  • F9b (properties) — edits a node's `attrs` via the `setNodeAttrs` action,
  *    which replaces one node's attrs by nodeId and marks dirty (the immutable
@@ -69,7 +70,15 @@ import { createContext, type ReactNode, useContext, useMemo, useReducer } from "
 import type { GuiNode } from "../../lib/guiNode";
 import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { nodeHasId } from "./guiProperties";
-import { addChild, findNode, nextAutoId, removeNode, setNodeAttrs } from "./guiTreeEdit";
+import {
+  addChild,
+  canMoveTo,
+  findNode,
+  moveNode,
+  nextAutoId,
+  removeNode,
+  setNodeAttrs,
+} from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
 
 /**
@@ -190,7 +199,7 @@ export type EditorState = {
  * UNDO/REDO + COALESCING (task 470)
  * ─────────────────────────────────────────────────────────────────────────────
  * VISUAL-tree mutations (`replaceRoot`, `addChildNode`, `setNodeAttrs`,
- * `removeNode`, `addController`) push an undo step. (`setControllerText` does
+ * `removeNode`, `moveNode`, `addController`) push an undo step. (`setControllerText` does
  * NOT — task 472: Monaco owns the controller buffer's undo, so a controller-text
  * edit is dirty-but-not-a-document-step.) Some carry an optional
  * `coalesceKey`: consecutive mutations sharing the SAME key collapse into ONE undo
@@ -269,6 +278,21 @@ export type EditorAction =
    * selection that the removal orphans (the removed node OR a descendant) is cleared.
    */
   | { type: "removeNode"; nodeId: string }
+  /**
+   * Move the node identified by `nodeId` (and its whole subtree) to become a child
+   * of `targetParentId` at `index` — the data half of structure-tree drag-and-drop
+   * (task 512) — marks dirty. VALIDATED via {@link canMoveTo}: an illegal drop
+   * (cycle, root, or a target whose element rules forbid the child) is a clean no-op
+   * (no dirty, no history). `index` follows {@link moveNode}'s current-array
+   * convention (the target's children as they stand before the move; the off-by-one
+   * for a same-parent later move is handled inside `moveNode`). The moved subtree's
+   * `nodeId`s are preserved, so the selection survives without remapping. The
+   * immutable move lives in the pure {@link moveNode} so it is tested off-store; one
+   * discrete move is ONE undo step (no coalescing). Persisted element locks are
+   * re-derived by the `LockPersistence` effect, which fires on the resulting `root`
+   * change (same path `addChildNode`/`removeNode` rely on).
+   */
+  | { type: "moveNode"; nodeId: string; targetParentId: string; index: number }
   /**
    * Seat the controller's on-disk contents into the working draft WITHOUT marking
    * dirty (F10 lazy-load: the Controller tab read an existing controller via
@@ -555,6 +579,30 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             : state.selectedNodeId,
         dirty: true,
         // A discrete remove is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
+      };
+    }
+    case "moveNode": {
+      if (!state.open) return state;
+      // Legality gate: an illegal drop (cycle, root, or an element rule the target
+      // forbids) is a clean no-op — keep every rule in canMoveTo so the UI never
+      // duplicates it. Validate BEFORE mutating.
+      if (!canMoveTo(state.open.root, action.nodeId, action.targetParentId)) return state;
+      const nextRoot = moveNode(
+        state.open.root,
+        action.nodeId,
+        action.targetParentId,
+        action.index,
+      );
+      // A move that lands the node exactly where it already sits returns the SAME
+      // reference → no-op (don't dirty or push history on a null move).
+      if (nextRoot === state.open.root) return state;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        // The moved subtree keeps its nodeIds, so the selection stays valid as-is.
+        dirty: true,
+        // A discrete move is its own undo step (no coalescing).
         ...pushHistory(state, undefined),
       };
     }

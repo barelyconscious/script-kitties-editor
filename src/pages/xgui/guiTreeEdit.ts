@@ -10,9 +10,10 @@
  * immutable function, returning a fresh root (the store's `replaceRoot` reducer
  * marks dirty). The panel is then a thin shell that calls this and dispatches.
  *
- * SCOPE (F9a): ADD a child only. Delete and reparent are explicitly deferred
- * (design subsection 2 / task 452), so this module offers no remove/move — adding
- * them later is a new function here, not a reshaping of these.
+ * SCOPE: grew from ADD-only (F9a) to the full structural edit set — {@link addChild}
+ * (append), {@link removeNode} (delete a subtree), and {@link moveNode} /
+ * {@link canMoveTo} (re-parent/reorder via drag-and-drop, task 512). Each is a pure
+ * immutable transform returning a fresh root; the store wraps them with dirty/history.
  *
  * @see design/xgui_ta.md — "Structure column" (the tree slice) and "XML Elements"
  *   (the element rules: View top-level, Event only under View, Component childless).
@@ -314,6 +315,131 @@ export function removeNode(root: GuiNode, nodeId: string): GuiNode {
     children.push(next);
   }
   return changed ? { ...root, children } : root;
+}
+
+/**
+ * Insert `child` at `index` among the children of the node identified by
+ * `parentNodeId`, returning a NEW root (immutable — untouched subtrees are reused
+ * by reference). `index` is a splice position into the parent's children array:
+ * `0` prepends, `children.length` appends, values outside `[0, length]` clamp. If
+ * `parentNodeId` is not found, the original root is returned UNCHANGED (same
+ * reference). Internal helper behind {@link moveNode}; the public add-child path is
+ * {@link addChild} (append-only).
+ */
+function insertChildAt(
+  root: GuiNode,
+  parentNodeId: string,
+  child: GuiNode,
+  index: number,
+): GuiNode {
+  if (root.nodeId === parentNodeId) {
+    const at = Math.max(0, Math.min(index, root.children.length));
+    const children = [...root.children];
+    children.splice(at, 0, child);
+    return { ...root, children };
+  }
+  let changed = false;
+  const children = root.children.map((c) => {
+    const next = insertChildAt(c, parentNodeId, child, index);
+    if (next !== c) changed = true;
+    return next;
+  });
+  return changed ? { ...root, children } : root;
+}
+
+/**
+ * Move the node identified by `nodeId` (and its whole subtree) so it becomes a
+ * child of `targetParentId` at `index`, returning a NEW root (immutable — untouched
+ * subtrees are reused by reference, and the MOVED subtree's node objects — and thus
+ * its `nodeId`s — are preserved by reference, so selection / locks / badges keyed by
+ * nodeId survive the move).
+ *
+ * INDEX CONVENTION — `index` is a position in the target parent's CURRENT children
+ * array (the array as it stands BEFORE the move), i.e. "place the moved node at this
+ * slot among the children you can see right now". `0` is first, and the target's
+ * current `children.length` (or more) appends; out-of-range values clamp. For a
+ * SAME-PARENT reorder the moved node is still in that current array, so this function
+ * compensates for the remove-then-insert shift internally: dropping the node first
+ * shifts every later sibling down by one, so a requested `index` PAST the node's own
+ * current position lands one slot earlier after removal (the classic off-by-one). The
+ * caller therefore always reasons in current-array terms and never subtracts itself —
+ * keeping that arithmetic here is what lets #513's drop-plan helper stay a pure
+ * pointer→index mapping. A move that would leave the node exactly where it already is
+ * returns the SAME root reference (a no-op, so callers don't dirty on a null move).
+ *
+ * This function is MECHANICAL: it guards only against structurally-impossible moves
+ * (unknown node/target, moving the root, or a cycle where the target is the node or
+ * one of its descendants), returning the original root unchanged for those. The
+ * element-RULE legality (allow-lists, one-grid, Event-only-under-View, self-exclusion)
+ * lives in {@link canMoveTo}; the store validates with that BEFORE calling this.
+ */
+export function moveNode(
+  root: GuiNode,
+  nodeId: string,
+  targetParentId: string,
+  index: number,
+): GuiNode {
+  // The root never moves; an unknown node/target or a self-target is a no-op.
+  if (root.nodeId === nodeId || nodeId === targetParentId) return root;
+  const moving = findNode(root, nodeId);
+  if (!moving) return root;
+  const targetParent = findNode(root, targetParentId);
+  if (!targetParent) return root;
+  // No-cycle: the target must not live inside the moved subtree.
+  if (findNode(moving, targetParentId) != null) return root;
+
+  // Same-parent reorder? Then the moved node is a direct child of the target, and
+  // its current slot governs the remove-then-insert shift.
+  const from = targetParent.children.findIndex((c) => c.nodeId === nodeId);
+  const sameParent = from !== -1;
+  const clamped = Math.max(0, Math.min(index, targetParent.children.length));
+  // Post-removal insertion index: only a same-parent move PAST the node's own slot
+  // needs the -1 (removing the node shifts later siblings down by one).
+  const insertAt = sameParent && clamped > from ? clamped - 1 : clamped;
+  // Landing right back on the current slot changes nothing — signal a no-op.
+  if (sameParent && insertAt === from) return root;
+
+  const detached = removeNode(root, nodeId);
+  return insertChildAt(detached, targetParentId, moving, insertAt);
+}
+
+/**
+ * Whether the node identified by `nodeId` may be MOVED to become a child of
+ * `targetParentId` — the drop-legality predicate behind the structure tree's
+ * drag-and-drop. Built ON {@link allowedChildTags} / {@link canAddChild} (so every
+ * element rule — one-grid-per-container, `<Event>` only under `<View>`, leaves reject
+ * children, an occupied `<GridLayout>` takes nothing) plus three rules the add-child
+ * allow-list cannot express:
+ *
+ *  - NO-CYCLE — the target may not be the node itself nor any descendant of it (you
+ *    cannot drop a subtree inside itself).
+ *  - ROOT IMMOVABLE — the `<View>` root never moves; and since the root has no parent
+ *    to target, nothing can be dropped as a sibling of the root either.
+ *  - SELF-EXCLUSION — the target's allow-list is evaluated as if the dragged node were
+ *    ALREADY removed from it, so reordering a `<GridLayout>` within its own parent
+ *    doesn't fail the one-grid-per-container check against ITSELF (a same-parent move
+ *    would otherwise see the container as "already has a grid" and reject the move).
+ *
+ * Keeping ALL of this here (rather than in the pointer/UI layer) means the drop UI
+ * never re-derives a rule — it asks this and honors the answer. {@link moveNode}
+ * performs the mechanical move; the store validates with this first.
+ */
+export function canMoveTo(root: GuiNode, nodeId: string, targetParentId: string): boolean {
+  // Root immovable, and a self-target is never legal.
+  if (root.nodeId === nodeId || nodeId === targetParentId) return false;
+  const moving = findNode(root, nodeId);
+  if (!moving) return false;
+  const targetParent = findNode(root, targetParentId);
+  if (!targetParent) return false;
+  // No-cycle: the target must not live inside the moved subtree.
+  if (findNode(moving, targetParentId) != null) return false;
+  // Self-exclusion: judge the allow-list against the target as if the dragged node
+  // were already gone (a no-op for a cross-parent move, since it isn't a child there).
+  const targetExcludingNode: GuiNode = {
+    ...targetParent,
+    children: targetParent.children.filter((c) => c.nodeId !== nodeId),
+  };
+  return allowedChildTags(targetExcludingNode).includes(moving.tag);
 }
 
 /**

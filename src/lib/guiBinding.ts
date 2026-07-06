@@ -86,8 +86,11 @@ function hasOwn(obj: object, key: string): boolean {
  * The binding grammar parsed from the text BETWEEN a token's braces: which frame it
  * names (`view`/`item`/`named`) and the dotted path into that frame (an empty path
  * is the whole-object form).
+ *
+ * Exported so the model scaffold (`guiModelScaffold.ts`) classifies tokens through
+ * the SAME grammar the resolver binds against — one grammar, one classifier.
  */
-type ScopeRef =
+export type ScopeRef =
   | { frame: "view"; path: string[] }
   | { frame: "item"; path: string[] }
   | { frame: "named"; name: string; path: string[] };
@@ -105,7 +108,7 @@ type ScopeRef =
  * `$.` (view) is distinguished from `$name.` (named) by the character after `$`: a
  * dot means the anonymous View frame, anything else starts a scope name.
  */
-function parseScopeRef(token: string): ScopeRef {
+export function parseScopeRef(token: string): ScopeRef {
   const t = token.trim();
   if (t.startsWith("$.")) return { frame: "view", path: splitPath(t.slice(2)) };
   if (t.startsWith("$")) {

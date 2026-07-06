@@ -76,11 +76,8 @@ import type { GuiNode } from "../../lib/guiNode";
 import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
 import {
   pickTopmostRect,
-  placeTooltip,
-  type StageBounds,
   type StageRect,
   screenRectToStageRect,
-  tooltipSizeFromRoot,
 } from "../../lib/guiTooltipPlacement";
 import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
@@ -664,41 +661,43 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
 /** The tooltip overlay's z-index — above every ranked box (whose z-indices are small). */
 const TOOLTIP_Z = 2_147_483_000;
 
-/** The fixed stage bounds the tooltip placement flips/clamps against. */
-const TOOLTIP_STAGE: StageBounds = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
-
 type TooltipCardProps = {
   /** The tooltip component ref (`tooltip=` value, e.g. `gui.card.xml`). */
   src: string;
   /** The provider's scope-resolved `tooltipData` — the card's fresh root model. */
   data: unknown;
-  /** The provider's rect in stage-logical coords (placement anchors to it). */
+  /** The provider's rect in stage-logical coords — the card's render frame verbatim. */
   anchor: StageRect;
   palette: Palette;
 };
 
 /**
- * The tooltip card overlay (task 515). Rendered INSIDE the stage's coordinate space
- * (so it scales with zoom like the runtime card will), `pointer-events-none` (so it
- * can never steal hover from its provider — structurally no flicker loop), and above
+ * The tooltip card overlay (tasks 515/516). Rendered INSIDE the stage's coordinate
+ * space (so it scales with zoom like the runtime card will), `pointer-events-none` (so
+ * it can never steal hover from its provider — structurally no flicker loop), and above
  * everything (a large z-index in the stage's root stacking context).
+ *
+ * ANCHORING (task 516, engine ground truth — worlds-cpp GUILoader.cpp:370): the engine
+ * parents the loaded tooltip subtree to the PROVIDER element, so the tooltip's geometry
+ * resolves against the HOVERED ELEMENT'S RECT and its placement is authored entirely by
+ * the tooltip component. So the overlay's frame is the provider's stage rect VERBATIM
+ * (its `x`/`y`/`width`/`height`), and the mounted tooltip tree renders inside it exactly
+ * as if it were the provider's own box — a child at `position="1,1,0,0"` lands at the
+ * provider's bottom-right corner. There is NO editor-side placement (no gap / flip /
+ * clamp / default card size); the design-doc stage-7 placement policy is FUTURE engine
+ * work, deliberately not simulated (the old `placeTooltip`/`tooltipSizeFromRoot` helpers
+ * were removed with it).
  *
  * It resolves `src` through the SAME {@link useComponent} cache and renders the
  * component tree via the SAME child-render path a nested `<Component>` uses
  * ({@link renderChildren}), seated in a fresh View frame from the resolved `data`
  * (a `null` datum → {@link emptyItemScope}, matching the empty-grid-cell rule). A
- * missing/blank ref reuses the shared {@link ComponentPlaceholder}. The card's size is
- * its root's authored ABSOLUTE size ({@link tooltipSizeFromRoot}); {@link placeTooltip}
- * positions it below-right of the provider, flipping at the stage bottom and clamping
- * to 1280×768.
+ * missing/blank ref reuses the shared {@link ComponentPlaceholder}.
  */
 function TooltipCard({ src, data, anchor, palette }: TooltipCardProps) {
   const basename = srcBasename(src);
   const entry = useComponent(basename || null);
   const root = entry.status === "ok" ? entry.root : null;
-  // The card's own size — its root's absolute size (or the default when the root lacks
-  // an absolute size; the loader lint nudges authors toward one).
-  const size = useMemo(() => tooltipSizeFromRoot(root?.attrs.size), [root]);
   // The card's fresh root model: the resolved data seated as a View frame. A `null`
   // datum uses emptyItemScope so tokens collapse to "" (no waiting flash), mirroring
   // the empty-grid-cell path (caveat 5).
@@ -715,13 +714,14 @@ function TooltipCard({ src, data, anchor, palette }: TooltipCardProps) {
   // In flight — render nothing (no placeholder flash), same posture as ComponentMount.
   if (entry.status === "loading") return null;
 
-  const place = placeTooltip(anchor, size, TOOLTIP_STAGE);
+  // The overlay frame IS the provider's stage rect (position AND size) — the tooltip
+  // subtree renders inside it exactly as if it were the provider's own box.
   const wrapperStyle: CSSProperties = {
     position: "absolute",
-    left: `${place.x}px`,
-    top: `${place.y}px`,
-    width: `${size.width}px`,
-    height: `${size.height}px`,
+    left: `${anchor.x}px`,
+    top: `${anchor.y}px`,
+    width: `${anchor.width}px`,
+    height: `${anchor.height}px`,
     pointerEvents: "none",
     zIndex: TOOLTIP_Z,
   };

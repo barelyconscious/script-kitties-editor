@@ -1,7 +1,7 @@
 /**
  * guiTooltipPlacement — the pure, unit-testable math behind the XGUI preview's
- * tooltip simulation (task 515). It owns three concerns, all coordinate math and
- * none of them React/DOM:
+ * tooltip simulation (tasks 515/516). It owns two concerns, both coordinate math and
+ * neither React/DOM:
  *
  *   1. HIT-TESTING (`rectContainsPoint` / `pickTopmostRect`) — given the pointer in
  *      SCREEN coordinates and the registered tooltip providers' screen rects, pick
@@ -13,35 +13,24 @@
  *
  *   2. SCREEN→STAGE CONVERSION (`screenRectToStageRect`) — convert a provider's
  *      screen rect into the stage's LOGICAL 1280×768 space (the one place the
- *      zoom/pan transform is undone), so placement math is trivial and testable in a
+ *      zoom/pan transform is undone), so downstream math is trivial and testable in a
  *      single coordinate space. The stage is drawn `translate(pan) scale(scale)` from
  *      its top-left, so `logical = (screen - stageScreenOrigin) / scale`.
  *
- *   3. PLACEMENT (`placeTooltip`) — anchor the tooltip card BELOW the provider (top
- *      edge a gap under the provider's bottom, left edges aligned so the card grows
- *      down-and-right), FLIP it above when it would overflow the stage bottom, and
- *      CLAMP it horizontally into the 1280×768 stage. All in stage-logical space; the
- *      overlay renders inside the stage transform, so it scales with zoom like the
- *      runtime card will.
+ * ANCHORING CONTRACT (task 516, engine ground truth — worlds-cpp GUILoader.cpp:370):
+ * the engine parents the loaded tooltip subtree to the PROVIDER element ("it needs a
+ * parent to compare its size and position to"), so the tooltip's geometry resolves
+ * against the HOVERED ELEMENT'S RECT and placement is authored entirely by the tooltip
+ * component itself (a child at `position="1,1,0,0"` sits at the provider's bottom-right
+ * corner). The preview therefore renders the tooltip in a frame EQUAL to the provider's
+ * stage rect — there is no editor-side placement policy. The design doc's stage-7
+ * placement (below-anchor gap / flip / clamp / a default card size) is FUTURE ENGINE
+ * work and is deliberately NOT simulated here; the old `placeTooltip` /
+ * `tooltipSizeFromRoot` helpers were removed with it. What remains is the hit-test +
+ * coordinate-conversion core that feeds the provider rect straight to the overlay.
  *
- * The tooltip card's own size comes from its root's authored ABSOLUTE size
- * (`tooltipSizeFromRoot`) — the loader lint nudges authors toward an absolute root
- * size; a missing/relative one falls back to {@link DEFAULT_TOOLTIP_SIZE} so
- * placement still has a sane box to flip/clamp against.
- *
- * @see design/xgui_mouse_input.md — "Stage 7 — Overlay root + tooltip system"
+ * @see design/xgui_mouse_input.md — "Stage 7 — Overlay root + tooltip system" (future)
  */
-
-import { parseUDim2 } from "./guiGeometry";
-
-/** A width/height pair in stage-logical pixels. */
-export type Size = { width: number; height: number };
-
-/** The fixed stage bounds placement clamps/flips against (1280×768 logical). */
-export type StageBounds = { width: number; height: number };
-
-/** A point in stage-logical space (the tooltip card's top-left). */
-export type Point = { x: number; y: number };
 
 /** A rect in stage-logical space: top-left `x`/`y` plus `width`/`height`. */
 export type StageRect = { x: number; y: number; width: number; height: number };
@@ -55,63 +44,6 @@ export type ScreenRectEdges = { left: number; top: number; right: number; bottom
 
 /** The subset of a `DOMRect` the screen→stage conversion reads. */
 export type ScreenRectOrigin = { left: number; top: number; width: number; height: number };
-
-/** The gap (stage-logical px) between the provider's edge and the tooltip card. */
-export const TOOLTIP_GAP = 8;
-
-/**
- * The tooltip card size used when the referenced component's root does not declare a
- * usable ABSOLUTE size (missing, or a relative/zero width/height). The loader lint
- * warns authors to give tooltip roots an absolute pixel size; until they do, this
- * keeps placement's flip/clamp math sane rather than degenerating to a 0×0 box.
- */
-export const DEFAULT_TOOLTIP_SIZE: Size = { width: 160, height: 96 };
-
-/**
- * The tooltip card's on-screen size, from its root `<View>`'s `size` attribute — the
- * ABSOLUTE (`absX`/`absY`) fields only, since a tooltip sizes in pixels (relative
- * fields would size against the card's own overlay box, which is meaningless). A
- * non-positive absolute field (absent size, or a relative/token root size) falls back
- * to {@link DEFAULT_TOOLTIP_SIZE} per axis.
- */
-export function tooltipSizeFromRoot(sizeAttr: string | undefined): Size {
-  const { absX, absY } = parseUDim2(sizeAttr);
-  return {
-    width: absX > 0 ? absX : DEFAULT_TOOLTIP_SIZE.width,
-    height: absY > 0 ? absY : DEFAULT_TOOLTIP_SIZE.height,
-  };
-}
-
-/**
- * Place the tooltip card relative to its provider, all in stage-logical space.
- *
- *   - PREFERRED: directly below the provider — the card's top edge a `gap` under the
- *     provider's bottom, its left edge aligned with the provider's left, so the card
- *     grows down-and-right from the provider's bottom-left corner.
- *   - FLIP: if the card would overflow the stage's bottom edge, place it ABOVE the
- *     provider instead (bottom edge a `gap` above the provider's top).
- *   - CLAMP: the card's left is clamped so it stays within the stage horizontally
- *     (`0 … stage.width - card.width`); a card wider than the stage pins to the left.
- *
- * Vertical is FLIP (not clamp) by design — a flipped card sits fully above the
- * provider rather than being nudged to overlap it. Horizontal is clamp. Returns the
- * card's top-left in stage-logical coordinates.
- */
-export function placeTooltip(
-  anchor: StageRect,
-  tooltip: Size,
-  stage: StageBounds,
-  gap: number = TOOLTIP_GAP,
-): Point {
-  const belowY = anchor.y + anchor.height + gap;
-  // Flip above when the below placement would run past the stage bottom.
-  const flip = belowY + tooltip.height > stage.height;
-  const y = flip ? anchor.y - gap - tooltip.height : belowY;
-  // Horizontal clamp: keep the card on-stage; a too-wide card pins left.
-  const maxX = Math.max(0, stage.width - tooltip.width);
-  const x = Math.min(maxX, Math.max(0, anchor.x));
-  return { x, y };
-}
 
 /**
  * Convert a provider's SCREEN rect into the stage's LOGICAL 1280×768 space. The stage

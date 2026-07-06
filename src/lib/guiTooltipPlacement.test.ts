@@ -1,97 +1,10 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_TOOLTIP_SIZE,
-  pickTopmostRect,
-  placeTooltip,
-  rectContainsPoint,
-  type StageRect,
-  screenRectToStageRect,
-  TOOLTIP_GAP,
-  tooltipSizeFromRoot,
-} from "./guiTooltipPlacement";
-
-const STAGE = { width: 1280, height: 768 };
+import { pickTopmostRect, rectContainsPoint, screenRectToStageRect } from "./guiTooltipPlacement";
 
 // A screen rect helper: build the {left,top,right,bottom,width,height} DOMRect subset.
 function rect(left: number, top: number, width: number, height: number) {
   return { left, top, right: left + width, bottom: top + height, width, height };
 }
-
-describe("tooltipSizeFromRoot", () => {
-  it("uses the absolute (absX/absY) fields of the root size", () => {
-    expect(tooltipSizeFromRoot("0,0,200,120")).toEqual({ width: 200, height: 120 });
-  });
-
-  it("falls back to the default per axis when the absolute field is non-positive", () => {
-    // Absent size → default both axes.
-    expect(tooltipSizeFromRoot(undefined)).toEqual(DEFAULT_TOOLTIP_SIZE);
-    // A relative-only root size (abs 0) → default both axes.
-    expect(tooltipSizeFromRoot("1,1,0,0")).toEqual(DEFAULT_TOOLTIP_SIZE);
-    // Mixed: absX present, absY zero → width kept, height defaulted.
-    expect(tooltipSizeFromRoot("0,0,300,0")).toEqual({
-      width: 300,
-      height: DEFAULT_TOOLTIP_SIZE.height,
-    });
-  });
-
-  it("ignores relative fields entirely (only abs matters)", () => {
-    expect(tooltipSizeFromRoot("0.5,0.5,80,60")).toEqual({ width: 80, height: 60 });
-  });
-});
-
-describe("placeTooltip", () => {
-  const tooltip = { width: 160, height: 96 };
-
-  it("anchors below the provider, left edges aligned, a gap under its bottom", () => {
-    const anchor: StageRect = { x: 100, y: 100, width: 64, height: 64 };
-    expect(placeTooltip(anchor, tooltip, STAGE)).toEqual({
-      x: 100,
-      y: 100 + 64 + TOOLTIP_GAP,
-    });
-  });
-
-  it("flips above when the below placement overflows the stage bottom", () => {
-    // Provider near the bottom: below would be 700+64+8=772 + 96 > 768 → flip above.
-    const anchor: StageRect = { x: 100, y: 700, width: 64, height: 64 };
-    const p = placeTooltip(anchor, tooltip, STAGE);
-    // Above: bottom edge a gap over the provider top → y = 700 - 8 - 96.
-    expect(p).toEqual({ x: 100, y: 700 - TOOLTIP_GAP - tooltip.height });
-  });
-
-  it("does NOT flip when the card fits below (boundary: exactly reaches the edge)", () => {
-    // belowY + height == stage.height exactly → not an overflow (uses strict >).
-    // Pick anchor so belowY = 768 - 96 = 672 → anchor.y + 64 + 8 = 672 → anchor.y = 600.
-    const anchor: StageRect = { x: 0, y: 600, width: 64, height: 64 };
-    const p = placeTooltip(anchor, tooltip, STAGE);
-    expect(p.y).toBe(600 + 64 + TOOLTIP_GAP);
-    expect(p.y + tooltip.height).toBe(STAGE.height);
-  });
-
-  it("clamps horizontally so the card stays within the stage right edge", () => {
-    // Provider hard against the right edge: x would overflow → clamp to width - card.
-    const anchor: StageRect = { x: 1260, y: 100, width: 20, height: 20 };
-    const p = placeTooltip(anchor, tooltip, STAGE);
-    expect(p.x).toBe(STAGE.width - tooltip.width); // 1120
-  });
-
-  it("clamps horizontally to 0 when the provider is off the left edge", () => {
-    const anchor: StageRect = { x: -50, y: 100, width: 20, height: 20 };
-    const p = placeTooltip(anchor, tooltip, STAGE);
-    expect(p.x).toBe(0);
-  });
-
-  it("pins a card wider than the stage to the left edge", () => {
-    const wide = { width: 2000, height: 40 };
-    const anchor: StageRect = { x: 500, y: 100, width: 20, height: 20 };
-    const p = placeTooltip(anchor, wide, STAGE);
-    expect(p.x).toBe(0);
-  });
-
-  it("honors a custom gap", () => {
-    const anchor: StageRect = { x: 10, y: 10, width: 30, height: 30 };
-    expect(placeTooltip(anchor, tooltip, STAGE, 20)).toEqual({ x: 10, y: 10 + 30 + 20 });
-  });
-});
 
 describe("screenRectToStageRect", () => {
   it("undoes the stage origin and scale (identity view)", () => {

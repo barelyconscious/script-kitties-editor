@@ -42,6 +42,7 @@ import {
   rowsToAttrs,
 } from "./freeformRows";
 import {
+  bindingDisplayValue,
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
   computedId,
@@ -50,6 +51,7 @@ import {
   formatCompound,
   isBoundField,
   nodeHasId,
+  normalizeBinding,
   type PropertyField,
   parseCompound,
   srcBasename,
@@ -153,88 +155,74 @@ export function PropertiesPanel() {
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
-       <fieldset
-         disabled={locked}
-         className={cn("m-0 min-w-0 border-0 p-0", locked && "opacity-60")}
-       >
-        {/* <Component> src — the included component's basename. Pinned to the very
+        <fieldset
+          disabled={locked}
+          className={cn("m-0 min-w-0 border-0 p-0", locked && "opacity-60")}
+        >
+          {/* <Component> src — the included component's basename. Pinned to the very
             top and rendered as an obviously NON-editable, locked field: it is set
             once via the tree's component picker (when the <Component> is added) and
             never typed here. */}
-        {node.tag === "Component" && (
-          <FieldRow label="src">
-            <div
-              aria-readonly="true"
-              title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
-              className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                {srcBasename(node.attrs.src) || "—"}
-              </span>
-            </div>
-          </FieldRow>
-        )}
-
-        {/* Computed read-only hierarchical id + editable local id — hidden for Event
-            nodes, which have no id (475). */}
-        {hasId && (
-          <>
-            <FieldRow label="computed id">
-              <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
-                <span
-                  className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
-                  title={computed || "no id set"}
-                >
-                  {computed || "—"}
+          {node.tag === "Component" && (
+            <FieldRow label="src">
+              <div
+                aria-readonly="true"
+                title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
+                className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                  {srcBasename(node.attrs.src) || "—"}
                 </span>
-                <CopyIdButton value={computed} />
               </div>
             </FieldRow>
+          )}
 
-            <FieldRow label="id">
-              <Input
-                value={node.attrs.id ?? ""}
-                onChange={(e) => setAttr("id", e.currentTarget.value)}
-                placeholder="local id"
-                className="h-7 font-mono text-xs"
-              />
-            </FieldRow>
-          </>
-        )}
+          {/* Computed read-only hierarchical id + editable local id — hidden for Event
+            nodes, which have no id (475). */}
+          {hasId && (
+            <>
+              <FieldRow label="computed id">
+                <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
+                  <span
+                    className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
+                    title={computed || "no id set"}
+                  >
+                    {computed || "—"}
+                  </span>
+                  <CopyIdButton value={computed} />
+                </div>
+              </FieldRow>
 
-        {/* <Component> data — the key of a data-model OBJECT to seat as the mounted
-            child's root (auto-populated from the child's token shape). A bare model
-            key; clearing it removes the binding. Committed on BLUR (not per
-            keystroke) so a half-typed name never spawns a throwaway model key. */}
-        {node.tag === "Component" && (
-          <FieldRow label="data">
-            <DataKeyField
-              key={node.nodeId}
-              value={node.attrs.data ?? ""}
-              onCommit={(v) => setAttr("data", v)}
-            />
-          </FieldRow>
-        )}
+              <FieldRow label="id">
+                <Input
+                  value={node.attrs.id ?? ""}
+                  onChange={(e) => setAttr("id", e.currentTarget.value)}
+                  placeholder="local id"
+                  className="h-7 font-mono text-xs"
+                />
+              </FieldRow>
+            </>
+          )}
 
-        {/* The root View's structural attrs are managed elsewhere (id auto-set on
+          {/* The root View's structural attrs are managed elsewhere (id auto-set on
             create; controller via the Controller tab); its one schema field
             (scopeName) renders via the map below. Offer the add-child actions here
             so the panel is a starting point rather than a near-empty surface. */}
-        {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
+          {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
 
-        {/* Well-known fields for the tag (position/size suppressed for a grid
+          {/* Well-known fields for the tag (position/size suppressed for a grid
             child — the parent GridLayout owns its geometry). */}
-        {fieldsForTag(node.tag, parentTag).map((field) => (
-          <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
-        ))}
+          {fieldsForTag(node.tag, parentTag).map((field) => (
+            <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
+          ))}
 
-        {/* Freeform override rows (Component overrides + any unrecognized attr).
+          {/* Freeform override rows (Component overrides + any unrecognized attr).
             Keyed by nodeId so switching the selected element re-derives fresh
             local rows for it (a clean mount), rather than carrying the previous
             node's in-progress rows across. Same-node external changes (undo/redo)
             are handled inside via reconcileRows. */}
-        <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
-       </fieldset>
+          <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
+        </fieldset>
       </div>
     </div>
   );
@@ -339,17 +327,22 @@ function CopyIdButton({ value }: { value: string }) {
 }
 
 /**
- * The `<Component>` `data` key input. Edits are LOCAL until BLUR (or Enter), so a
- * half-typed name like "b"/"bu"/"but" never lands on the node — which would spawn a
- * throwaway data-model object per keystroke. Mounted with a `key={nodeId}` by the
- * caller so selecting a different element gives it a fresh value; an external change
- * to the committed value (undo/redo) re-syncs the draft.
+ * A whole-value BINDING field (`data` / `dataCollection` / `tooltipData`). The input
+ * EDITS the inner model path; the STORED attr is the normalized grammar token
+ * ({@link normalizeBinding}) — a bare key is unresolvable under the strict grammar, so
+ * it must never land on the node. The displayed draft is the inner path of a simple
+ * `{$.x}` form ({@link bindingDisplayValue}) so it reads as "edit the path".
+ *
+ * Edits are LOCAL until BLUR (or Enter): a half-typed path like "b"/"bu"/"but" never
+ * commits — which would otherwise spawn a throwaway data-model object per keystroke.
+ * An external change to the committed value (undo/redo, node switch) re-syncs the
+ * draft to the newly-displayed path.
  */
-function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+function BindingField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(() => bindingDisplayValue(value));
+  useEffect(() => setDraft(bindingDisplayValue(value)), [value]);
   const commit = () => {
-    const next = draft.trim();
+    const next = normalizeBinding(draft);
     if (next !== value) onCommit(next);
   };
   return (
@@ -360,7 +353,7 @@ function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: str
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      placeholder="data model key"
+      placeholder="model path, e.g. creature"
       className="h-7 font-mono text-xs"
     />
   );
@@ -397,11 +390,12 @@ function FieldControl({
   onSet: (name: string, value: string) => void;
 }) {
   switch (kind) {
-    case "modelKey":
-      // A bare model key (e.g. GridLayout's dataCollection) — commit on blur/Enter
-      // (not per keystroke) so a half-typed key doesn't spawn a throwaway scaffold
-      // entry per character. Reuses the same control as <Component>'s `data` key.
-      return <DataKeyField value={value} onCommit={(v) => onSet(name, v)} />;
+    case "binding":
+      // A whole-value binding (data / dataCollection / tooltipData) — edits the inner
+      // model path and stores the normalized grammar token, committed on blur/Enter
+      // (not per keystroke) so a half-typed path doesn't spawn a throwaway scaffold
+      // entry per character.
+      return <BindingField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
       return <CompoundField name={name} value={value} onSet={onSet} />;
     case "color":

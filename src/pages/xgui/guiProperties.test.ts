@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { parseScopeRef } from "../../lib/guiBinding";
 import type { GuiNode } from "../../lib/guiNode";
 import {
+  bindingDisplayValue,
   computedId,
   fieldsForTag,
   formatCompound,
   freeformAttrs,
+  INTERACTION_GROUP,
   isBoundField,
   nodeHasId,
+  normalizeBinding,
   parseCompound,
   removeAttr,
   renameAttr,
@@ -188,21 +192,27 @@ describe("fieldsForTag", () => {
     expect(fields.every((f) => f.kind === "text")).toBe(true);
   });
 
-  it("gives the root View a scopeName text field", () => {
+  it("gives the root View a scopeName text field first, then an onKeyPressed handler", () => {
     // scopeName publishes the View's frame under a name for `{$name.x}` reach
     // (engine parses it on the root <View>). It is the FIRST panel field the View
     // shows; id (auto-set) and controller (Controller tab) stay handled elsewhere.
+    // The View is ALSO a real onKeyPressed target (engine dispatches unfocused key
+    // events to Root), so it gains an Interaction group with that ONE handler.
     const fields = fieldsForTag("View");
-    expect(fields.map((f) => f.name)).toEqual(["scopeName"]);
+    expect(fields.map((f) => f.name)).toEqual(["scopeName", "onKeyPressed"]);
     expect(fields[0].kind).toBe("text");
+    expect(fields[0].group).toBeUndefined();
+    const onKeyPressed = fields[1];
+    expect(onKeyPressed.kind).toBe("handler");
+    expect(onKeyPressed.group).toBe(INTERACTION_GROUP);
   });
 
-  it("gives GridLayout dataCollection (modelKey) + rows/columns/gutter (text), in order", () => {
+  it("gives GridLayout dataCollection (binding) + rows/columns/gutter (text), in order", () => {
     const fields = fieldsForTag("GridLayout");
     expect(fields.map((f) => f.name)).toEqual(["dataCollection", "rows", "columns", "gutter"]);
-    // dataCollection is a bare model key — committed on blur (not per keystroke) so a
-    // half-typed name doesn't spam the additive scaffold; rows/columns/gutter are plain text.
-    expect(fields.map((f) => f.kind)).toEqual(["modelKey", "text", "text", "text"]);
+    // dataCollection is a whole-value binding — committed on blur (not per keystroke) so
+    // a half-typed path doesn't spam the additive scaffold; rows/columns/gutter are plain text.
+    expect(fields.map((f) => f.kind)).toEqual(["binding", "text", "text", "text"]);
   });
 
   it("never exposes position/size on a GridLayout (it's a non-visual control)", () => {
@@ -229,6 +239,135 @@ describe("fieldsForTag", () => {
     const panelUnderView = fieldsForTag("Panel", "View").map((f) => f.name);
     expect(panelUnderView).toContain("position");
     expect(panelUnderView).toContain("size");
+  });
+
+  it("gives Component a `data` binding field (not a bare-key)", () => {
+    // `data` seats the mounted child's root; its stored form is a whole-value grammar
+    // token (kind `binding`), never a bare key the strict resolver rejects.
+    const data = fieldsForTag("Component").find((f) => f.name === "data");
+    expect(data?.kind).toBe("binding");
+    expect(data?.group).toBeUndefined();
+  });
+});
+
+describe("interaction fields (B1)", () => {
+  const HANDLERS = [
+    "onMouseClicked",
+    "onMouseEntered",
+    "onMouseExited",
+    "onMouseMoved",
+    "onKeyPressed",
+    "onFocus",
+    "onBlur",
+  ];
+
+  for (const tag of ["Panel", "Text", "Component"] as const) {
+    it(`exposes the 7 handlers + modal + tooltip + tooltipData on ${tag}, all grouped Interaction`, () => {
+      const fields = fieldsForTag(tag);
+      const byName = new Map(fields.map((f) => [f.name, f]));
+
+      // Every handler is a literal-only `handler` kind (no {token} affordance).
+      for (const h of HANDLERS) {
+        expect(byName.get(h)?.kind).toBe("handler");
+        expect(byName.get(h)?.group).toBe(INTERACTION_GROUP);
+      }
+      // modal is a plain boolean (the no-token affordance is the panel's job, #504).
+      expect(byName.get("modal")?.kind).toBe("boolean");
+      expect(byName.get("modal")?.group).toBe(INTERACTION_GROUP);
+      // tooltip is a component ref (a `.xml` basename via the picker).
+      expect(byName.get("tooltip")?.kind).toBe("componentRef");
+      expect(byName.get("tooltip")?.group).toBe(INTERACTION_GROUP);
+      // tooltipData is a whole-value binding (same as data=).
+      expect(byName.get("tooltipData")?.kind).toBe("binding");
+      expect(byName.get("tooltipData")?.group).toBe(INTERACTION_GROUP);
+    });
+  }
+
+  it("View exposes onKeyPressed only (no mouse handlers, no tooltip)", () => {
+    const names = fieldsForTag("View")
+      .filter((f) => f.group === INTERACTION_GROUP)
+      .map((f) => f.name);
+    expect(names).toEqual(["onKeyPressed"]);
+  });
+
+  it("does NOT add interaction fields to Event or GridLayout", () => {
+    for (const tag of ["Event", "GridLayout"] as const) {
+      const grouped = fieldsForTag(tag).filter((f) => f.group === INTERACTION_GROUP);
+      expect(grouped).toEqual([]);
+    }
+  });
+
+  it("the default (ungrouped) fields carry no group tag", () => {
+    // Grouping is opt-in; the well-known geometry/color/etc. fields stay ungrouped so
+    // they render inline exactly as before.
+    const position = fieldsForTag("Panel").find((f) => f.name === "position");
+    expect(position?.group).toBeUndefined();
+  });
+});
+
+describe("normalizeBinding", () => {
+  it("view-scopes a bare key", () => {
+    expect(normalizeBinding("creatures")).toBe("{$.creatures}");
+    expect(normalizeBinding("creature.name")).toBe("{$.creature.name}");
+  });
+
+  it("wraps an explicit $. / $name. prefix verbatim", () => {
+    expect(normalizeBinding("$.creatures")).toBe("{$.creatures}");
+    expect(normalizeBinding("$app.theme")).toBe("{$app.theme}");
+  });
+
+  it("stores a hand-typed whole token verbatim (incl. whole-object forms)", () => {
+    expect(normalizeBinding("{$.creature}")).toBe("{$.creature}");
+    expect(normalizeBinding("{$.}")).toBe("{$.}");
+    expect(normalizeBinding("{.}")).toBe("{.}");
+    expect(normalizeBinding("{sprite}")).toBe("{sprite}");
+    expect(normalizeBinding("{$app.theme}")).toBe("{$app.theme}");
+  });
+
+  it("maps the bare grid-item whole-object shorthand `.` to {.}", () => {
+    expect(normalizeBinding(".")).toBe("{.}");
+  });
+
+  it("trims surrounding whitespace before normalizing", () => {
+    expect(normalizeBinding("  creatures  ")).toBe("{$.creatures}");
+    expect(normalizeBinding("  {$.creature}  ")).toBe("{$.creature}");
+  });
+
+  it("keeps an empty value empty (clearing removes the attr)", () => {
+    expect(normalizeBinding("")).toBe("");
+    expect(normalizeBinding("   ")).toBe("");
+  });
+
+  it("produces a form the resolver + scaffold both accept for a bare key", () => {
+    // {$.key} is a single-segment view path — resolveWholeTokenValue walks it and
+    // tokenTarget seats it at the root. This is the round-trip contract with A1/A1s.
+    const stored = normalizeBinding("creatures");
+    const ref = parseScopeRef(stored.slice(1, -1));
+    expect(ref).toEqual({ frame: "view", path: ["creatures"] });
+  });
+});
+
+describe("bindingDisplayValue", () => {
+  it("shows the inner dotted path for a simple {$.x} view form", () => {
+    expect(bindingDisplayValue("{$.creature}")).toBe("creature");
+    expect(bindingDisplayValue("{$.a.b}")).toBe("a.b");
+  });
+
+  it("round-trips a bare key through normalize → display", () => {
+    expect(bindingDisplayValue(normalizeBinding("creatures"))).toBe("creatures");
+    expect(bindingDisplayValue(normalizeBinding("creature.name"))).toBe("creature.name");
+  });
+
+  it("shows whole-object / item / named / non-view tokens verbatim", () => {
+    expect(bindingDisplayValue("{$.}")).toBe("{$.}");
+    expect(bindingDisplayValue("{.}")).toBe("{.}");
+    expect(bindingDisplayValue("{sprite}")).toBe("{sprite}");
+    expect(bindingDisplayValue("{$app.theme}")).toBe("{$app.theme}");
+  });
+
+  it("shows a non-token literal verbatim (e.g. a legacy bare value)", () => {
+    expect(bindingDisplayValue("creatures")).toBe("creatures");
+    expect(bindingDisplayValue("")).toBe("");
   });
 });
 
@@ -299,6 +438,25 @@ describe("freeformAttrs", () => {
     // field — not fall through to the freeform 'other properties' rows.
     const n = node("View", { id: "view", scopeName: "bag" });
     expect(freeformAttrs(n)).toEqual([]);
+  });
+
+  it("does not surface a Component's data as freeform (now a schema binding field)", () => {
+    const n = node("Component", { id: "btn", src: "gui.button", data: "{$.buttonData}" });
+    expect(freeformAttrs(n)).toEqual([]);
+  });
+
+  it("does not surface interaction attrs as freeform (they are schema fields)", () => {
+    // Handlers / modal / tooltip / tooltipData are first-class fields now, so an
+    // authored one must render as its typed field, never as a freeform override row.
+    const n = node("Panel", {
+      id: "p",
+      onMouseClicked: "handleClick",
+      modal: "true",
+      tooltip: "gui.kittypacks-tooltip.xml",
+      tooltipData: "{$.creature}",
+      customThing: "x",
+    });
+    expect(freeformAttrs(n)).toEqual(["customThing"]);
   });
 });
 

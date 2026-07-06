@@ -175,11 +175,17 @@ describe("parseCellSize", () => {
     expect(parseCellSize("abc")).toBeNull();
   });
 
-  it("present-but-partial defaults the missing/garbage field to 0 (tolerant, like gutter)", () => {
-    expect(parseCellSize("64")).toEqual({ w: 64, h: 0 });
-    expect(parseCellSize("64,")).toEqual({ w: 64, h: 0 });
-    expect(parseCellSize("64,abc")).toEqual({ w: 64, h: 0 });
-    expect(parseCellSize(",48")).toEqual({ w: 0, h: 48 });
+  it("requires EXACTLY two numeric parts — any malformed form → null (task 510)", () => {
+    // The UDim2 four-field form (natural muscle memory) used to read parts[0]/[1] and
+    // discard the pixel pair, stamping a zero-sized cell. Now it falls back cleanly.
+    expect(parseCellSize("0,0,64,64")).toBeNull();
+    expect(parseCellSize("64,64,")).toBeNull(); // trailing comma → 3 parts
+    // A single field can't define a cell; a missing/garbage field is no longer tolerated.
+    expect(parseCellSize("64")).toBeNull();
+    expect(parseCellSize("64,")).toBeNull();
+    expect(parseCellSize("64,abc")).toBeNull();
+    expect(parseCellSize("abc,5")).toBeNull();
+    expect(parseCellSize(",48")).toBeNull();
   });
 });
 

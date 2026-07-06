@@ -152,10 +152,18 @@ export function cellGeometryFixed(
 
 /**
  * Parse a `cellSize="w,h"` attribute into its two pixel dimensions, or `null` when the
- * attribute is absent/blank or fully unparseable (→ the caller falls back to the
- * area-division default). Mirrors {@link parseGutter}'s tolerant per-field parse: a
- * present-but-partial value (`"64,"`, `"64,abc"`) defaults its missing/garbage field to
- * `0`; only a wholly missing or wholly non-numeric value yields `null`.
+ * value is NOT exactly two finite numeric parts (→ the caller falls back to the
+ * area-division default). This is a STRICT parse: exactly two comma-separated fields,
+ * both parsing to a finite number, else `null`.
+ *
+ * The strictness is deliberate (task 510). A tolerant per-field parse silently accepted
+ * the UDim2 four-field form authors reach for by muscle memory — `"0,0,64,64"` split to
+ * `parts[0]/[1]` read the two rel zeros and DISCARDED the `64`s → a zero-sized cell. It
+ * also let `"64"` become `{64,0}` (an invisible-height cell) and `",48"` become `{0,48}`.
+ * Every one of those is malformed and now yields `null`, so a bad `cellSize` degrades to
+ * the visible area-division grid instead of stamping garbage; the {@link guiLints} WARNING
+ * on a malformed non-token `cellSize` tells the author what went wrong. This mirrors the
+ * engine's `XGridLayout::Gutter()`, which likewise requires exactly two parts or defaults.
  *
  * `cellSize` is a LITERAL (grid structure is stamped at load — it cannot bind; a
  * `{token}` here is an ERROR lint, not a binding), so this is a plain numeric parse
@@ -166,14 +174,15 @@ export function parseCellSize(raw: string | undefined): { w: number; h: number }
   const trimmed = raw.trim();
   if (trimmed === "") return null;
   const parts = trimmed.split(",");
-  const w = Number((parts[0] ?? "").trim());
-  const h = Number((parts[1] ?? "").trim());
-  // A non-numeric WIDTH means the value can't define a fixed cell → fall back to area
-  // division rather than stamp a garbage cell. (`Number("")` is 0, so an OMITTED second
-  // field tolerantly defaults to 0 — matching parseGutter — while a non-numeric first
-  // field like "abc" bails.)
-  if (!Number.isFinite(w)) return null;
-  return { w, h: Number.isFinite(h) ? h : 0 };
+  if (parts.length !== 2) return null;
+  const w = Number(parts[0].trim());
+  const h = Number(parts[1].trim());
+  // Both fields must be finite numbers; an empty (`Number("")` → 0) or non-numeric field
+  // makes the value malformed → fall back to area division rather than stamp a garbage
+  // cell. (`""` trims non-empty above, so a lone `""` split never reaches here.)
+  if (!Number.isFinite(w) || parts[0].trim() === "") return null;
+  if (!Number.isFinite(h) || parts[1].trim() === "") return null;
+  return { w, h };
 }
 
 /**

@@ -402,6 +402,63 @@ describe("grid structure literal-only lint (rule 10)", () => {
   });
 });
 
+describe("malformed cellSize lint (rule 11)", () => {
+  it("warns on the four-field UDim2 form with a did-you-mean pixel pair", () => {
+    const warn = find(lint(node("GridLayout", { cellSize: "0,0,64,64" })), "cellSize", "warning");
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain("looks like a UDim2");
+    expect(warn?.message).toContain('did you mean "64,64"');
+  });
+
+  it("pulls the actual abs fields into the four-field suggestion", () => {
+    const warn = find(lint(node("GridLayout", { cellSize: "0.5,0,32,48" })), "cellSize", "warning");
+    expect(warn?.message).toContain('did you mean "32,48"');
+  });
+
+  it.each([
+    "64",
+    ",48",
+    "abc,5",
+    "64,64,",
+  ])("warns generically on another malformed value (%s)", (value) => {
+    const warn = find(lint(node("GridLayout", { cellSize: value })), "cellSize", "warning");
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain('pixel pair "w,h"');
+    expect(warn?.message).not.toContain("UDim2");
+  });
+
+  it("does NOT fire on a valid pixel pair", () => {
+    expect(
+      find(lint(node("GridLayout", { cellSize: "64,64" })), "cellSize", "warning"),
+    ).toBeUndefined();
+    expect(
+      find(lint(node("GridLayout", { cellSize: " 32 , 96 " })), "cellSize", "warning"),
+    ).toBeUndefined();
+  });
+
+  it("does NOT fire when cellSize is absent or empty", () => {
+    expect(find(lint(node("GridLayout", { rows: "2" })), "cellSize", "warning")).toBeUndefined();
+    expect(find(lint(node("GridLayout", { cellSize: "" })), "cellSize", "warning")).toBeUndefined();
+  });
+
+  it("does NOT double-fire with rule 10 on a token value (rule 10 errors; rule 11 stays silent)", () => {
+    const lints = lint(node("GridLayout", { cellSize: "{w},{h}" }));
+    expect(find(lints, "cellSize", "error")).toBeDefined();
+    // No rule-11 "pixel pair" warning on a value rule 10 already errored on. (A separate
+    // bare-token warning may still fire — that's rule 8, not this rule.)
+    const pixelPairWarn = lints.find(
+      (l) => l.attr === "cellSize" && l.severity === "warning" && l.message.includes("pixel pair"),
+    );
+    expect(pixelPairWarn).toBeUndefined();
+  });
+
+  it("only fires on a GridLayout element, not other tags", () => {
+    expect(
+      find(lint(node("Panel", { cellSize: "0,0,64,64" })), "cellSize", "warning"),
+    ).toBeUndefined();
+  });
+});
+
 describe("collectTooltipBasenames", () => {
   it("collects distinct .xml-stripped basenames across the tree", () => {
     const root = node("View", { id: "view" }, [

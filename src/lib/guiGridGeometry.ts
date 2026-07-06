@@ -27,8 +27,16 @@
  * PURE: no React, no DOM. The caller (`GuiPreview`) maps a cell index → its
  * `{ position, size }` here, then renders the template node with that geometry.
  *
+ * A grid may instead author an explicit `cellSize` UDim2, in which case cells are a
+ * FIXED size and positions accumulate `index·(cell+gutter)` — see
+ * {@link cellGeometryFixed}. Absent `cellSize`, the area-division default here runs
+ * unchanged.
+ *
  * @see design/gridLayout_element_design_prompt.md — "Calculating Position and Size".
+ * @see design/gridlayout_cell_geometry.md — the settled cell size/position contract.
  */
+
+import { parseUDim2 } from "./guiGeometry";
 
 /** A cell's geometry as the raw `position`/`size` comma strings the renderer consumes. */
 export type CellGeometry = {
@@ -94,6 +102,51 @@ export function cellGeometry(
   return {
     position: udim2(x.pos, y.pos),
     size: udim2(x.size, y.size),
+  };
+}
+
+/**
+ * The geometry for the cell at 0-based `index` when the grid authors an EXPLICIT
+ * `cellSize` (design/gridlayout_cell_geometry.md). Unlike the area-division
+ * {@link cellGeometry}, every cell is the SAME fixed size — the resolved `cellSize`
+ * UDim2 verbatim — and positions accumulate `index·(cell + gutter)` per axis from the
+ * parent's content-box origin.
+ *
+ * `cellSize` is a UDim2 whose `rel` fields resolve against the PARENT box (the one
+ * unambiguous reference box — the grid fills its parent), so passing it straight
+ * through as the cell `size` gives the renderer exactly that: {@link computeBoxGeometry}
+ * resolves a cell's `rel` against the parent it renders into. `abs` fields are pixels.
+ *
+ * The derivation (per axis, columns shown; rows identical with `gy`): a cell's width is
+ * the UDim2 `relX·100% + absX px`. The cell in column `c` (0-based) sits at left
+ * `c·(cellWidth + gx) = (c·relX)·100% + c·(absX + gx) px`  →  position
+ * `relX = c·cellRelX`, `absX = c·(cellAbsX + gx)`. Size is the cellSize UDim2 as-is.
+ *   Worked check (cellSize `0,0,64,64`, gx=gy=10, columns=3): the cell at col 2 →
+ *   position `0,_,148,_` (2·(64+10)), size `0,_,64,_`. Proportional cellSize
+ *   `0.25,0.25,0,0` at col 2 → position `0.5,_,0,_`, size `0.25,_,0,_`.
+ *
+ * @param index 0-based cell index in fill order (0 … rows·columns−1).
+ * @param columns number of columns (≥ 1) — maps `index` → column/row.
+ * @param cellSize the RESOLVED `cellSize` comma string (`relX,relY,absX,absY`);
+ *   unresolved/missing fields fall back to `0` via {@link parseUDim2}.
+ * @param gutterX horizontal px between columns (default 0).
+ * @param gutterY vertical px between rows (default 0).
+ */
+export function cellGeometryFixed(
+  index: number,
+  columns: number,
+  cellSize: string,
+  gutterX = 0,
+  gutterY = 0,
+): CellGeometry {
+  const { relX, relY, absX, absY } = parseUDim2(cellSize);
+  const column = index % columns;
+  const row = Math.floor(index / columns);
+  const posX: Axis = { rel: column * relX, abs: column * (absX + gutterX) };
+  const posY: Axis = { rel: row * relY, abs: row * (absY + gutterY) };
+  return {
+    position: udim2(posX, posY),
+    size: udim2({ rel: relX, abs: absX }, { rel: relY, abs: absY }),
   };
 }
 

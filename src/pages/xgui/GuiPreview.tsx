@@ -46,6 +46,7 @@ import {
   type ResolvedAttrs,
   type ResolveScope,
   resolveAttrs,
+  resolveCompoundProp,
   resolveWholeTokenValue,
   viewScope,
 } from "../../lib/guiBinding";
@@ -64,7 +65,12 @@ import {
   textureToLoad,
   type ViewTransform,
 } from "../../lib/guiGeometry";
-import { cellGeometry, parseGridDimension, parseGutter } from "../../lib/guiGridGeometry";
+import {
+  cellGeometry,
+  cellGeometryFixed,
+  parseGridDimension,
+  parseGutter,
+} from "../../lib/guiGridGeometry";
 import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
 import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
@@ -577,6 +583,17 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
   // still draws its template chrome).
   const collection = resolveWholeTokenValue(node.attrs[DATA_COLLECTION_ATTR] ?? "", scope);
 
+  // An explicit `cellSize` switches the grid from area-division to FIXED cells. Its
+  // fields may be per-field bound like any compound (`cellSize="{$.w},0,0,64"`), so
+  // resolve it against the View scope BEFORE parsing — an unresolved field falls back
+  // to 0 downstream (cellGeometryFixed → parseUDim2). Absent/blank → area division,
+  // the historical default (see design/gridlayout_cell_geometry.md).
+  const cellSizeAttr = node.attrs.cellSize;
+  const cellSize =
+    cellSizeAttr !== undefined && cellSizeAttr.trim() !== ""
+      ? resolveCompoundProp(cellSizeAttr, scope).value
+      : null;
+
   const stamps = stampGrid(collection, rows, columns);
   const isComponentTemplate = template.tag === "Component";
 
@@ -586,7 +603,10 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
     // fall through to the parent box — cells are not individually selectable.
     <div className="pointer-events-none absolute inset-0">
       {stamps.map((stamp) => {
-        const geometry = cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
+        const geometry =
+          cellSize !== null
+            ? cellGeometryFixed(stamp.index, columns, cellSize, gutter.x, gutter.y)
+            : cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
         // Each cell binds the item as a composite scope OVER the View frame, so a
         // bare `{field}` reads the item while `{$.x}` still reaches the model. A
         // `null` item (an empty cell) uses emptyItemScope() so every {token} resolves

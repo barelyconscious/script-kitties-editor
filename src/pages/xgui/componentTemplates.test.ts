@@ -79,7 +79,7 @@ describe("tooltip template", () => {
       exportedFunctions: null,
       resolveComponent: () => root,
     };
-    const lints = nodeLints(referencing, false, ctx);
+    const lints = nodeLints(referencing, { insideGrid: false, isGridTemplate: false }, ctx);
     const tooltipWarnings = lints.filter((l) => l.attr === "tooltip");
     expect(tooltipWarnings).toEqual([]);
   });

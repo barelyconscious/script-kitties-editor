@@ -22,8 +22,13 @@ function node(
 const EMPTY_CTX: LintContext = { exportedFunctions: null, resolveComponent: () => null };
 
 /** Run node lints outside any grid with an optional context override. */
-function lint(n: GuiNode, ctx: LintContext = EMPTY_CTX, insideGrid = false): Lint[] {
-  return nodeLints(n, insideGrid, ctx);
+function lint(
+  n: GuiNode,
+  ctx: LintContext = EMPTY_CTX,
+  insideGrid = false,
+  isGridTemplate = false,
+): Lint[] {
+  return nodeLints(n, { insideGrid, isGridTemplate }, ctx);
 }
 
 /** Find a lint touching `attr` with the given severity, or undefined. */
@@ -301,6 +306,55 @@ describe("lintTree — grid context threading", () => {
   it("omits clean nodes from the map", () => {
     const root = node("View", { id: "view" }, [node("Panel", { id: "p", size: "0,0,10,10" })]);
     expect(lintTree(root, EMPTY_CTX).size).toBe(0);
+  });
+});
+
+describe("grid template geometry lint (rule 9)", () => {
+  it("warns on size authored on a grid template child, pointing at cellSize", () => {
+    const lints = lint(node("Panel", { size: "0,0,64,64" }), EMPTY_CTX, true, true);
+    const warn = find(lints, "size", "warning");
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain("cellSize");
+  });
+
+  it("warns on position authored on a grid template child", () => {
+    expect(
+      find(
+        lint(node("Panel", { position: "0,0,0,0" }), EMPTY_CTX, true, true),
+        "position",
+        "warning",
+      ),
+    ).toBeDefined();
+  });
+
+  it("fires on PRESENCE (empty-string value still dead)", () => {
+    expect(
+      find(lint(node("Panel", { size: "" }), EMPTY_CTX, true, true), "size", "warning"),
+    ).toBeDefined();
+  });
+
+  it("does NOT warn on a NON-template node inside the grid subtree (descendant lays out normally)", () => {
+    // insideGrid true, isGridTemplate false: a Text nested inside the template Panel.
+    expect(
+      find(lint(node("Text", { size: "0.5,0,0,0" }), EMPTY_CTX, true, false), "size", "warning"),
+    ).toBeUndefined();
+  });
+
+  it("does NOT warn on geometry outside any grid", () => {
+    expect(find(lint(node("Panel", { size: "0,0,10,10" })), "size", "warning")).toBeUndefined();
+  });
+
+  it("lintTree fires on the DIRECT grid child but not its descendant", () => {
+    const inner = node("Text", { size: "0.5,0,0,0", text: "hi" });
+    const template = node("Panel", { size: "0,0,64,64" }, [inner]);
+    const grid = node("GridLayout", { dataCollection: "{$.items}" }, [template]);
+    const root = node("View", { id: "view" }, [grid]);
+    const map = lintTree(root, EMPTY_CTX);
+    expect(
+      map.get(template.nodeId)?.some((l) => l.attr === "size" && l.severity === "warning"),
+    ).toBe(true);
+    // The nested Text's size is live geometry within the cell — no rule-9 warning.
+    expect(map.get(inner.nodeId)?.some((l) => l.attr === "size")).not.toBe(true);
   });
 });
 

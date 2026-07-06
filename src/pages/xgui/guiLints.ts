@@ -37,6 +37,11 @@
  *  8. A BARE `{token}` (grid-item scope) in a presentational attr OUTSIDE any
  *     GridLayout child subtree → WARNING (bare only resolves for a grid item; the
  *     author likely meant `{$.token}`).
+ *  9. `position`/`size` authored on a GridLayout's DIRECT child (the template) →
+ *     WARNING (dead geometry — the grid computes cell position and takes cell size
+ *     from `cellSize` on the GridLayout; the template owns appearance only). Fires
+ *     only on the template itself, not its descendants (which lay out normally
+ *     within the cell). See design/gridlayout_cell_geometry.md.
  *
  * @see design/xgui_ta.md — interaction attributes; the ENGINE files cited in
  *   {@link import("../../lib/guiInteraction")} are the source of truth on disagreement.
@@ -231,6 +236,26 @@ function modalLint(node: GuiNode, out: Lint[]): void {
   });
 }
 
+/**
+ * Rule 9: `position`/`size` on a GridLayout's DIRECT child is dead geometry — the grid
+ * assigns the cell's position (grid-computed) and size (from `cellSize` on the grid),
+ * so the template's own geometry is ignored. Fires on PRESENCE (not value) and only on
+ * the template itself; a descendant deeper in the template lays out normally within the
+ * cell, so it is left alone. See design/gridlayout_cell_geometry.md.
+ */
+function gridChildGeometryLints(node: GuiNode, isGridTemplate: boolean, out: Lint[]): void {
+  if (!isGridTemplate) return;
+  for (const attr of ["position", "size"] as const) {
+    if (attr in node.attrs) {
+      out.push({
+        severity: "warning",
+        attr,
+        message: `${attr} on a GridLayout child is ignored — the grid computes each cell's position, and cell size comes from cellSize on the GridLayout. Set cellSize on the grid instead.`,
+      });
+    }
+  }
+}
+
 /** Rule 8: a bare grid-item token used outside any GridLayout subtree is likely a `$.` mistake. */
 function bareTokenLints(node: GuiNode, insideGrid: boolean, out: Lint[]): void {
   if (insideGrid) return; // bare tokens are legitimate item scope inside a grid
@@ -261,16 +286,26 @@ function firstBareItemToken(value: string): string | null {
 }
 
 /**
- * All lints on a single node, given whether it sits inside a GridLayout subtree
- * (for the bare-token rule) and the injected {@link LintContext}. Exported for
- * direct unit testing; the tree drives {@link lintTree}, which threads `insideGrid`.
+ * The GridLayout context a node sits in, threaded by {@link lintTree}:
+ *   - `insideGrid` — the node is a DESCENDANT of a GridLayout (its whole template
+ *     subtree), so bare `{item}` tokens are legitimate (rule 8 stands down).
+ *   - `isGridTemplate` — the node is the DIRECT child of a GridLayout (the template
+ *     itself), so its own `position`/`size` is dead geometry (rule 9).
  */
-export function nodeLints(node: GuiNode, insideGrid: boolean, ctx: LintContext): Lint[] {
+export type GridLintContext = { insideGrid: boolean; isGridTemplate: boolean };
+
+/**
+ * All lints on a single node, given its {@link GridLintContext} (for the grid-scoped
+ * rules 8 + 9) and the injected {@link LintContext}. Exported for direct unit testing;
+ * the tree drives {@link lintTree}, which threads the grid context.
+ */
+export function nodeLints(node: GuiNode, grid: GridLintContext, ctx: LintContext): Lint[] {
   const out: Lint[] = [];
   handlerLints(node, ctx, out);
   tooltipLints(node, ctx, out);
   modalLint(node, out);
-  bareTokenLints(node, insideGrid, out);
+  bareTokenLints(node, grid.insideGrid, out);
+  gridChildGeometryLints(node, grid.isGridTemplate, out);
   return out;
 }
 
@@ -283,13 +318,15 @@ export function nodeLints(node: GuiNode, insideGrid: boolean, ctx: LintContext):
  */
 export function lintTree(root: GuiNode, ctx: LintContext): Map<string, Lint[]> {
   const out = new Map<string, Lint[]>();
-  const walk = (node: GuiNode, insideGrid: boolean): void => {
-    const lints = nodeLints(node, insideGrid, ctx);
+  const walk = (node: GuiNode, insideGrid: boolean, isGridTemplate: boolean): void => {
+    const lints = nodeLints(node, { insideGrid, isGridTemplate }, ctx);
     if (lints.length > 0) out.set(node.nodeId, lints);
-    const childInsideGrid = insideGrid || node.tag === "GridLayout";
-    for (const child of node.children) walk(child, childInsideGrid);
+    const isGrid = node.tag === "GridLayout";
+    // Children of a grid are its templates (rule 9); the whole subtree is "inside a
+    // grid" for the bare-token rule (rule 8).
+    for (const child of node.children) walk(child, insideGrid || isGrid, isGrid);
   };
-  walk(root, false);
+  walk(root, false, false);
   return out;
 }
 

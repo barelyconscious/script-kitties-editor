@@ -389,16 +389,21 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
         { name: "handler", label: "handler", kind: "handler" },
       ];
     case "GridLayout":
-      // A non-visual control element: no id, no position/size. `dataCollection` is a
-      // whole-value BINDING (`dataCollection="{$.creatures}"`) — the field edits the
-      // path and stores the grammar token (a bare key is unresolvable under the strict
-      // grammar). rows/columns/gutter are plain text. The grid LAYS OUT its repeated
-      // child, so it exposes no geometry of its own (design req 5).
+      // A non-visual control element: no id, no position/size of its OWN (the grid
+      // fills its parent). `dataCollection` is a whole-value BINDING
+      // (`dataCollection="{$.creatures}"`) — the field edits the path and stores the
+      // grammar token (a bare key is unresolvable under the strict grammar).
+      // rows/columns/gutter are plain text. `cellSize` is a compound UDim2 (per-field
+      // tokens like any compound) that fixes each cell's size; absent, the grid divides
+      // its parent's content box evenly. The grid LAYS OUT its repeated child, so all of
+      // this is layout policy on the one element that IS the layout (design req 5 +
+      // design/gridlayout_cell_geometry.md).
       return [
         { name: "dataCollection", label: "dataCollection", kind: "binding" },
         { name: "rows", label: "rows", kind: "text" },
         { name: "columns", label: "columns", kind: "text" },
         { name: "gutter", label: "gutter", kind: "text" },
+        { name: "cellSize", label: "cellSize", kind: "compound" },
       ];
     default: {
       const _never: never = tag;

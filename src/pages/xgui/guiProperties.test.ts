@@ -213,12 +213,19 @@ describe("fieldsForTag", () => {
     expect(onKeyPressed.group).toBe(INTERACTION_GROUP);
   });
 
-  it("gives GridLayout dataCollection (binding) + rows/columns/gutter (text), in order", () => {
+  it("gives GridLayout dataCollection (binding) + rows/columns/gutter (text) + cellSize (compound), in order", () => {
     const fields = fieldsForTag("GridLayout");
-    expect(fields.map((f) => f.name)).toEqual(["dataCollection", "rows", "columns", "gutter"]);
+    expect(fields.map((f) => f.name)).toEqual([
+      "dataCollection",
+      "rows",
+      "columns",
+      "gutter",
+      "cellSize",
+    ]);
     // dataCollection is a whole-value binding — committed on blur (not per keystroke) so
-    // a half-typed path doesn't spam the additive scaffold; rows/columns/gutter are plain text.
-    expect(fields.map((f) => f.kind)).toEqual(["binding", "text", "text", "text"]);
+    // a half-typed path doesn't spam the additive scaffold; rows/columns/gutter are plain text;
+    // cellSize is a compound UDim2 (per-field tokens) fixing each cell's size.
+    expect(fields.map((f) => f.kind)).toEqual(["binding", "text", "text", "text", "compound"]);
   });
 
   it("never exposes position/size on a GridLayout (it's a non-visual control)", () => {

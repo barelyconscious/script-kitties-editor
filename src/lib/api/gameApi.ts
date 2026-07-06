@@ -2463,6 +2463,12 @@ end`,
           documentation:
             "v1 tooltip components are presentation-only — no controller runs. A tooltip that declares a controller is flagged by the editor's lints.",
         },
+        {
+          name: "preview peek (hold Alt)",
+          type: "property",
+          documentation:
+            "In the GUI editor preview, tooltips are hidden while you author. Hold Alt (Option on macOS) and hover a widget with a tooltip to peek its card; release Alt to hide it. Pressing Alt while already resting on a widget shows the card without moving the mouse.",
+        },
       ],
     },
   ],

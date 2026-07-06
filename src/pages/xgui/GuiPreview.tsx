@@ -36,7 +36,7 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model"
  */
 
-import { type CSSProperties, memo, useMemo, useRef, useState } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
@@ -75,7 +75,7 @@ import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
 import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
 import {
-  pickTopmostRect,
+  pickHoverTarget,
   type StageRect,
   screenRectToStageRect,
 } from "../../lib/guiTooltipPlacement";
@@ -906,6 +906,14 @@ export function GuiPreview({
   // moves within the SAME provider (the anchor is provider-bounds, not cursor, so it's
   // stable). A ref so comparing it doesn't itself re-render.
   const hoverKeyRef = useRef<string | null>(null);
+  // Task 519 — Alt-to-peek. The last pointer position in SCREEN (client) coords, stored on
+  // every stage pointermove, so an Alt keydown can re-evaluate the hover from where the
+  // cursor already rests (no mouse jiggle needed). Null until the pointer first enters.
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Whether Alt/Option is currently held. Tracked from BOTH entry points — `e.altKey` on
+  // every pointermove (self-correcting) and the window Alt keydown/keyup listeners — and
+  // reset on blur/visibility loss so an Alt+Tab away can't wedge the peek on.
+  const altHeldRef = useRef(false);
   // A single View-frame scope for the whole tree: every box resolves its `{$.x}`
   // bindings against this one model object. Memoized on `model` so a pan/zoom/selection
   // re-render (which leaves the model untouched) reuses the same scope object —
@@ -985,17 +993,21 @@ export function GuiPreview({
     }
   };
 
-  // Rect-test the pointer (SCREEN coords — getBoundingClientRect is screen-space, so
-  // zoom/pan is free) against the registered providers and show the topmost's card.
+  // The Alt-to-peek hover evaluator (task 519). ONE function drives both entry points —
+  // a stage pointermove AND a window Alt keydown/keyup (which re-evaluates from the last
+  // stored pointer, so pressing Alt while already resting on a provider shows the card
+  // with no mouse jiggle). It rect-tests the pointer (SCREEN coords — getBoundingClientRect
+  // is screen-space, so zoom/pan is free) against the registered providers, gating the
+  // result on `altHeld` via the pure {@link pickHoverTarget}: no Alt → no target → hide.
   // Suppressed while an element drag is active. The anchor is the hit provider's rect
   // converted ONCE into stage-logical space, so the pure placement helper works in a
   // single coordinate space.
-  const updateTooltipHover = (clientX: number, clientY: number) => {
+  const evaluateTooltip = (pointer: { x: number; y: number } | null, altHeld: boolean) => {
     if (drag.current) {
       clearTooltip();
       return;
     }
-    const hit = pickTopmostRect(registry.snapshot(), clientX, clientY);
+    const hit = pickHoverTarget(registry.snapshot(), pointer, altHeld);
     if (!hit) {
       clearTooltip();
       return;
@@ -1007,6 +1019,51 @@ export function GuiPreview({
     hoverKeyRef.current = hit.key;
     setTooltip({ src: hit.src, data: hit.data, anchor });
   };
+  // The window Alt listeners are subscribed ONCE (mount), but `evaluateTooltip` closes over
+  // the live `scale`. Route them through a ref to the latest evaluator so an Alt press
+  // always uses current view state without re-subscribing the listeners on every zoom.
+  const evaluateRef = useRef(evaluateTooltip);
+  evaluateRef.current = evaluateTooltip;
+
+  // Task 519 — window-level Alt peek + robustness. Alt keydown/keyup re-evaluate the hover
+  // from the last stored pointer (peek appears/disappears without moving the mouse), and
+  // blur/visibilitychange force the held state off so an Alt+Tab (or Cmd-Tab with Option
+  // down) can never leave the tooltip wedged on while the cursor sits idle. Mount-once:
+  // the handlers read refs + the evaluator ref, so no dependency churn.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Only the Alt transition matters; ignore auto-repeat and other keys held with Alt.
+      if (e.altKey && !altHeldRef.current) {
+        altHeldRef.current = true;
+        evaluateRef.current(lastPointerRef.current, true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      // The Alt keyup reports `altKey === false`; a non-Alt keyup while Alt is still down
+      // keeps it true and is ignored, so the peek only drops when Alt itself releases.
+      if (!e.altKey && altHeldRef.current) {
+        altHeldRef.current = false;
+        evaluateRef.current(lastPointerRef.current, false);
+      }
+    };
+    const clearHeld = () => {
+      altHeldRef.current = false;
+      evaluateRef.current(lastPointerRef.current, false);
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearHeld();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", clearHeld);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", clearHeld);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     // Any press hides a shown tooltip (engine parity: press dismisses the card).
@@ -1053,9 +1110,13 @@ export function GuiPreview({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    // Tooltip hover runs on every stage move (grid cells are pointer-events-none, so
-    // their moves bubble here). It self-suppresses while a drag is active.
-    updateTooltipHover(event.clientX, event.clientY);
+    // Tooltip peek runs on every stage move (grid cells are pointer-events-none, so their
+    // moves bubble here). Store the pointer so a later Alt keydown can re-evaluate from
+    // here, sync the held state from `e.altKey` (self-correcting after any missed keyup),
+    // and gate the peek on it. It self-suppresses while a drag is active.
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    altHeldRef.current = event.altKey;
+    evaluateTooltip(lastPointerRef.current, event.altKey);
     const active = drag.current;
     if (!active || !onDragMove) return;
     // Screen-pixel delta ÷ scale = logical-pixel delta. The stage is rendered with

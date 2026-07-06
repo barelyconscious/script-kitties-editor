@@ -96,3 +96,23 @@ export function pickTopmostRect<T extends { rect: ScreenRectEdges }>(
   }
   return hit;
 }
+
+/**
+ * The tooltip simulation's Alt-gated hover decision (task 519): the preview only
+ * peeks a tooltip while Alt/Option is held, so the target is the topmost provider
+ * under the pointer ONLY when `altHeld` is true and a pointer position is known.
+ * A released Alt (`altHeld === false`) or an unknown pointer (`null`, e.g. the
+ * cursor has never entered the stage) yields `null` → hide.
+ *
+ * Extracted from the React controller so the gating is a pure, unit-testable step
+ * shared by BOTH entry points that drive the peek: the pointermove handler and the
+ * window Alt keydown/keyup re-evaluation from the last stored pointer.
+ */
+export function pickHoverTarget<T extends { rect: ScreenRectEdges }>(
+  entries: readonly T[],
+  pointer: { x: number; y: number } | null,
+  altHeld: boolean,
+): T | null {
+  if (!altHeld || !pointer) return null;
+  return pickTopmostRect(entries, pointer.x, pointer.y);
+}

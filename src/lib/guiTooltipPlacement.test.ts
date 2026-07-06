@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pickTopmostRect, rectContainsPoint, screenRectToStageRect } from "./guiTooltipPlacement";
+import {
+  pickHoverTarget,
+  pickTopmostRect,
+  rectContainsPoint,
+  screenRectToStageRect,
+} from "./guiTooltipPlacement";
 
 // A screen rect helper: build the {left,top,right,bottom,width,height} DOMRect subset.
 function rect(left: number, top: number, width: number, height: number) {
@@ -96,5 +101,33 @@ describe("pickTopmostRect", () => {
     ];
     // Point in "under" only (outside "over").
     expect(pickTopmostRect(entries, 20, 20)?.key).toBe("under");
+  });
+});
+
+describe("pickHoverTarget (Alt-gated peek — task 519)", () => {
+  const entries = [{ rect: rect(0, 0, 100, 100), key: "a" }];
+
+  it("returns null when Alt is NOT held, even directly over a provider", () => {
+    expect(pickHoverTarget(entries, { x: 20, y: 20 }, false)).toBeNull();
+  });
+
+  it("returns the topmost provider under the pointer when Alt IS held", () => {
+    expect(pickHoverTarget(entries, { x: 20, y: 20 }, true)?.key).toBe("a");
+  });
+
+  it("returns null when Alt is held but the pointer is off every provider", () => {
+    expect(pickHoverTarget(entries, { x: 500, y: 500 }, true)).toBeNull();
+  });
+
+  it("returns null when the pointer position is unknown (never entered the stage)", () => {
+    expect(pickHoverTarget(entries, null, true)).toBeNull();
+  });
+
+  it("delegates topmost-wins to pickTopmostRect when Alt is held over overlapping providers", () => {
+    const overlapping = [
+      { rect: rect(0, 0, 100, 100), key: "under" },
+      { rect: rect(10, 10, 50, 50), key: "over" },
+    ];
+    expect(pickHoverTarget(overlapping, { x: 20, y: 20 }, true)?.key).toBe("over");
   });
 });

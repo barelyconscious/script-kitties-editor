@@ -3,6 +3,22 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+/* The game engine renders all GUI text with vgaoem.fon (the VGA OEM / DOS raster
+   font, CP437). Browsers can't load .fon, so the XGUI preview uses this
+   pixel-accurate open reproduction — Web437 "IBM VGA 9x16" from The Ultimate
+   Oldschool PC Font Pack (VileR, int10h.org, CC BY-SA 4.0). The 9x16 variant
+   carries the authentic inter-glyph spacing column, which reads correctly under
+   the horizontal stretch the preview applies to match the game's wide glyph
+   cells (see GuiPreview.tsx). Scoped to the preview's Text boxes only; the rest
+   of the editor stays on Geist. Attribution + license: src/assets/fonts/. */
+@font-face {
+  font-family: "Web437 IBM VGA";
+  src: url("./assets/fonts/Web437_IBM_VGA_9x16.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @layer base {

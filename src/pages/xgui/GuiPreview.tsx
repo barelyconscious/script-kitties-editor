@@ -99,6 +99,38 @@ function isVisualTag(tag: GuiNode["tag"]): boolean {
 /** Default text color when `color` is absent (design default). */
 const DEFAULT_TEXT_COLOR = "185,178,165,255";
 
+/**
+ * The engine renders all GUI text with vgaoem.fon (VGA OEM / DOS raster, CP437).
+ * We mirror that in the preview with Web437 "IBM VGA 9x16" (a pixel-accurate open
+ * reproduction; see src/assets/fonts/), falling back to a generic monospace if
+ * the webfont hasn't loaded. Scoped to Text boxes only.
+ */
+const PREVIEW_TEXT_FONT = '"Web437 IBM VGA", monospace';
+
+/**
+ * Match the game's on-screen text proportions. Calibrated from a side-by-side
+ * screenshot of the same component (game vs preview), normalized to the shared
+ * panel width so the two windows' zoom cancels out. The engine renders vgaoem.fon
+ * with glyph cells that are ~1.8x WIDER (relative to the layout) than the base
+ * 9x16 proportions, while the glyph HEIGHT nearly matches. So we bump the size a
+ * touch and stretch each glyph horizontally.
+ *
+ * HEIGHT_SCALE multiplies the authored `fontSize` (uniform size). WIDTH_STRETCH is
+ * an additional horizontal-only scale applied on top (see the text wrapper in the
+ * box render). Net width ≈ HEIGHT_SCALE * WIDTH_STRETCH; net height ≈ HEIGHT_SCALE.
+ * Tune these two if the preview drifts from the game.
+ */
+const PREVIEW_FONT_HEIGHT_SCALE = 1.1;
+const PREVIEW_FONT_WIDTH_STRETCH = 1.65;
+
+/** transform-origin for the horizontal text stretch, so it grows away from the
+ *  text's anchor edge and stays put under its `textAlign`. */
+function stretchOrigin(align: CSSProperties["textAlign"]): string {
+  if (align === "center") return "center";
+  if (align === "right" || align === "end") return "right center";
+  return "left center";
+}
+
 /** Map a resolved `textAlign` value to its CSS `text-align`. */
 function cssTextAlign(value: string | undefined): CSSProperties["textAlign"] {
   switch (value?.trim().toUpperCase()) {
@@ -316,7 +348,11 @@ const GuiBox = memo(function GuiBox({
       ? `${borderSize && Number.isFinite(Number(borderSize)) ? Number(borderSize) : 1}px solid ${borderColor}`
       : undefined,
     color: textColor,
-    fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
+    fontFamily: isText ? PREVIEW_TEXT_FONT : undefined,
+    // HEIGHT_SCALE brings the authored size up to the game's rendered size; the
+    // extra horizontal stretch lives on the inner text wrapper below.
+    fontSize:
+      isText && Number.isFinite(fontSize) ? `${fontSize * PREVIEW_FONT_HEIGHT_SCALE}px` : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
     // Nested z-order: every box applies its sibling-rank z-index (a container's
@@ -350,7 +386,22 @@ const GuiBox = memo(function GuiBox({
       )}
       style={style}
     >
-      {isText ? boxText(resolved) : null}
+      {isText ? (
+        // The game draws vgaoem.fon with much wider glyph cells than the base
+        // 9x16 font. An inline-block wrapper lets us stretch ONLY the glyphs
+        // horizontally (transform is visual-only, so the box geometry, selection
+        // rect and hit-testing are untouched); the origin follows textAlign so
+        // the text grows away from its anchor edge instead of drifting.
+        <span
+          style={{
+            display: "inline-block",
+            transform: `scaleX(${PREVIEW_FONT_WIDTH_STRETCH})`,
+            transformOrigin: stretchOrigin(cssTextAlign(attrs.textAlign)),
+          }}
+        >
+          {boxText(resolved)}
+        </span>
+      ) : null}
       {node.tag === "Component" ? (
         // F6b: a <Component> mounts its src child (or a placeholder) IN PLACE of
         // ordinary children. The child is mounted in a FRESH root scope built from

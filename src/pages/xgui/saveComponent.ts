@@ -35,9 +35,27 @@ import type { OpenComponent } from "./editorState";
  */
 const lastSavedXmlByPath = new Map<string, string>();
 
+/**
+ * The controller sibling of {@link lastSavedXmlByPath}: the exact `.lua` text the
+ * editor last wrote per component path. A controller `.lua` change fires its own
+ * `gui-changed` echo, so the live-reload listener re-reads the `.lua` and compares
+ * it here to recognize (and ignore) our own save.
+ */
+const lastSavedControllerByPath = new Map<string, string>();
+
 /** Record the XML the editor just persisted to `path` (for echo suppression). */
 export function recordSavedComponentXml(path: string, xml: string): void {
   lastSavedXmlByPath.set(path, xml);
+}
+
+/**
+ * Record the controller `.lua` text the editor just persisted to `path` (for echo
+ * suppression). A `null` `text` means the save wrote NO controller — clear any
+ * prior record so a stale entry can't suppress a later external controller edit.
+ */
+export function recordSavedController(path: string, text: string | null): void {
+  if (text == null) lastSavedControllerByPath.delete(path);
+  else lastSavedControllerByPath.set(path, text);
 }
 
 /**
@@ -47,6 +65,15 @@ export function recordSavedComponentXml(path: string, xml: string): void {
  */
 export function isOwnSaveEcho(path: string, xml: string): boolean {
   return lastSavedXmlByPath.get(path) === xml;
+}
+
+/**
+ * True when `text` is exactly the controller `.lua` the editor last wrote for
+ * `path` — the controller sibling of {@link isOwnSaveEcho}, so our own `.lua`
+ * write echoing back through the watcher doesn't raise a spurious notice.
+ */
+export function isOwnControllerSaveEcho(path: string, text: string): boolean {
+  return lastSavedControllerByPath.get(path) === text;
 }
 
 /**
@@ -100,5 +127,6 @@ export async function saveOpenComponent(open: OpenComponent): Promise<void> {
   // place when the live-reload listener re-reads the file. A failed write leaves
   // a harmless stale record — disk won't match it, so nothing is suppressed.
   recordSavedComponentXml(open.path, xml);
+  recordSavedController(open.path, controller ? controller[1] : null);
   await invoke("save_component", { name, xml, controller });
 }

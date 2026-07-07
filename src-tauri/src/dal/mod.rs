@@ -302,12 +302,16 @@ fn build_watcher(
         }),
     ];
 
-    // Scripts/ holds ~134 `.lua` files; we can't cheaply map a changed file back
-    // to its logical name, so any `.lua` change invalidates the whole scripts cache
-    // (wholesale, like sprites on an assets.json change). Captured separately from
-    // the exact-path invalidators above.
+    // The `scripts` cache is keyed by a `.lua` file's logical name and is populated
+    // by `get_script` for BOTH Scripts/ entity scripts (~134 `.lua`) AND gui/
+    // controller `.lua` files. We can't cheaply map a changed file back to its
+    // logical name, so ANY `.lua` change under a watched root invalidates the whole
+    // scripts cache (wholesale, like sprites on an assets.json change). It must fire
+    // for gui/ controllers too, not only Scripts/: a controller edited on disk is
+    // read through the same `scripts` cache, and scoping this to Scripts/ left gui
+    // controllers serving stale bytes forever (get_script never re-read them, so a
+    // component switch "reloaded" stale contents and a later Save clobbered disk).
     let scripts_cache = scripts.clone();
-    let scripts_dir_match = scripts_dir.clone();
     // The whole gui/ tree is a single coarse cache unit: any create/delete/edit
     // anywhere under gui/ (including nested folders) invalidates it wholesale, and
     // the next read re-walks. Captured separately from the exact-path invalidators,
@@ -335,9 +339,12 @@ fn build_watcher(
                     invalidate();
                 }
             }
-            if path.starts_with(&scripts_dir_match)
-                && path.extension().and_then(|e| e.to_str()) == Some("lua")
-            {
+            // Any `.lua` change under a watched root (Scripts/ entity scripts OR
+            // gui/ controllers — both read through `get_script`) invalidates the
+            // whole scripts cache. Runs before the gui/ branch's `gui-changed` emit
+            // below, so the frontend's post-emit re-fetch reads fresh controller
+            // bytes rather than the stale cache.
+            if path.extension().and_then(|e| e.to_str()) == Some("lua") {
                 scripts_cache.invalidate_all();
             }
             // Any change anywhere under gui/ (the recursive watch covers nested

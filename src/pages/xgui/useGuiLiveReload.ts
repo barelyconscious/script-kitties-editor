@@ -31,9 +31,9 @@ import { useEditorStore } from "./editorState";
 import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
 import { GUI_CHANGED_EVENT } from "./guiEvents";
 import type { GuiComponentRef } from "./guiTree";
-import { decideLiveReload, onGuiChangedAlways, remapSelection } from "./liveReload";
+import { classifyOpenChange, onGuiChangedAlways, remapSelection } from "./liveReload";
 import { buildOpenComponent } from "./openComponent";
-import { isOwnSaveEcho } from "./saveComponent";
+import { isOwnControllerSaveEcho, isOwnSaveEcho } from "./saveComponent";
 
 export type GuiLiveReload = {
   /** Basename of the open component whose disk file changed under unsaved edits,
@@ -122,22 +122,43 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
   // The event-driven reconcile when the OPEN component's file changed. Distinct
   // from the button: it must (1) ignore the editor's OWN save echoing back through
   // the watcher, and (2) never stomp a dirty draft — surface the notice instead.
-  const reconcileOpenChange = useCallback(async () => {
-    const res = await readOpenFromDisk();
-    if (!res) return;
-    const cur = stateRef.current.open;
-    if (!cur || cur.path !== res.open.path) return;
-    // Our OWN save (the watcher can't distinguish it from an external edit). The
-    // normalized disk content matches what we wrote → nothing changed externally.
-    if (isOwnSaveEcho(res.open.path, serializeGui(res.component.root))) return;
-    if (stateRef.current.dirty) {
-      // A genuine external change while the user has unsaved edits — don't stomp;
-      // surface the conflict and let them choose (Reload / Keep).
-      setDiskChangeNotice(cur.name);
-      return;
-    }
-    seatReload(res.component, res.open.path);
-  }, [readOpenFromDisk, seatReload]);
+  //
+  // `kind` selects WHICH file changed: an `.xml` edit echo-checks the serialized
+  // tree; a controller `.lua` edit re-reads the `.lua` via `get_script` and
+  // echo-checks that. Either way we still `readOpenFromDisk` first — the reload
+  // (`seatReload` → `reloadOpen`) re-seats the whole component and resets
+  // `controllerText` to null so the ControllerTab lazily re-reads the fresh `.lua`.
+  const reconcileOpenChange = useCallback(
+    async (kind: "xml" | "controller") => {
+      const res = await readOpenFromDisk();
+      if (!res) return;
+      const cur = stateRef.current.open;
+      if (!cur || cur.path !== res.open.path) return;
+      // Our OWN save (the watcher can't distinguish it from an external edit): the
+      // re-read content matches what we wrote → nothing changed externally.
+      if (kind === "xml") {
+        if (isOwnSaveEcho(res.open.path, serializeGui(res.component.root))) return;
+      } else {
+        const fileName = cur.controllerFileName;
+        if (fileName == null) return;
+        let lua: string | null;
+        try {
+          lua = await invoke<string | null>("get_script", { name: fileName });
+        } catch {
+          return;
+        }
+        if (isOwnControllerSaveEcho(res.open.path, lua ?? "")) return;
+      }
+      if (stateRef.current.dirty) {
+        // A genuine external change while the user has unsaved edits — don't stomp;
+        // surface the conflict and let them choose (Reload / Keep).
+        setDiskChangeNotice(cur.name);
+        return;
+      }
+      seatReload(res.component, res.open.path);
+    },
+    [readOpenFromDisk, seatReload],
+  );
 
   const reloadFromDisk = useCallback(() => {
     setDiskChangeNotice(null);
@@ -159,18 +180,23 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
       // any gui change drops the whole mount cache; mounts re-fetch cheaply.
       onGuiChangedAlways(() => void reloadTreeRef.current(), invalidateComponents);
       const s = stateRef.current;
-      const decision = decideLiveReload(
-        { openName: s.open?.name ?? null, openPath: s.open?.path ?? null, dirty: s.dirty },
+      const kind = classifyOpenChange(
+        {
+          openName: s.open?.name ?? null,
+          openPath: s.open?.path ?? null,
+          openControllerFileName: s.open?.controllerFileName ?? null,
+          dirty: s.dirty,
+        },
         changedPath,
       );
-      // Both "reload-open" and "notice-dirty" mean the OPEN component's file
-      // changed; the reconciler re-reads disk to suppress our own save echo and
-      // then branches on dirtiness (re-seat when clean, notice when dirty). The
-      // dirty flag is re-read there, so passing through one path is correct.
-      if (decision !== "refresh-only") {
-        void reconcileOpenChange();
+      // An "xml" or "controller" change means the OPEN document's file changed;
+      // the reconciler re-reads disk to suppress our own save echo and then
+      // branches on dirtiness (re-seat when clean, notice when dirty). The dirty
+      // flag is re-read there, so passing through one path is correct. "other" is
+      // already handled by the unconditional reloadTree above.
+      if (kind !== "other") {
+        void reconcileOpenChange(kind);
       }
-      // "refresh-only" already handled by the unconditional reloadTree above.
     }).then((fn) => {
       // listen() resolves async; if we already unmounted, detach immediately.
       if (disposed) fn();

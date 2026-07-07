@@ -353,6 +353,11 @@ const GuiBox = memo(function GuiBox({
     // extra horizontal stretch lives on the inner text wrapper below.
     fontSize:
       isText && Number.isFinite(fontSize) ? `${fontSize * PREVIEW_FONT_HEIGHT_SCALE}px` : undefined,
+    // The engine draws each glyph flush to the element's top (DrawText renders at
+    // the box origin). Collapse the inherited leading (the app base is 1.5, which
+    // otherwise centers the glyph in a tall line box and drops it below where the
+    // game paints it) so preview text top-aligns like the runtime.
+    lineHeight: isText ? 1 : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
     // Nested z-order: every box applies its sibling-rank z-index (a container's
@@ -395,6 +400,9 @@ const GuiBox = memo(function GuiBox({
         <span
           style={{
             display: "inline-block",
+            // Top-align to the box's line box so the collapsed leading isn't
+            // reintroduced as a baseline offset above the glyphs.
+            verticalAlign: "top",
             transform: `scaleX(${PREVIEW_FONT_WIDTH_STRETCH})`,
             transformOrigin: stretchOrigin(cssTextAlign(attrs.textAlign)),
           }}

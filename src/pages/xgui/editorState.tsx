@@ -72,10 +72,13 @@ import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { nodeHasId } from "./guiProperties";
 import {
   addChild,
+  canDuplicate,
   canMoveTo,
+  duplicateNode,
   findNode,
   moveNode,
   nextAutoId,
+  nodePath,
   removeNode,
   setNodeAttrs,
 } from "./guiTreeEdit";
@@ -293,6 +296,20 @@ export type EditorAction =
    * change (same path `addChildNode`/`removeNode` rely on).
    */
   | { type: "moveNode"; nodeId: string; targetParentId: string; index: number }
+  /**
+   * Duplicate the node identified by `nodeId` (and its whole subtree) as the
+   * original's next sibling — marks dirty and SELECTS the clone (mirrors
+   * `addChildNode` selecting the freshly-added node). VALIDATED via
+   * {@link canDuplicate}: an illegal duplication (the root `<View>`, the sole child of
+   * a `<GridLayout>`, a `<GridLayout>` whose parent already caps at one grid, or an
+   * unknown node) is a clean no-op (no dirty, no history). The clone is NEW nodes: the
+   * pure {@link duplicateNode} re-mints every `nodeId` and re-suffixes every authored
+   * `id` to a tree-unique `{id}-copy`, so selection/locks/badges never bleed between
+   * the copy and the original. One discrete duplication is ONE undo step (no
+   * coalescing). The immutable clone lives in the pure {@link duplicateNode} so it is
+   * tested off-store.
+   */
+  | { type: "duplicateNode"; nodeId: string }
   /**
    * Seat the controller's on-disk contents into the working draft WITHOUT marking
    * dirty (F10 lazy-load: the Controller tab read an existing controller via
@@ -603,6 +620,35 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // The moved subtree keeps its nodeIds, so the selection stays valid as-is.
         dirty: true,
         // A discrete move is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
+      };
+    }
+    case "duplicateNode": {
+      if (!state.open) return state;
+      // Legality gate: an illegal duplication (root, a one-child grid, a one-grid
+      // container, or an unknown node) is a clean no-op — keep every rule in
+      // canDuplicate so the UI never duplicates it. Validate BEFORE mutating.
+      if (!canDuplicate(state.open.root, action.nodeId)) return state;
+      const nextRoot = duplicateNode(state.open.root, action.nodeId);
+      // Belt-and-suspenders: a legality-passing duplication always produces a fresh
+      // root, but guard the same-reference case like every other tree action.
+      if (nextRoot === state.open.root) return state;
+      // The clone is the original's NEXT SIBLING in the new tree. The original keeps
+      // its nodeId (only the clone is re-minted), so locate it and take the next slot
+      // to select the freshly-created copy (mirrors addChildNode selecting the add).
+      const path = nodePath(nextRoot, action.nodeId);
+      const parent = path && path.length >= 2 ? path[path.length - 2] : null;
+      const originalIndex = parent
+        ? parent.children.findIndex((c) => c.nodeId === action.nodeId)
+        : -1;
+      const clone =
+        parent && originalIndex >= 0 ? (parent.children[originalIndex + 1] ?? null) : null;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        selectedNodeId: clone ? clone.nodeId : state.selectedNodeId,
+        dirty: true,
+        // A discrete duplication is its own undo step (no coalescing).
         ...pushHistory(state, undefined),
       };
     }

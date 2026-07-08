@@ -443,6 +443,117 @@ export function canMoveTo(root: GuiNode, nodeId: string, targetParentId: string)
 }
 
 /**
+ * Collect every authored `id` (trimmed, non-empty) anywhere in the tree into
+ * `into`. Backs {@link duplicateNode}'s uniqueness check — the clone's re-suffixed
+ * ids must collide with neither the existing tree nor each other.
+ */
+function collectAuthoredIds(node: GuiNode, into: Set<string>): void {
+  const id = node.attrs.id?.trim();
+  if (id) into.add(id);
+  for (const child of node.children) collectAuthoredIds(child, into);
+}
+
+/**
+ * A unique `{baseId}-copy` id, disambiguating with a trailing number on collision:
+ * `Panel1-copy`, then `Panel1-copy-2`, `Panel1-copy-3`, … The `usedIds` set is the
+ * live set of ids already spoken for (the existing tree PLUS clone ids minted so
+ * far in the same duplication), so a subtree holding several id-bearing nodes never
+ * mints the same id twice.
+ */
+function uniqueCopyId(baseId: string, usedIds: ReadonlySet<string>): string {
+  const first = `${baseId}-copy`;
+  if (!usedIds.has(first)) return first;
+  let n = 2;
+  while (usedIds.has(`${first}-${n}`)) n += 1;
+  return `${first}-${n}`;
+}
+
+/**
+ * Deep-clone a subtree for {@link duplicateNode}: every node — top to leaf — gets a
+ * FRESH {@link mintNodeId} (the clone is NEW nodes, so nothing may share a nodeId
+ * with the source; two nodes sharing one would make selecting/locking the copy also
+ * hit the original), and every id-bearing node's authored `attrs.id` is re-suffixed
+ * to a unique `{id}-copy` (preserving the editor's tree-wide-unique-id invariant).
+ * `usedIds` is mutated as ids are claimed so sibling/descendant clones stay distinct.
+ *
+ * Id-less nodes (`<Event>`, `<GridLayout>`, or a node whose `id` is blank) are left
+ * as-is. Controller code and binding tokens that referenced the old id are NOT
+ * rewritten — the editor is deliberately thin about runtime semantics, so a
+ * duplicated `Panel1`→`Panel1-copy` leaving the controller knowing only `Panel1` is
+ * the same expected outcome as adding any fresh element.
+ */
+function cloneSubtreeFresh(node: GuiNode, usedIds: Set<string>): GuiNode {
+  const attrs = { ...node.attrs };
+  const id = node.attrs.id?.trim();
+  if (id) {
+    const newId = uniqueCopyId(id, usedIds);
+    usedIds.add(newId);
+    attrs.id = newId;
+  }
+  return {
+    nodeId: mintNodeId(),
+    tag: node.tag,
+    attrs,
+    children: node.children.map((child) => cloneSubtreeFresh(child, usedIds)),
+  };
+}
+
+/**
+ * Duplicate the node identified by `nodeId` (and its WHOLE subtree), inserting the
+ * clone as the original's NEXT SIBLING (its index + 1 among the parent's children),
+ * and returning a NEW root (immutable — untouched subtrees, including the original
+ * itself, are reused by reference; only the ancestor spine down to the parent is
+ * rebuilt). The clone is a set of NEW nodes: {@link cloneSubtreeFresh} re-mints every
+ * `nodeId` and re-suffixes every authored `id` to a tree-unique `{id}-copy`.
+ *
+ * The root `<View>` cannot be duplicated (it has no parent to hold a sibling), and an
+ * unknown `nodeId` is a no-op — both return the original root UNCHANGED (same
+ * reference), so callers (and the store) treat an unchanged reference as a no-op. The
+ * element-RULE legality (may the clone be a legal sibling of the original?) lives in
+ * {@link canDuplicate}; the store validates with that BEFORE calling this.
+ */
+export function duplicateNode(root: GuiNode, nodeId: string): GuiNode {
+  // The root has no parent to take a sibling clone → no-op.
+  if (root.nodeId === nodeId) return root;
+  const path = nodePath(root, nodeId);
+  // Not found, or somehow the root (no parent) → no-op.
+  if (!path || path.length < 2) return root;
+  const original = path[path.length - 1];
+  const parent = path[path.length - 2];
+  // Seed the used-id set with every authored id already in the WHOLE tree, so the
+  // clone's `-copy` ids collide with neither the originals nor one another.
+  const usedIds = new Set<string>();
+  collectAuthoredIds(root, usedIds);
+  const clone = cloneSubtreeFresh(original, usedIds);
+  const index = parent.children.findIndex((c) => c.nodeId === nodeId);
+  // insertChildAt clamps, so an original in the last slot appends the clone.
+  return insertChildAt(root, parent.nodeId, clone, index + 1);
+}
+
+/**
+ * Whether the node identified by `nodeId` may be DUPLICATED — the legality predicate
+ * behind the structure tree's Duplicate affordance. The clone becomes a SECOND child
+ * of the original's parent (the original stays), so this asks {@link allowedChildTags}
+ * whether the parent may hold ANOTHER child of the node's tag — with NO self-exclusion
+ * (contrast {@link canMoveTo}, where the moved node LEAVES its slot). That difference
+ * is load-bearing: the sole child of a `<GridLayout>` (a grid holds exactly one child)
+ * and a `<GridLayout>` under a container already capped at one grid are BOTH rejected,
+ * because adding a second such child is illegal. The root `<View>` (no parent) and an
+ * unknown node are rejected too. The rules are NOT re-derived in the UI — the tree
+ * asks this and honors the answer.
+ */
+export function canDuplicate(root: GuiNode, nodeId: string): boolean {
+  if (root.nodeId === nodeId) return false;
+  const path = nodePath(root, nodeId);
+  if (!path || path.length < 2) return false;
+  const node = path[path.length - 1];
+  const parent = path[path.length - 2];
+  // No self-exclusion: the original remains, so the clone is genuinely an ADDITIONAL
+  // child — judge the parent's allow-list exactly as it stands.
+  return allowedChildTags(parent).includes(node.tag);
+}
+
+/**
  * Drop every node in `nodeIds` (and its whole subtree) from the tree, returning a
  * NEW root — the multi-node analogue of {@link removeNode}, used by the preview's
  * EDITOR-VISIBILITY prune (hidden elements are pruned before rendering, not removed

@@ -457,6 +457,88 @@ describe("editorReducer", () => {
     });
   });
 
+  describe("duplicateNode (task 520)", () => {
+    // View → Panel(p1: t1) + Panel(p2), with authored ids for the -copy assertions.
+    function tree(): GuiNode {
+      return {
+        nodeId: "root",
+        tag: "View",
+        attrs: { id: "view" },
+        children: [
+          {
+            nodeId: "p1",
+            tag: "Panel",
+            attrs: { id: "Panel1" },
+            children: [{ nodeId: "t1", tag: "Text", attrs: { id: "Text2" }, children: [] }],
+          },
+          { nodeId: "p2", tag: "Panel", attrs: { id: "Panel3" }, children: [] },
+        ],
+      };
+    }
+    const opened = (): EditorState =>
+      editorReducer(CLEAN, { type: "open", component: openDoc({ root: tree() }) });
+
+    it("inserts the clone as the next sibling, selects it, dirties, and commits ONE undo step", () => {
+      const s = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const ids = s.open?.root.children.map((c) => c.nodeId) ?? [];
+      // [p1, <clone>, p2]
+      expect(ids).toHaveLength(3);
+      expect(ids[0]).toBe("p1");
+      expect(ids[2]).toBe("p2");
+      const cloneId = ids[1];
+      expect(cloneId).not.toBe("p1");
+      // The clone (not the original) is selected.
+      expect(s.selectedNodeId).toBe(cloneId);
+      expect(s.dirty).toBe(true);
+      expect(s.past).toHaveLength(1);
+    });
+
+    it("re-suffixes the clone's authored ids to {id}-copy at every level", () => {
+      const s = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const clone = s.open?.root.children[1];
+      expect(clone?.attrs.id).toBe("Panel1-copy");
+      expect(clone?.children[0].attrs.id).toBe("Text2-copy");
+    });
+
+    it("undoing a duplication restores the tree in one step", () => {
+      const dup = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const undone = editorReducer(dup, { type: "undo" });
+      expect(undone.open?.root.children.map((c) => c.nodeId)).toEqual(["p1", "p2"]);
+    });
+
+    it("is a clean no-op (no dirty, no history) for the root <View>", () => {
+      const s0 = opened();
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "root" })).toBe(s0);
+    });
+
+    it("is a clean no-op when the node is missing", () => {
+      const s0 = opened();
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "ghost" })).toBe(s0);
+    });
+
+    it("is a clean no-op on an ILLEGAL duplication (sole child of a GridLayout)", () => {
+      const root: GuiNode = {
+        nodeId: "root",
+        tag: "View",
+        attrs: {},
+        children: [
+          {
+            nodeId: "g",
+            tag: "GridLayout",
+            attrs: {},
+            children: [{ nodeId: "cell", tag: "Panel", attrs: { id: "Cell1" }, children: [] }],
+          },
+        ],
+      };
+      const s0 = editorReducer(CLEAN, { type: "open", component: openDoc({ root }) });
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "cell" })).toBe(s0);
+    });
+
+    it("is a no-op when nothing is open", () => {
+      expect(editorReducer(CLEAN, { type: "duplicateNode", nodeId: "p1" })).toBe(CLEAN);
+    });
+  });
+
   it("stores an Event's name/handler verbatim (no validation/normalization)", () => {
     // The events panel is intentionally thin: whatever the user types is stored as
     // an <Event> node's attrs, untouched — even a namespaced/colon-bearing name and

@@ -29,6 +29,7 @@ import {
   AppWindow,
   ChevronDown,
   ChevronRight,
+  Copy,
   Eye,
   EyeOff,
   LayoutGrid,
@@ -61,6 +62,7 @@ import { interactionHandlerFields, nodeHasId, srcBasename } from "./guiPropertie
 import { type DropPlan, type DropZone, dropPlanForPointer } from "./guiTreeDnd";
 import {
   allowedChildTags,
+  canDuplicate,
   canMoveTo,
   findNode,
   makeChildNode,
@@ -428,6 +430,16 @@ export function StructureTree() {
     dispatch({ type: "removeNode", nodeId });
   };
 
+  // Duplicate a node (and its whole subtree) as its next sibling via the
+  // history-tracked `duplicateNode` action, which re-mints the clone's nodeIds,
+  // re-suffixes its ids to `{id}-copy`, and selects the clone. Exposed only on rows
+  // where `canDuplicate` says the clone is a legal sibling (guarded both here — the
+  // reducer no-ops an illegal duplication — and at the affordance level, where the
+  // menu item is hidden for the root and the grid-capped cases).
+  const handleDuplicate = (nodeId: string) => {
+    dispatch({ type: "duplicateNode", nodeId });
+  };
+
   // Add-handler action (task 507): wire an interaction handler onto a node by
   // writing ONLY the XML attribute — an EMPTY value the author fills in with a
   // controller function name in the Properties panel. Selecting the node opens its
@@ -473,6 +485,7 @@ export function StructureTree() {
     >
       <ul>
         <TreeRow
+          root={rootNode}
           node={open.root}
           depth={0}
           selectedNodeId={selectedNodeId}
@@ -485,6 +498,7 @@ export function StructureTree() {
           onAdd={handleAdd}
           onAddHandler={handleAddHandler}
           onRemove={handleRemove}
+          onDuplicate={handleDuplicate}
           onToggleLock={(nodeId) => dispatch({ type: "toggleLock", nodeId })}
           onToggleVisibility={(nodeId) => dispatch({ type: "toggleVisibility", nodeId })}
         />
@@ -533,6 +547,8 @@ function LintBadge({ lints }: { lints: readonly Lint[] }) {
 const INDENT_REM = 0.75;
 
 type TreeRowProps = {
+  /** The whole tree root — needed to ask {@link canDuplicate} about this row. */
+  root: GuiNode;
   node: GuiNode;
   depth: number;
   selectedNodeId: string | null;
@@ -547,11 +563,13 @@ type TreeRowProps = {
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onAddHandler: (nodeId: string, attr: string) => void;
   onRemove: (nodeId: string) => void;
+  onDuplicate: (nodeId: string) => void;
   onToggleLock: (nodeId: string) => void;
   onToggleVisibility: (nodeId: string) => void;
 };
 
 function TreeRow({
+  root,
   node,
   depth,
   selectedNodeId,
@@ -564,6 +582,7 @@ function TreeRow({
   onAdd,
   onAddHandler,
   onRemove,
+  onDuplicate,
   onToggleLock,
   onToggleVisibility,
 }: TreeRowProps) {
@@ -598,6 +617,11 @@ function TreeRow({
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
   // and is never removable). Events are just one case of this general delete.
   const removable = depth > 0;
+  // Whether this row can be duplicated — asked of the shared predicate, never
+  // re-derived here. False for the root `<View>`, the sole child of a `<GridLayout>`,
+  // and a `<GridLayout>` whose parent already caps at one grid (the clone would be an
+  // illegal second child of that tag).
+  const duplicable = canDuplicate(root, node.nodeId);
   // Lock / hide are offered on every NON-root element. The root `<View>` is excluded:
   // locking it ("lock everything") or hiding it ("blank the preview") carry no useful
   // meaning, and dropping its icons lets the whole tree reclaim the left gutter.
@@ -878,6 +902,14 @@ function TreeRow({
                   </ContextMenu.Item>
                 </>
               )}
+              {duplicable && (
+                <ContextMenu.Item
+                  onSelect={() => onDuplicate(node.nodeId)}
+                  className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 outline-none data-[highlighted]:bg-muted"
+                >
+                  <Copy className="size-3" /> Duplicate
+                </ContextMenu.Item>
+              )}
               {removable && (
                 <ContextMenu.Item
                   onSelect={() => onRemove(node.nodeId)}
@@ -896,6 +928,7 @@ function TreeRow({
           {node.children.map((child) => (
             <TreeRow
               key={child.nodeId}
+              root={root}
               node={child}
               depth={depth + 1}
               selectedNodeId={selectedNodeId}
@@ -908,6 +941,7 @@ function TreeRow({
               onAdd={onAdd}
               onAddHandler={onAddHandler}
               onRemove={onRemove}
+              onDuplicate={onDuplicate}
               onToggleLock={onToggleLock}
               onToggleVisibility={onToggleVisibility}
             />

@@ -104,7 +104,11 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
     (component: ReturnType<typeof buildOpenComponent>, openPath: string) => {
       const cur = stateRef.current.open;
       if (!cur || cur.path !== openPath) return;
-      const selectedNodeId = remapSelection(cur.root, component.root, stateRef.current.selectedNodeId);
+      const selectedNodeId = remapSelection(
+        cur.root,
+        component.root,
+        stateRef.current.selectedNodeId,
+      );
       // Re-resolve persisted locks against the re-parsed tree (nodeIds were
       // re-minted), so a live external edit doesn't drop the user's locks.
       const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
@@ -173,12 +177,14 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
     void listen<string | null>(GUI_CHANGED_EVENT, (event) => {
       const changedPath = event.payload ?? null;
       // ALWAYS, regardless of branch: refresh the component list (external
-      // add/delete/rename) AND clear the frontend child-mount cache so components
-      // that mount the changed one via <Component src> re-fetch the fresh child.
-      // The cache clear is safe here because `gui-changed` fires AFTER the backend
-      // caches are invalidated, so re-fetches read fresh data. Coarse by design:
-      // any gui change drops the whole mount cache; mounts re-fetch cheaply.
-      onGuiChangedAlways(() => void reloadTreeRef.current(), invalidateComponents);
+      // add/delete/rename) AND drop the frontend child-mount cache entry for the
+      // CHANGED child so components that mount it via <Component src> re-fetch the
+      // fresh child. The cache drop is safe here because `gui-changed` fires AFTER
+      // the backend caches are invalidated, so re-fetches read fresh data. Targeted
+      // by design: only the changed stem is dropped, so saving a screen that embeds
+      // other components no longer flashes those untouched children (task 523). A
+      // null (unattributable) payload falls back to a whole-cache clear.
+      onGuiChangedAlways(() => void reloadTreeRef.current(), invalidateComponents, changedPath);
       const s = stateRef.current;
       const kind = classifyOpenChange(
         {

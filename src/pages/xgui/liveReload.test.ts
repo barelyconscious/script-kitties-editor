@@ -3,6 +3,7 @@ import { type GuiNode, type GuiTag, parseGui } from "../../lib/guiNode";
 import {
   changedPathIsOpenComponent,
   changedPathIsOpenController,
+  changedPathStem,
   classifyOpenChange,
   decideLiveReload,
   nodeIdAtIndexPath,
@@ -15,15 +16,49 @@ function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
 }
 
+describe("changedPathStem — normalize a payload path to the mount-cache key", () => {
+  it("strips the folder and the .xml extension to the bare stem", () => {
+    expect(changedPathStem("widgets/bag_slot.xml")).toBe("bag_slot");
+    expect(changedPathStem("bag_slot.xml")).toBe("bag_slot");
+    expect(changedPathStem("a/b/c/deep.xml")).toBe("deep");
+  });
+
+  it("strips .xml case-insensitively (matches srcBasename)", () => {
+    expect(changedPathStem("widgets/bag_slot.XML")).toBe("bag_slot");
+  });
+
+  it("leaves a non-.xml file (e.g. a controller .lua) as a stem that matches no XML entry", () => {
+    // A controller edit fires gui-changed too; its stem must NOT collapse to a
+    // clear-all (that's null's job) — it stays a distinct string that no mounted
+    // XML child is keyed by, so the targeted invalidation is a harmless no-op.
+    expect(changedPathStem("widgets/bag_controller.lua")).toBe("bag_controller.lua");
+    expect(changedPathStem("bag_controller.lua")).toBe("bag_controller.lua");
+  });
+
+  it("returns null for a null payload (the clear-all fallback)", () => {
+    expect(changedPathStem(null)).toBeNull();
+  });
+});
+
 describe("onGuiChangedAlways — unconditional per-change side effects", () => {
-  it("refreshes the list AND invalidates the mount cache on every change", () => {
+  it("refreshes the list AND invalidates the CHANGED mount by its normalized stem", () => {
     const refreshList = vi.fn();
     const invalidateMounts = vi.fn();
-    onGuiChangedAlways(refreshList, invalidateMounts);
-    // Both must fire regardless of branch — the mount-cache clear is what makes
-    // includers re-fetch a saved/edited child (task 488).
+    onGuiChangedAlways(refreshList, invalidateMounts, "widgets/bag_slot.xml");
+    // Both must fire regardless of branch — the targeted mount-cache drop is what
+    // makes includers re-fetch a saved/edited child (task 488) without flashing the
+    // OTHER embedded children (task 523).
     expect(refreshList).toHaveBeenCalledTimes(1);
     expect(invalidateMounts).toHaveBeenCalledTimes(1);
+    expect(invalidateMounts).toHaveBeenCalledWith("bag_slot");
+  });
+
+  it("passes null through on an unattributable payload (clear-all fallback)", () => {
+    const refreshList = vi.fn();
+    const invalidateMounts = vi.fn();
+    onGuiChangedAlways(refreshList, invalidateMounts, null);
+    expect(refreshList).toHaveBeenCalledTimes(1);
+    expect(invalidateMounts).toHaveBeenCalledWith(null);
   });
 });
 

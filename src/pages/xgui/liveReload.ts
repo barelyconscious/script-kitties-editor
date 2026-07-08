@@ -113,23 +113,47 @@ export function classifyOpenChange(
 }
 
 /**
+ * Normalize a `gui-changed` payload path to the bare STEM the child-mount cache is
+ * keyed by (what `srcBasename` produces for a `<Component src>`): the last
+ * `/`-segment with a trailing `.xml` stripped (case-insensitive). Pure + testable.
+ *
+ *  - `"widgets/bag_slot.xml"` → `"bag_slot"` (matches the mount cache key).
+ *  - `"bag_controller.lua"`   → `"bag_controller.lua"` (no `.xml` to strip) — a stem
+ *    that matches no XML mount entry, so a targeted invalidation is a harmless no-op.
+ *  - `null` → `null` (the caller falls back to a clear-all — we can't attribute a
+ *    coarse "something changed" signal to one file).
+ */
+export function changedPathStem(changedPath: string | null): string | null {
+  if (changedPath == null) return null;
+  const segment = changedPath.slice(changedPath.lastIndexOf("/") + 1);
+  return segment.replace(/\.xml$/i, "");
+}
+
+/**
  * The side effects that run on EVERY `gui-changed` event, regardless of the
  * decision branch (refresh-only / reload-open / notice-dirty):
  *
  *  - `refreshList` — re-fetch the component LIST so external add/delete/rename
  *    always surfaces.
- *  - `invalidateMounts` — clear the frontend child-mount cache (F6b's
- *    guiComponentCache) so components that mount the changed one via
+ *  - `invalidateMounts` — drop the frontend child-mount cache (F6b's
+ *    guiComponentCache) for the CHANGED child so components that mount it via
  *    `<Component src>` re-fetch the fresh child, whether opened later or already
- *    mounted in the open preview.
+ *    mounted in the open preview. Only the changed stem is dropped (TARGETED), so
+ *    other embedded children keep their cache and never flash on an unrelated save;
+ *    a `null` payload we can't attribute falls back to a clear-all.
  *
  * Both are unconditional and order-independent. Kept here, off-React, so the
- * "always fire both, no matter the branch" contract is unit-tested without
- * rendering — the same pure-core posture as {@link decideLiveReload}.
+ * "always fire both, no matter the branch" contract — and the path normalization —
+ * are unit-tested without rendering, the same pure-core posture as
+ * {@link decideLiveReload}.
  */
-export function onGuiChangedAlways(refreshList: () => void, invalidateMounts: () => void): void {
+export function onGuiChangedAlways(
+  refreshList: () => void,
+  invalidateMounts: (basename?: string | null) => void,
+  changedPath: string | null,
+): void {
   refreshList();
-  invalidateMounts();
+  invalidateMounts(changedPathStem(changedPath));
 }
 
 /**

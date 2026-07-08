@@ -243,7 +243,8 @@ describe("makeChildNode", () => {
     const n = makeChildNode("Panel");
     expect(n.tag).toBe("Panel");
     expect(n.attrs.position).toBe("0,0,0,0");
-    expect(n.attrs.size).toBeDefined();
+    // Fills its parent by default (100% relative, no pixel offset).
+    expect(n.attrs.size).toBe("1,1,0,0");
     expect(n.children).toEqual([]);
   });
 

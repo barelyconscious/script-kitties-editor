@@ -137,9 +137,11 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  * sensible default attributes so it is visible/selectable in the preview the
  * instant it is added (the Properties slice F9b edits the rest):
  *
- *  - `<Panel>` / `<Text>` get a small default `position`/`size` so the new box is
- *    a visible, clickable target rather than a zero/full-bleed surprise. `<Text>`
- *    also gets placeholder `text` so it paints something.
+ *  - `<Panel>` gets `position="0,0,0,0"` `size="1,1,0,0"` — it FILLS its parent
+ *    (100% relative, no pixel offset), the sensible default for a container box.
+ *  - `<Text>` gets a small fixed default `position`/`size` so the new label is a
+ *    visible, clickable target rather than a zero/full-bleed surprise, plus
+ *    placeholder `text` so it paints something.
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
  *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
@@ -165,7 +167,7 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
   const underGrid = parentTag === "GridLayout";
   switch (tag) {
     case "Panel":
-      node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "0,0,100,100" };
+      node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "1,1,0,0" };
       break;
     case "Text":
       node.attrs = underGrid

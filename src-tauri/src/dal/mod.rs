@@ -41,6 +41,17 @@ pub mod sprites;
 /// for this to live-reload an open component and refresh the component list.
 pub const GUI_CHANGED_EVENT: &str = "gui-changed";
 
+/// The Tauri event name emitted to the frontend when a `.png` under a watched
+/// image root (`Sprites/` or `gui/`) changes on disk. Coarse — no payload —
+/// because the frontend sprite cache is keyed by logical name and reverse-mapping
+/// a changed path to its name(s) isn't worth it (one file can resolve under
+/// multiple names via `resolve_asset`'s `<name>.png` fallback); the frontend
+/// clears its whole cache. Emitted AFTER the Rust sprites cache is invalidated so
+/// the frontend's re-fetch reads fresh bytes (mirrors the gui-changed ordering).
+/// The editor never authors PNGs, so this is always a genuine external edit — no
+/// self-echo dedup is needed (unlike gui-changed).
+pub const SPRITES_CHANGED_EVENT: &str = "sprites-changed";
+
 /// A shared slot holding the `AppHandle` the filesystem watcher emits through.
 /// The watcher is built inside `Dal::new`, BEFORE the Tauri app (and thus its
 /// `AppHandle`) exists, so the watcher captures this empty slot and the setup
@@ -239,6 +250,7 @@ fn build_watcher(
     let data_dir = game_root.join("Data");
     let scripts_dir = game_root.join("Scripts");
     let gui_dir = game_root.join("gui");
+    let sprites_dir = game_root.join("Sprites");
 
     // (path the watcher reacts to, closure that invalidates the matching cache).
     // To register a new domain: clone its cache handle and push a row here.
@@ -322,6 +334,15 @@ fn build_watcher(
     // gui/ invalidates the whole components cache wholesale.
     let components_cache = components.clone();
     let gui_dir_match = gui_dir.clone();
+    // Sprite data URLs are cached per logical name and are fed by `.png` files under
+    // BOTH Sprites/ (creature/item/charm/ability art) AND gui/ (GUI textures). A
+    // same-path edit to an existing `.png` fires no domain/assets.json invalidator,
+    // so it needs its own branch: any `.png` change under either root evicts the
+    // whole sprites cache and signals the frontend. Wholesale eviction mirrors the
+    // assets.json precedent and sidesteps reverse-mapping a path to its logical
+    // name(s) (the `<name>.png` fallback makes that one-to-many).
+    let sprites_cache = sprites.clone();
+    let sprites_dir_match = sprites_dir.clone();
     // The handle the gui/ branch emits `gui-changed` through. Cloned into the
     // closure; empty until the setup hook installs the AppHandle, at which point
     // every subsequent gui/ change emits to the frontend.
@@ -364,6 +385,17 @@ fn build_watcher(
                     let _ = handle.emit(GUI_CHANGED_EVENT, rel);
                 }
             }
+            // A `.png` edit under Sprites/ or gui/ evicts the whole sprites cache
+            // and signals the frontend. Runs alongside (not instead of) the gui/
+            // branch above: a gui texture change refreshes both the tree cache and
+            // the sprite cache. Emit AFTER invalidation so the frontend's re-fetch
+            // reads fresh bytes, mirroring the gui ordering.
+            if is_sprite_change(path, &sprites_dir_match, &gui_dir_match) {
+                sprites_cache.invalidate_all();
+                if let Some(handle) = emit_slot.lock().unwrap().as_ref() {
+                    let _ = handle.emit(SPRITES_CHANGED_EVENT, ());
+                }
+            }
         }
     })
     .map_err(|e| format!("failed to create filesystem watcher: {}", e))?;
@@ -390,7 +422,28 @@ fn build_watcher(
     // on the next config update.
     let _ = watcher.watch(&gui_dir, RecursiveMode::Recursive);
 
+    // Watch Sprites/ so an external `.png` edit refreshes on-screen art. This is a
+    // TARGETED watch, NOT a whole-install recursion: the install root holds a
+    // `cmake-build-debug-*` output dir that churns on every compile, so recursing
+    // the root would flood events. Sprites/ is ~450 files but only ~2 directories,
+    // and a watch registers paths (not bytes), so PNG size is irrelevant — one
+    // coalesced FSEvents stream on macOS / 2 inotify descriptors on Linux. Sprites
+    // are static art, so event throughput is ~zero except on a deliberate edit.
+    // Best-effort: an install missing Sprites/ still starts (the cache just won't
+    // auto-freshen until the folder exists and is rewatched on the next config
+    // update). Recursive to catch any nested art subfolders.
+    let _ = watcher.watch(&sprites_dir, RecursiveMode::Recursive);
+
     Ok(watcher)
+}
+
+/// True when `path` is a `.png` under one of the watched image roots (`Sprites/`
+/// or `gui/`) — an edit that may have changed on-disk sprite bytes and so should
+/// evict the sprites cache. Extracted from the watcher closure so the predicate is
+/// unit-testable without a live filesystem watch.
+fn is_sprite_change(path: &Path, sprites_dir: &Path, gui_dir: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("png")
+        && (path.starts_with(sprites_dir) || path.starts_with(gui_dir))
 }
 
 /// Derive the gui-relative, forward-slashed path of a changed file for the
@@ -485,6 +538,49 @@ mod tests {
         let gui_dir = Path::new("/games/install/gui");
         let changed = Path::new("/games/install/Data/items.json");
         assert_eq!(gui_relative_path(gui_dir, changed), None);
+    }
+
+    #[test]
+    fn is_sprite_change_true_for_png_under_sprites_dir() {
+        let sprites_dir = Path::new("/games/install/Sprites");
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/Sprites/bitlynx.png");
+        assert!(is_sprite_change(changed, sprites_dir, gui_dir));
+    }
+
+    #[test]
+    fn is_sprite_change_true_for_png_under_gui_dir() {
+        // GUI textures live under gui/ and feed the same sprite cache.
+        let sprites_dir = Path::new("/games/install/Sprites");
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/kittypacks/panel_bg.png");
+        assert!(is_sprite_change(changed, sprites_dir, gui_dir));
+    }
+
+    #[test]
+    fn is_sprite_change_true_for_png_in_nested_sprites_subfolder() {
+        let sprites_dir = Path::new("/games/install/Sprites");
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/Sprites/creatures/bitlynx.png");
+        assert!(is_sprite_change(changed, sprites_dir, gui_dir));
+    }
+
+    #[test]
+    fn is_sprite_change_false_for_non_png() {
+        // A `.lua`/`.xml` under gui/ is handled by other branches, not this one.
+        let sprites_dir = Path::new("/games/install/Sprites");
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/gui/kittypacks/bag.xml");
+        assert!(!is_sprite_change(changed, sprites_dir, gui_dir));
+    }
+
+    #[test]
+    fn is_sprite_change_false_for_png_outside_watched_roots() {
+        // A `.png` under Data/ (or anywhere else) isn't sprite art we cache.
+        let sprites_dir = Path::new("/games/install/Sprites");
+        let gui_dir = Path::new("/games/install/gui");
+        let changed = Path::new("/games/install/Data/whatever.png");
+        assert!(!is_sprite_change(changed, sprites_dir, gui_dir));
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { NAV_RAIL_TOOLS, NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { useSpritesLiveReload } from "./components/useSpritesLiveReload";
 import { usePreference } from "./lib/preferences";
 import { RegistryProvider } from "./lib/registry";
 import { cn } from "./lib/utils";
@@ -12,6 +13,11 @@ import Xgui from "./pages/Xgui";
 
 function App() {
   const [activeTool, setActiveTool] = useState<NavRailTool>("workbench");
+
+  // App-wide: keep on-screen sprites in sync with external image edits. One
+  // listener clears the shared sprite cache on a `sprites-changed` event so every
+  // consumer (object list, sprite picker, data tables, XGUI preview) re-fetches.
+  useSpritesLiveReload();
 
   // Whether the Workbench's object-list pane is collapsed. Held in the central
   // preferences layer so it survives tool switches now and can move to

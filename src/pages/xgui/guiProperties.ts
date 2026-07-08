@@ -109,6 +109,31 @@ export function formatCompound(fields: CompoundFields): string {
 }
 
 /**
+ * Decide what a LIVE (per-keystroke) edit of one compound field should write to
+ * the store — or `null` to DEFER the write (task 521).
+ *
+ * `current` is the fields as they stand in the store; `key`/`text` is the field
+ * the user is editing and its raw in-progress text. A NON-EMPTY edit re-joins
+ * through {@link formatCompound} and returns it, so the preview keeps updating as
+ * the user types. An EMPTIED field returns `null` — the caller leaves the store
+ * untouched so {@link formatCompound}'s blank→0 rule does NOT fire mid-edit and
+ * snap a `0` back into the cell. The blur boundary flushes the empty field
+ * through `formatCompound` (coercing to a well-formed `0`) at that point.
+ *
+ * The blank→0 rule itself is unchanged — it is deferred from every-keystroke to
+ * the serialize boundary (blur), not removed: the runtime still needs four
+ * well-formed segments.
+ */
+export function compoundLiveWrite(
+  current: CompoundFields,
+  key: keyof CompoundFields,
+  text: string,
+): string | null {
+  if (text.trim() === "") return null;
+  return formatCompound({ ...current, [key]: text });
+}
+
+/**
  * Whether a single field value is a `{token}` binding (the whole field is a
  * brace-wrapped token) versus a literal number. The panel styles a bound field
  * distinctly. Delegates to the render-time {@link isWholeToken} so the editor's

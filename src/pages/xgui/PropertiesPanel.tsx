@@ -46,6 +46,7 @@ import {
   bindingDisplayValue,
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
+  compoundLiveWrite,
   computedId,
   fieldsForTag,
   formatCompound,
@@ -669,19 +670,45 @@ function CompoundField({
   literalOnly?: boolean;
 }) {
   const fields = parseCompound(value);
-  const setField = (key: keyof CompoundFields, fieldValue: string) => {
-    onSet(name, formatCompound({ ...fields, [key]: fieldValue }));
+  // Transient edit buffer for the CURRENTLY-FOCUSED field ONLY (task 521). While
+  // a field has focus its display comes from `draft` — which may be EMPTY
+  // mid-edit, so clearing a cell no longer snaps a `0` back in and typing `23`
+  // yields `23` rather than `023`. Every NON-focused field reads straight from
+  // `fields` (the value prop), so external writes (undo/redo, node switch,
+  // drag-to-move writing `position` live) always show through. The buffer is
+  // dropped on blur, so it never shields a field the user has left.
+  const [draft, setDraft] = useState<{ key: keyof CompoundFields; text: string } | null>(null);
+
+  const change = (key: keyof CompoundFields, text: string) => {
+    setDraft({ key, text });
+    // A non-empty edit commits live so the preview keeps updating; an emptied
+    // field DEFERS (compoundLiveWrite → null) so the store isn't coerced to 0
+    // mid-edit. The blur flush lands the 0 (four well-formed segments) then.
+    const next = compoundLiveWrite(fields, key, text);
+    if (next != null && next !== value) onSet(name, next);
   };
+
+  // Blur boundary: flush the buffered field through formatCompound (an empty
+  // field coerces to `0` here) and drop the buffer so the field re-reads the
+  // value prop. Only fires for the field that actually holds the buffer.
+  const flush = (key: keyof CompoundFields) => {
+    if (!draft || draft.key !== key) return;
+    const next = formatCompound({ ...fields, [key]: draft.text });
+    if (next !== value) onSet(name, next);
+    setDraft(null);
+  };
+
   return (
     <div className="grid grid-cols-2 gap-1.5">
       {COMPOUND_FIELD_LABELS.map(({ key, label }) => {
-        const fieldValue = fields[key];
+        const fieldValue = draft?.key === key ? draft.text : fields[key];
         return (
           <div key={key} className="flex flex-col gap-0.5">
             <span className="text-[10px] text-muted-foreground/80">{label}</span>
             <Input
               value={fieldValue}
-              onChange={(e) => setField(key, e.currentTarget.value)}
+              onChange={(e) => change(key, e.currentTarget.value)}
+              onBlur={() => flush(key)}
               placeholder={literalOnly ? "0" : "0 or {token}"}
               aria-label={label}
               className={cn(

@@ -3,6 +3,7 @@ import { parseScopeRef } from "../../lib/guiBinding";
 import type { GuiNode } from "../../lib/guiNode";
 import {
   bindingDisplayValue,
+  compoundLiveWrite,
   computedId,
   fieldsForTag,
   formatCompound,
@@ -123,6 +124,37 @@ describe("parseCompound / formatCompound round-trip", () => {
   it("round-trips a per-field token value through parse → format", () => {
     const raw = "{healthRatio},1,0,0";
     expect(formatCompound(parseCompound(raw))).toBe(raw);
+  });
+});
+
+describe("compoundLiveWrite (task 521 — defer blank→0 to blur)", () => {
+  const current = parseCompound("5,0,0,0");
+
+  it("DEFERS (returns null) when the edited field is emptied — no mid-edit 0", () => {
+    expect(compoundLiveWrite(current, "scaleX", "")).toBeNull();
+  });
+
+  it("defers on a whitespace-only field (formatCompound would coerce it to 0)", () => {
+    expect(compoundLiveWrite(current, "scaleX", "   ")).toBeNull();
+  });
+
+  it("commits a non-empty edit live, re-joined through formatCompound", () => {
+    // Clearing then typing `23`: the cleared keystroke deferred, so `23` lands on
+    // its own and serializes as `23` — not `023`.
+    expect(compoundLiveWrite(current, "scaleX", "23")).toBe("23,0,0,0");
+  });
+
+  it("commits a partial numeric edit live so the preview keeps updating", () => {
+    expect(compoundLiveWrite(current, "scaleX", "2")).toBe("2,0,0,0");
+  });
+
+  it("commits a {token} field verbatim (bindings survive the live write)", () => {
+    expect(compoundLiveWrite(current, "offsetX", "{x}")).toBe("5,0,{x},0");
+  });
+
+  it("preserves the OTHER fields on a live write", () => {
+    const c = parseCompound("0.5,1,4,9");
+    expect(compoundLiveWrite(c, "scaleY", "2")).toBe("0.5,2,4,9");
   });
 });
 

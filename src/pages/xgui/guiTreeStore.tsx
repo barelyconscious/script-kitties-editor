@@ -22,6 +22,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { GuiFolder } from "./guiTree";
@@ -49,13 +50,20 @@ export function GuiTreeStoreProvider({ children }: { children: ReactNode }) {
   const [tree, setTree] = useState<GuiFolder>(EMPTY_TREE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // True once the FIRST load has resolved. After that, refreshes (external edits,
+  // our own save echoing through the watcher) are background reconciles that must
+  // NOT blank the list into the "Loading…" placeholder — doing so flashes the
+  // whole panel on every save. Only the initial load, when there's nothing on
+  // screen yet, is allowed to show the loading state.
+  const loadedRef = useRef(false);
 
   const reload = useCallback(async (): Promise<GuiFolder | null> => {
-    setLoading(true);
+    if (!loadedRef.current) setLoading(true);
     setError(null);
     try {
       const result = await invoke<GuiFolder>("get_gui_tree");
       setTree(result);
+      loadedRef.current = true;
       return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load the gui/ tree.");

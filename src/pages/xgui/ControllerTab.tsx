@@ -36,13 +36,45 @@ import { type ReactNode, useEffect, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ApiReferencePane } from "@/components/workbench/ApiReferencePane";
 import { defaultControllerFileName, normalizeControllerFileName } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 
 /** Tracks the lazy disk read of an EXISTING controller. */
 type ReadState = { kind: "idle" } | { kind: "error"; message: string };
 
+/**
+ * The Controller tab: the Lua editor (in all its load states) on the left, plus
+ * the shared {@link ApiReferencePane} on the right so the game scripting API is
+ * one collapse-rail away while writing a controller.
+ *
+ * The API pane is a CONTROLLER-tab concern only — it lives here, inside the
+ * controller pane region, so it never adds a rail to the View or XML tabs. Since
+ * the whole controller pane stays mounted-but-hidden across tab flips (see
+ * {@link import("../Xgui").default} — `OpenComponentPanes`), the pane keeps its
+ * search/drill state for free across flips; it starts COLLAPSED so the Lua
+ * editor keeps full width until the docs are reached for. It owns only its own
+ * state (bundled `GAME_API`), so mounting it here is the same three-line reuse
+ * the Workbench does. It sits between the editor and the far-right Data Model
+ * panel, which is a sibling of this whole tab and so does not move tab-to-tab.
+ */
 export function ControllerTab() {
+  return (
+    <div className="flex h-full min-h-0">
+      <div className="min-h-0 min-w-0 flex-1">
+        <ControllerBody />
+      </div>
+      {/* h-full bounds the pane's internal scroll; shrink-0 keeps its rail/width
+          from being squeezed by the editor. Reused as-is, same as the Workbench. */}
+      <div className="h-full min-h-0 shrink-0">
+        <ApiReferencePane defaultCollapsed />
+      </div>
+    </div>
+  );
+}
+
+/** The Lua controller editor and its load/add states (no API pane). */
+function ControllerBody() {
   const { state, dispatch } = useEditorStore();
   const open = state.open;
 

@@ -397,9 +397,15 @@ const GuiBox = memo(function GuiBox({
         // horizontally (transform is visual-only, so the box geometry, selection
         // rect and hit-testing are untouched); the origin follows textAlign so
         // the text grows away from its anchor edge instead of drifting.
+        //
+        // Because scaleX is visual-only, wrapping is computed on the UNSTRETCHED
+        // text — so we pre-shrink the wrapper to (100% / stretch). The browser
+        // then wraps at that narrower width, and the scaleX blows each line back
+        // out to exactly fill the box, keeping wrapped text inside the bounds.
         <span
           style={{
             display: "inline-block",
+            width: `${100 / PREVIEW_FONT_WIDTH_STRETCH}%`,
             // Top-align to the box's line box so the collapsed leading isn't
             // reintroduced as a baseline offset above the glyphs.
             verticalAlign: "top",

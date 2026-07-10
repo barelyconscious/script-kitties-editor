@@ -2,25 +2,30 @@
  * The single source of truth for the game's Lua scripting API.
  *
  * This is **editor knowledge** — a static, hand-authored description of the
- * surface a modder can call from a creature/ability/item/effect/biogram script.
- * It is NOT per-install game data and is never fetched from Rust; it ships in
- * the frontend bundle.
+ * surface a modder can call from a creature/ability/item/effect/biogram script
+ * or a GUI controller. It is NOT per-install game data and is never fetched
+ * from Rust; it ships in the frontend bundle.
  *
  * "One source, two surfaces": the Workbench reference pane renders this tree
  * directly, and a future Monaco completion provider will be a *projection* of
  * the same tree (that is what the `insertText` / `detail` fields below feed).
- * Keeping both surfaces backed by one tree is the whole point — the predecessor
- * carried two independently hand-authored lists (`apiViewer/gameApi.ts` and
- * `services/CompletionProvider.ts`) that never shared a line and drifted out of
- * sync. This module is their reconciled merge.
  *
- * Authoring rules, so the merge does not re-fork:
+ * GROUND TRUTH: this tree is synced to the actual worlds-cpp sol2 bindings, not
+ * to any editor's doc. The engine registers its Lua surface in
+ * `LuaLoader.cpp` (14 `ScriptLibrary*`/GUI libs) plus two Lua preludes,
+ * `Scripts/__globals.lua` and `Scripts/__libcombat.lua`. Where an older doc
+ * disagreed with the bindings, the bindings win (e.g. there is no DLC API,
+ * `GetParty` returns a `Party` not a `Creature[]`, `Ability.shape` is an
+ * `AbilityShape` enum not a geometry `Shape`, `Inventory.swapItems` takes two
+ * indices, `Creature.abilities` is `AbilityAttack[]`). Symbols that come from
+ * the Lua preludes rather than a C++ binding are flagged in their docs.
+ *
+ * Authoring rules, so the tree does not drift:
  *  - Every item has a `name` and a `type`.
  *  - Top-level names are unique. Nested member names may repeat only where the
  *    game genuinely overloads them (e.g. `Creature.removeEffect`).
  *  - `documentation` is prose for the reference pane. `insertText` (a Monaco
- *    snippet) and `detail` (a short type hint) are completion-provider hints,
- *    carried over from the predecessor's CompletionProvider where it had them.
+ *    snippet) and `detail` (a short type hint) are completion-provider hints.
  */
 
 /** A node in the API tree: a namespace, type, function, enum, member, … */
@@ -47,9 +52,7 @@ export type ApiItem = {
   /** Worked examples shown in the reference pane. */
   examples?: ApiExample[];
 
-  // --- Completion-provider projection hints (from the predecessor's
-  // CompletionProvider). Optional: items authored only for the reference pane
-  // may omit them and the provider falls back to inserting `name`. ---
+  // --- Completion-provider projection hints. Optional. ---
 
   /** Monaco snippet string (may contain `${1:...}` tab stops). */
   insertText?: string;
@@ -57,15 +60,10 @@ export type ApiItem = {
   detail?: string;
 };
 
-/**
- * The closed set of node kinds. Derived from what both predecessor sources
- * actually used: gameApi.ts's `enum`/`object`/`function`/`method`/`library`
- * plus the primitive/field types it stored in `type`, and CompletionProvider's
- * keyword/property/constant flavours.
- */
+/** The closed set of node kinds. */
 export type ApiItemType =
   // structural
-  | "namespace" // a grouping with members but no value of its own (keywords, libraries)
+  | "namespace" // a grouping with members but no value of its own
   | "library" // a stdlib/game table you call functions on (string, math, Battle)
   | "object" // a game type with fields and methods
   | "enum" // a set of named constants
@@ -75,7 +73,7 @@ export type ApiItemType =
   | "constant" // a named constant value (enum member, ArenaEffects entry)
   | "callback" // an overridable hook the modder implements
   | "keyword" // a Lua reserved word
-  // primitive value types (used on members carried over from gameApi.ts)
+  // primitive value types
   | "string"
   | "int"
   | "double"
@@ -88,13 +86,8 @@ export type ApiArg = { name: string; type: string };
 export type ApiExample = { title: string; code: string };
 
 // ---------------------------------------------------------------------------
-// Lua language surface
-//
-// Source: CompletionProvider.ts (provideLuaKeywords / provideLuaStandardLibrary).
-// gameApi.ts had none of this. Keywords become one `namespace` whose members
-// are the reserved words; the stdlib becomes global functions plus `library`
-// nodes for string/table/math (matching how the predecessor namespaced them in
-// the completion labels, e.g. "string.find").
+// Lua language surface (Lua 5.4). Not engine bindings — the standard library
+// available to every script.
 // ---------------------------------------------------------------------------
 
 const luaKeywords = (): ApiItem => ({
@@ -129,7 +122,6 @@ const luaKeywords = (): ApiItem => ({
 });
 
 const luaStdlib = (): ApiItem[] => [
-  // Global functions
   {
     name: "assert",
     type: "function",
@@ -207,7 +199,6 @@ const luaStdlib = (): ApiItem[] => [
     args: [{ name: "value", type: "any" }],
     returns: { type: "string" },
   },
-  // String library
   {
     name: "string",
     type: "library",
@@ -223,6 +214,14 @@ const luaStdlib = (): ApiItem[] => [
           { name: "str", type: "string" },
           { name: "pattern", type: "string" },
         ],
+      },
+      {
+        name: "format",
+        type: "function",
+        documentation: 'Formats a string, printf-style (e.g. string.format("%3.0f", n)).',
+        insertText: "string.format(${1:fmt}, ${2:...})",
+        args: [{ name: "fmt", type: "string" }],
+        returns: { type: "string" },
       },
       {
         name: "sub",
@@ -274,7 +273,6 @@ const luaStdlib = (): ApiItem[] => [
       },
     ],
   },
-  // Table library
   {
     name: "table",
     type: "library",
@@ -321,7 +319,6 @@ const luaStdlib = (): ApiItem[] => [
       },
     ],
   },
-  // Math library
   {
     name: "math",
     type: "library",
@@ -369,7 +366,7 @@ const luaStdlib = (): ApiItem[] => [
       {
         name: "random",
         type: "function",
-        documentation: "Random number.",
+        documentation: "Random number. math.random() → [0,1); math.random(max) → [1,max].",
         insertText: "math.random(${1:max})",
         args: [{ name: "max", type: "int" }],
         returns: { type: "double" },
@@ -387,20 +384,17 @@ const luaStdlib = (): ApiItem[] => [
 ];
 
 // ---------------------------------------------------------------------------
-// Basic types & enums
-//
-// Source: gameApi.ts getBasicTypes(). The CombatAction and DamageType enum
-// VALUES are reconciled here with CompletionProvider's CombatAction.* /
-// DamageType.* entries — gameApi.ts had bare "Enum value" docs, while the
-// CompletionProvider carried a real one-line doc + insertText + detail per
-// value. We keep gameApi.ts's structure and fold in the richer prose.
+// Enums — `lua.new_enum(...)` across the ScriptLibrary* set, plus the two
+// prelude "enum-like" tables (CombatAction, ArenaEffects). Ground truth:
+// ScriptLibraryDataTypes.h, ScriptLibraryBattleManager.h, ScriptLibraryInput.h,
+// ScriptLibraryGameManager.h, ScriptLibraryDirector.h, LGUI.h, __globals.lua.
 // ---------------------------------------------------------------------------
 
-const basicTypes = (): ApiItem[] => [
+const enums = (): ApiItem[] => [
   {
     name: "Biome",
     type: "enum",
-    documentation: "The biome of an area.",
+    documentation: "The biome of an area. (C++ enum.)",
     members: [
       { name: "FOREST", type: "constant", documentation: "A FOREST biome." },
       { name: "PLAINS", type: "constant", documentation: "A PLAINS biome." },
@@ -416,7 +410,8 @@ const basicTypes = (): ApiItem[] => [
   {
     name: "ItemRarity",
     type: "enum",
-    documentation: "Represents the rarity of an item.",
+    tags: ["items"],
+    documentation: "The rarity of an item. (C++ enum.)",
     members: [
       { name: "POOR", type: "constant", documentation: "A POOR rarity." },
       { name: "COMMON", type: "constant", documentation: "A COMMON rarity." },
@@ -427,218 +422,10 @@ const basicTypes = (): ApiItem[] => [
     ],
   },
   {
-    name: "Point",
-    type: "object",
-    documentation: "A 2D coordinate.",
-    members: [
-      { name: "x", type: "int", documentation: "X coordinate." },
-      { name: "y", type: "int", documentation: "Y coordinate." },
-      {
-        name: "toScreenPosition",
-        type: "method",
-        documentation: "Converts a world coordinate in combat to a screen coordinate.",
-      },
-    ],
-  },
-  {
-    name: "Shape",
-    type: "object",
-    documentation: "A geometric shape. Supports sphere and square.",
-    members: [
-      {
-        name: "contains",
-        type: "method",
-        documentation: "Whether the shape contains a point.",
-        args: [{ name: "point", type: "Point" }],
-        returns: { type: "bool" },
-      },
-    ],
-  },
-  {
-    name: "Sphere",
-    type: "object",
-    documentation: "A sphere shape.",
-    members: [
-      { name: "radius", type: "int", documentation: "The radius." },
-      {
-        name: "center",
-        type: "property",
-        documentation: "The center of the sphere.",
-        detail: "Point",
-      },
-      {
-        name: "new",
-        type: "function",
-        documentation: "Constructor.",
-        args: [
-          { name: "radius", type: "int" },
-          { name: "center", type: "Point" },
-        ],
-        returns: { type: "Sphere" },
-      },
-      {
-        name: "contains",
-        type: "method",
-        documentation: "Whether the shape contains a point.",
-        args: [{ name: "point", type: "Point" }],
-        returns: { type: "bool" },
-      },
-    ],
-  },
-  {
-    name: "CombatAction",
-    type: "enum",
-    tags: ["battle"],
-    documentation:
-      "Describes an action taken as part of combat. Used both as an enum of action kinds and as the shape of an action object.",
-    members: [
-      {
-        name: "DAMAGE",
-        type: "constant",
-        documentation: "Applies damage to a creature.",
-        insertText: "CombatAction.DAMAGE",
-        detail: "CombatAction",
-      },
-      {
-        name: "HEALING",
-        type: "constant",
-        documentation: "Applies healing to a creature.",
-        insertText: "CombatAction.HEALING",
-        detail: "CombatAction",
-      },
-      {
-        name: "APPLY_EFFECT",
-        type: "constant",
-        documentation: "Applies an effect to a creature.",
-        insertText: "CombatAction.APPLY_EFFECT",
-        detail: "CombatAction",
-      },
-      {
-        name: "REMOVE_EFFECT",
-        type: "constant",
-        documentation: "Removes an effect from a creature.",
-        insertText: "CombatAction.REMOVE_EFFECT",
-        detail: "CombatAction",
-      },
-      {
-        name: "MOVE",
-        type: "constant",
-        documentation: "Relocates a creature to a new location.",
-        insertText: "CombatAction.MOVE",
-        detail: "CombatAction",
-      },
-      {
-        name: "SPRITE_ANIMATION",
-        type: "constant",
-        documentation: "Inserts a sprite animation.",
-        insertText: "CombatAction.SPRITE_ANIMATION",
-        detail: "CombatAction",
-      },
-      {
-        name: "SET_ARENA_EFFECT",
-        type: "constant",
-        documentation: "Inserts an arena effect over the specified area.",
-        insertText: "CombatAction.SET_ARENA_EFFECT",
-        detail: "CombatAction",
-      },
-      {
-        name: "CREATE_ENTITY",
-        type: "constant",
-        documentation: "Inserts a combat entity.",
-        insertText: "CombatAction.CREATE_ENTITY",
-        detail: "CombatAction",
-      },
-      {
-        name: "action",
-        type: "property",
-        documentation: "The CombatAction enum value describing this action.",
-        detail: "CombatAction",
-      },
-      {
-        name: "target",
-        type: "property",
-        documentation: "The target creature of this action.",
-        detail: "BattleCreature",
-      },
-      {
-        name: "name",
-        type: "property",
-        documentation: "The name when creating a battle entity.",
-        detail: "string",
-      },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The description when creating a battle entity.",
-        detail: "string",
-      },
-      {
-        name: "position",
-        type: "property",
-        documentation: "The position when creating a battle entity.",
-        detail: "Point",
-      },
-      {
-        name: "script",
-        type: "property",
-        documentation: "The script when creating a battle entity.",
-        detail: "string",
-      },
-      {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the action.",
-        detail: "string",
-      },
-      {
-        name: "amount",
-        type: "property",
-        documentation: "The amount of the action.",
-        detail: "double",
-      },
-      {
-        name: "damageType",
-        type: "property",
-        documentation: "The damage type of a DAMAGE action.",
-        detail: "DamageType",
-      },
-      {
-        name: "shape",
-        type: "property",
-        documentation: "The shape of the action.",
-        detail: "Shape",
-      },
-      {
-        name: "radius",
-        type: "property",
-        documentation: "The radius of the action.",
-        detail: "int",
-      },
-      {
-        name: "arenaEffect",
-        type: "property",
-        documentation: "The arena effect of a SET_ARENA_EFFECT action.",
-        detail: "ArenaEffect",
-      },
-      {
-        name: "creatureEffect",
-        type: "property",
-        documentation: "The creature effect of an APPLY_EFFECT action.",
-        detail: "CreatureEffect",
-      },
-      {
-        name: "mover",
-        type: "property",
-        documentation: "The creature being relocated by a MOVE action.",
-        detail: "BattleCreature",
-      },
-    ],
-  },
-  {
     name: "DamageType",
     type: "enum",
     tags: ["battle"],
-    documentation: "The type of damage dealt by an action.",
+    documentation: "The type of damage dealt by an action. (C++ enum.)",
     members: [
       {
         name: "PHYSICAL",
@@ -692,379 +479,502 @@ const basicTypes = (): ApiItem[] => [
     ],
   },
   {
+    name: "AbilityShape",
+    type: "enum",
+    tags: ["battle"],
+    documentation:
+      "The targeting shape of an ability (this is what `Ability.shape` holds). (C++ enum.)",
+    members: [
+      { name: "CONE", type: "constant", documentation: "Cone-shaped area." },
+      { name: "POINT", type: "constant", documentation: "A single point / tile." },
+      { name: "SELF", type: "constant", documentation: "The caster itself." },
+      { name: "SPHERE", type: "constant", documentation: "A spherical (radial) area." },
+      { name: "SQUARE", type: "constant", documentation: "A square area." },
+    ],
+  },
+  {
+    name: "AbilityTag",
+    type: "enum",
+    tags: ["battle"],
+    documentation: "Well-known ability/biogram tags. (C++ enum.)",
+    members: [
+      { name: "AREA", type: "constant", documentation: "Affects an area." },
+      { name: "CONJURE", type: "constant", documentation: "Conjures something." },
+      { name: "CONTACT", type: "constant", documentation: "Requires contact." },
+      { name: "SET_LOCATION", type: "constant", documentation: "Targets a location." },
+      { name: "PROJECTILE", type: "constant", documentation: "A projectile." },
+      {
+        name: "AUTO_TARGET",
+        type: "constant",
+        documentation:
+          'Auto-targets. NOTE: the engine\'s underlying string value is misspelled "ATUO_TARGET" — compare with AbilityTag.AUTO_TARGET rather than the literal.',
+      },
+      { name: "HELPFUL", type: "constant", documentation: "A helpful (friendly) ability." },
+      { name: "HARMFUL", type: "constant", documentation: "A harmful ability." },
+    ],
+  },
+  {
+    name: "CreatureEntryStatus",
+    type: "enum",
+    documentation: "A creature's status in the Journal (Kittydex). (C++ enum.)",
+    members: [
+      { name: "NOT_SEEN", type: "constant", documentation: "Never encountered." },
+      { name: "DISCOVERED", type: "constant", documentation: "Seen but not caught." },
+      { name: "CAUGHT", type: "constant", documentation: "Caught by the player." },
+      { name: "DEFEATED", type: "constant", documentation: "Defeated in battle." },
+    ],
+  },
+  {
+    name: "GameMode",
+    type: "enum",
+    documentation: "Top-level game mode, for SetGameMode. (C++ enum.)",
+    members: [
+      { name: "BATTLE_SCENE", type: "constant", documentation: "The battle scene." },
+      { name: "SAVE_SELECTOR_SCENE", type: "constant", documentation: "The save-selector scene." },
+      { name: "TITLE_SCENE", type: "constant", documentation: "The title scene." },
+    ],
+  },
+  {
+    name: "Key",
+    type: "enum",
+    tags: ["input"],
+    documentation: "Named input bindings, used with Input:isPressed / isDown / isUp. (C++ enum.)",
+    members: [
+      { name: "UP", type: "constant", documentation: "UI up." },
+      { name: "DOWN", type: "constant", documentation: "UI down." },
+      { name: "RIGHT", type: "constant", documentation: "UI right." },
+      { name: "LEFT", type: "constant", documentation: "UI left." },
+      { name: "TAB_RIGHT", type: "constant", documentation: "Tab right." },
+      { name: "TAB_LEFT", type: "constant", documentation: "Tab left." },
+      { name: "SELECT", type: "constant", documentation: "UI select / confirm." },
+      { name: "BACK", type: "constant", documentation: "UI back / cancel." },
+      { name: "LOOK", type: "constant", documentation: "Look." },
+      { name: "OPEN_HELP", type: "constant", documentation: "Open help." },
+      { name: "OPEN_MAP", type: "constant", documentation: "Open the map." },
+      { name: "OPEN_BAG", type: "constant", documentation: "Open the bag." },
+      { name: "OPEN_PARTY", type: "constant", documentation: "Open the party." },
+      { name: "OPEN_PROFILE", type: "constant", documentation: "Open the profile." },
+      { name: "RELEASE_CREATURE", type: "constant", documentation: "Release a creature." },
+      { name: "ABILITY1", type: "constant", documentation: "Battle ability 1." },
+      { name: "ABILITY2", type: "constant", documentation: "Battle ability 2." },
+      { name: "ABILITY3", type: "constant", documentation: "Battle ability 3." },
+      { name: "ABILITY4", type: "constant", documentation: "Battle ability 4." },
+    ],
+  },
+  {
+    name: "KeyBinding",
+    type: "enum",
+    tags: ["input"],
+    documentation:
+      "DEPRECATED (engine comment) — the older UI-only binding enum. Prefer `Key`. (C++ enum.)",
+    members: [
+      { name: "UI_UP", type: "constant", documentation: "UI up." },
+      { name: "UI_DOWN", type: "constant", documentation: "UI down." },
+      { name: "UI_RIGHT", type: "constant", documentation: "UI right." },
+      { name: "UI_LEFT", type: "constant", documentation: "UI left." },
+      { name: "UI_TAB_RIGHT", type: "constant", documentation: "Tab right." },
+      { name: "UI_TAB_LEFT", type: "constant", documentation: "Tab left." },
+      { name: "UI_SELECT", type: "constant", documentation: "Select." },
+      { name: "UI_BACK", type: "constant", documentation: "Back." },
+    ],
+  },
+  {
+    name: "Button",
+    type: "enum",
+    tags: ["input"],
+    documentation: "Mouse buttons (matches SDL button constants). (C++ enum.)",
+    members: [
+      { name: "LEFT", type: "constant", documentation: "Left mouse button." },
+      { name: "RIGHT", type: "constant", documentation: "Right mouse button." },
+      { name: "MIDDLE", type: "constant", documentation: "Middle mouse button." },
+    ],
+  },
+  {
+    name: "TextAlignment",
+    type: "enum",
+    tags: ["gui"],
+    documentation: "Text alignment for GUI Text widgets (LGUI). (C++ enum.)",
+    members: [
+      { name: "LEFT", type: "constant", documentation: "Left-aligned." },
+      { name: "CENTER", type: "constant", documentation: "Centered." },
+      { name: "RIGHT", type: "constant", documentation: "Right-aligned." },
+    ],
+  },
+  {
+    name: "ThoughtType",
+    type: "enum",
+    tags: ["battle"],
+    documentation: "DEPRECATED (engine comment) — legacy AI thought kinds. (C++ enum.)",
+    members: [
+      { name: "NOTHING", type: "constant", documentation: "Do nothing." },
+      { name: "MOVE", type: "constant", documentation: "Move." },
+      { name: "ATTACK", type: "constant", documentation: "Attack." },
+    ],
+  },
+  {
+    name: "CombatAction",
+    type: "enum",
+    tags: ["battle"],
+    documentation:
+      "Kinds of combat action. Defined as a plain Lua TABLE of string constants in __globals.lua (not a C++ enum); the values are the strings below. Also the conceptual shape of an action object you build and push via Combat:addAction — the fields are documented here for reference.",
+    members: [
+      {
+        name: "DAMAGE",
+        type: "constant",
+        documentation: "Applies damage to a creature.",
+        insertText: "CombatAction.DAMAGE",
+        detail: "CombatAction",
+      },
+      {
+        name: "MOVE",
+        type: "constant",
+        documentation: "Relocates a creature.",
+        insertText: "CombatAction.MOVE",
+        detail: "CombatAction",
+      },
+      {
+        name: "HEALING",
+        type: "constant",
+        documentation: "Applies healing to a creature.",
+        insertText: "CombatAction.HEALING",
+        detail: "CombatAction",
+      },
+      {
+        name: "APPLY_EFFECT",
+        type: "constant",
+        documentation: "Applies an effect to a creature.",
+        insertText: "CombatAction.APPLY_EFFECT",
+        detail: "CombatAction",
+      },
+      {
+        name: "REMOVE_EFFECT",
+        type: "constant",
+        documentation: "Removes an effect from a creature.",
+        insertText: "CombatAction.REMOVE_EFFECT",
+        detail: "CombatAction",
+      },
+      {
+        name: "SET_ARENA_EFFECT",
+        type: "constant",
+        documentation: "Places an arena effect over an area.",
+        insertText: "CombatAction.SET_ARENA_EFFECT",
+        detail: "CombatAction",
+      },
+      {
+        name: "SPRITE_ANIMATION",
+        type: "constant",
+        documentation: "Plays a sprite animation.",
+        insertText: "CombatAction.SPRITE_ANIMATION",
+        detail: "CombatAction",
+      },
+      {
+        name: "CREATE_ENTITY",
+        type: "constant",
+        documentation: "Creates a battle entity.",
+        insertText: "CombatAction.CREATE_ENTITY",
+        detail: "CombatAction",
+      },
+      // action-object fields (the shape of a table you build for addAction)
+      {
+        name: "action",
+        type: "property",
+        documentation: "The action kind (a CombatAction value).",
+        detail: "CombatAction",
+      },
+      {
+        name: "target",
+        type: "property",
+        documentation: "The target creature.",
+        detail: "BattleCreature",
+      },
+      {
+        name: "amount",
+        type: "property",
+        documentation: "The amount (damage/healing).",
+        detail: "double",
+      },
+      {
+        name: "damageType",
+        type: "property",
+        documentation: "The damage type of a DAMAGE action.",
+        detail: "DamageType",
+      },
+      {
+        name: "effect",
+        type: "property",
+        documentation:
+          "The effect (name or object) for APPLY_EFFECT / REMOVE_EFFECT / SET_ARENA_EFFECT.",
+        detail: "string | CreatureEffect | ArenaEffect",
+      },
+      {
+        name: "duration",
+        type: "property",
+        documentation: "The effect duration, in turns.",
+        detail: "int",
+      },
+      {
+        name: "position",
+        type: "property",
+        documentation: "The position for MOVE / CREATE_ENTITY / SPRITE_ANIMATION.",
+        detail: "Point",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite for a SPRITE_ANIMATION / CREATE_ENTITY action.",
+        detail: "string",
+      },
+      {
+        name: "shape",
+        type: "property",
+        documentation: "The shape for a SET_ARENA_EFFECT action.",
+        detail: "Shape",
+      },
+      {
+        name: "radius",
+        type: "property",
+        documentation: "The radius for a SET_ARENA_EFFECT action.",
+        detail: "int",
+      },
+      {
+        name: "script",
+        type: "property",
+        documentation: "The script for a CREATE_ENTITY action.",
+        detail: "string",
+      },
+      {
+        name: "name",
+        type: "property",
+        documentation: "The name for a CREATE_ENTITY action.",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description for a CREATE_ENTITY action.",
+        detail: "string",
+      },
+    ],
+  },
+  {
     name: "ArenaEffects",
     type: "namespace",
     tags: ["battle"],
     documentation:
-      "Built-in arena effects you can place on the battlefield. (Only in the predecessor's CompletionProvider — not in its apiViewer tree.)",
+      "The built-in arena effects, as a table of ready-made ArenaEffect instances. Defined in the Lua prelude (__globals.lua), not a C++ binding — use e.g. ArenaEffects.burning with Combat:addArenaEffect / BattleState:setArenaEffect.",
     members: [
-      {
-        name: "frozen",
-        type: "constant",
-        documentation: "Frozen arena effect.",
-        insertText: "ArenaEffects.frozen",
-        detail: "ArenaEffects",
-      },
       {
         name: "burning",
         type: "constant",
-        documentation: "Burning arena effect.",
-        insertText: "ArenaEffects.burning",
-        detail: "ArenaEffects",
+        documentation: "Burning — causes fire damage.",
+        detail: "ArenaEffect",
       },
-      {
-        name: "wet",
-        type: "constant",
-        documentation: "Wet arena effect.",
-        insertText: "ArenaEffects.wet",
-        detail: "ArenaEffects",
-      },
+      { name: "wet", type: "constant", documentation: "Wet.", detail: "ArenaEffect" },
       {
         name: "electrified",
         type: "constant",
-        documentation: "Electrified arena effect.",
-        insertText: "ArenaEffects.electrified",
-        detail: "ArenaEffects",
+        documentation: "Electrified — +physical damage, chance to stun.",
+        detail: "ArenaEffect",
       },
+      { name: "poisoned", type: "constant", documentation: "Poisoned.", detail: "ArenaEffect" },
       {
-        name: "poisoned",
+        name: "frozen",
         type: "constant",
-        documentation: "Poisoned arena effect.",
-        insertText: "ArenaEffects.poisoned",
-        detail: "ArenaEffects",
+        documentation: "Frozen — chance to stun on step.",
+        detail: "ArenaEffect",
       },
-      {
-        name: "steam",
-        type: "constant",
-        documentation: "Steam arena effect.",
-        insertText: "ArenaEffects.steam",
-        detail: "ArenaEffects",
-      },
+      { name: "steam", type: "constant", documentation: "Steam — blinds.", detail: "ArenaEffect" },
       {
         name: "blizzard",
         type: "constant",
-        documentation: "Blizzard arena effect.",
-        insertText: "ArenaEffects.blizzard",
-        detail: "ArenaEffects",
+        documentation: "Blizzard — chills.",
+        detail: "ArenaEffect",
       },
-      {
-        name: "ice",
-        type: "constant",
-        documentation: "Ice arena effect.",
-        insertText: "ArenaEffects.ice",
-        detail: "ArenaEffects",
-      },
+      { name: "ice", type: "constant", documentation: "Ice.", detail: "ArenaEffect" },
       {
         name: "lightningStrike",
         type: "constant",
-        documentation: "Lightning strike arena effect.",
-        insertText: "ArenaEffects.lightningStrike",
-        detail: "ArenaEffects",
+        documentation: "Lightning strike — electric damage on placement.",
+        detail: "ArenaEffect",
       },
       {
         name: "powerSurge",
         type: "constant",
-        documentation: "Power surge arena effect.",
-        insertText: "ArenaEffects.powerSurge",
-        detail: "ArenaEffects",
+        documentation: "Power surge.",
+        detail: "ArenaEffect",
       },
-      {
-        name: "smoke",
-        type: "constant",
-        documentation: "Smoke arena effect.",
-        insertText: "ArenaEffects.smoke",
-        detail: "ArenaEffects",
-      },
+      { name: "smoke", type: "constant", documentation: "Smoke — blinds.", detail: "ArenaEffect" },
       {
         name: "thunderstorm",
         type: "constant",
-        documentation: "Thunderstorm arena effect.",
-        insertText: "ArenaEffects.thunderstorm",
-        detail: "ArenaEffects",
+        documentation: "Thunderstorm.",
+        detail: "ArenaEffect",
       },
       {
         name: "explosion",
         type: "constant",
-        documentation: "Explosion arena effect.",
-        insertText: "ArenaEffects.explosion",
-        detail: "ArenaEffects",
+        documentation: "Explosion — fire damage on placement.",
+        detail: "ArenaEffect",
       },
-      {
-        name: "sludge",
-        type: "constant",
-        documentation: "Sludge arena effect.",
-        insertText: "ArenaEffects.sludge",
-        detail: "ArenaEffects",
-      },
+      { name: "sludge", type: "constant", documentation: "Sludge.", detail: "ArenaEffect" },
     ],
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Complex game types
-//
-// Source: gameApi.ts getComplexTypes(). CompletionProvider's flat battle.* /
-// battle:* / combat.* entries are reconciled INTO these objects (they are
-// projections of BattleState / Combat members and add no new info beyond what
-// the object members already carry) — with one exception noted below:
-//   - battle:isSelected — present only in CompletionProvider; added to
-//     BattleState as a new member so it is not dropped.
+// Core value types — geometry, colors, stats, and the small structs.
+// Ground truth: ScriptLibraryDataTypes.h, Shape.h, ScriptLibraryInput.h.
 // ---------------------------------------------------------------------------
 
-const complexTypes = (): ApiItem[] => [
+const coreTypes = (): ApiItem[] => [
   {
-    name: "Area",
+    name: "Point",
     type: "object",
-    documentation: "A world or battle area.",
+    documentation: "A 2D integer coordinate. Construct with Point.new(x, y).",
     members: [
-      { name: "biome", type: "property", documentation: "The biome of the area.", detail: "Biome" },
-      { name: "level", type: "property", documentation: "The level of the area.", detail: "int" },
-      { name: "width", type: "property", documentation: "The width of the area.", detail: "int" },
-      { name: "height", type: "property", documentation: "The height of the area.", detail: "int" },
-      {
-        name: "getTilesAt",
-        type: "method",
-        documentation: "Returns the tiles at a location.",
-        args: [
-          { name: "x", type: "int" },
-          { name: "y", type: "int" },
-        ],
-        returns: { type: "Tile[]" },
-      },
-      {
-        name: "setTileLit",
-        type: "method",
-        documentation: "Sets whether a given tile is lit.",
-        args: [
-          { name: "point", type: "Point" },
-          { name: "isLit", type: "bool" },
-        ],
-      },
-      {
-        name: "isTileBlocked",
-        type: "method",
-        documentation: "Whether there is a blocking tile at this location.",
-        args: [
-          { name: "x", type: "int" },
-          { name: "y", type: "int" },
-        ],
-        returns: { type: "bool" },
-      },
-    ],
-  },
-  {
-    name: "Tile",
-    type: "object",
-    documentation: "A tile within an area.",
-    members: [
-      { name: "name", type: "property", documentation: "The tile's name.", detail: "string" },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The tile's description.",
-        detail: "string",
-      },
-      {
-        name: "blocksVision",
-        type: "property",
-        documentation: "Whether the tile blocks vision.",
-        detail: "bool",
-      },
-      {
-        name: "hasCollision",
-        type: "property",
-        documentation: "Whether the tile has collision.",
-        detail: "bool",
-      },
-      {
-        name: "interactable",
-        type: "property",
-        documentation: "Whether the tile is interactable.",
-        detail: "bool",
-      },
-      {
-        name: "isTileExplored",
-        type: "property",
-        documentation: "Whether the tile has been explored.",
-        detail: "bool",
-      },
-      {
-        name: "isTileLit",
-        type: "property",
-        documentation: "Whether the tile is lit.",
-        detail: "bool",
-      },
-      { name: "tags", type: "property", documentation: "The tile's tags.", detail: "string[]" },
-      {
-        name: "hasTag",
-        type: "method",
-        documentation: "Whether the tile has a certain tag.",
-        args: [{ name: "tagName", type: "string" }],
-        returns: { type: "bool" },
-      },
-      {
-        name: "onUse",
-        type: "callback",
-        documentation: "Overridable. Called when the tile is used.",
-      },
-      {
-        name: "playerSteppedOn",
-        type: "callback",
-        documentation: "Overridable. Called when the player steps on the tile.",
-        args: [{ name: "player", type: "Player" }],
-      },
-    ],
-  },
-  {
-    name: "ArenaEffect",
-    type: "object",
-    tags: ["battle"],
-    documentation: "An effect placed on a tile of the battle arena.",
-    members: [
-      {
-        name: "name",
-        type: "property",
-        documentation: "The name of the effect.",
-        detail: "string",
-      },
-      {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the effect.",
-        detail: "string",
-      },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The description of the effect.",
-        detail: "string",
-      },
-      {
-        name: "duration",
-        type: "property",
-        documentation: "The duration of the effect.",
-        detail: "int",
-      },
-      {
-        name: "onSteppedOn",
-        type: "callback",
-        documentation: "Overridable. Called when a creature steps on the effect.",
-      },
+      { name: "x", type: "property", documentation: "X coordinate.", detail: "int" },
+      { name: "y", type: "property", documentation: "Y coordinate.", detail: "int" },
       {
         name: "new",
         type: "function",
-        documentation: "Constructor.",
+        documentation: "Constructs a Point.",
         args: [
-          { name: "name", type: "string" },
-          { name: "description", type: "string" },
-          { name: "sprite", type: "string" },
-          { name: "creatureEffect", type: "string" },
-          { name: "duration", type: "int" },
+          { name: "x", type: "int" },
+          { name: "y", type: "int" },
         ],
-        returns: { type: "ArenaEffect" },
+        returns: { type: "Point" },
+      },
+      {
+        name: "toScreenPosition",
+        type: "method",
+        documentation:
+          "Converts a battle world coordinate to a screen coordinate. Defined in the Lua prelude (__globals.lua), not a C++ binding.",
+        returns: { type: "Point" },
       },
     ],
   },
   {
-    name: "BattleEntity",
+    name: "Color",
+    type: "object",
+    tags: ["gui"],
+    documentation: "An RGBA color (SDL_Color). Construct with Color.new(r, g, b, a).",
+    members: [
+      { name: "r", type: "property", documentation: "Red (0-255).", detail: "int" },
+      { name: "g", type: "property", documentation: "Green (0-255).", detail: "int" },
+      { name: "b", type: "property", documentation: "Blue (0-255).", detail: "int" },
+      { name: "a", type: "property", documentation: "Alpha (0-255).", detail: "int" },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs a Color.",
+        args: [
+          { name: "r", type: "int" },
+          { name: "g", type: "int" },
+          { name: "b", type: "int" },
+          { name: "a", type: "int" },
+        ],
+        returns: { type: "Color" },
+      },
+    ],
+  },
+  {
+    name: "Shape",
     type: "object",
     tags: ["battle"],
-    documentation: "A non-creature entity placed on the battlefield.",
+    documentation: "Base geometric shape (Sphere / Square). Used for area queries.",
     members: [
       {
-        name: "name",
-        type: "property",
-        documentation: "The name of the entity.",
-        detail: "string",
-      },
-      {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the entity.",
-        detail: "string",
-      },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The description of the entity.",
-        detail: "string",
-      },
-      {
-        name: "position",
-        type: "property",
-        documentation: "The position of the entity.",
-        detail: "Point",
-      },
-      {
-        name: "owner",
-        type: "property",
-        documentation: "The owner of the entity.",
-        detail: "BattleCreature",
-      },
-      {
-        name: "script",
-        type: "property",
-        documentation: "The script of the entity.",
-        detail: "string",
-      },
-      {
-        name: "remove",
-        type: "property",
-        documentation: "If true, the entity will be destroyed.",
-        detail: "bool",
+        name: "contains",
+        type: "method",
+        documentation: "Whether the shape contains a point.",
+        args: [{ name: "point", type: "Point" }],
+        returns: { type: "bool" },
       },
     ],
   },
   {
-    name: "Item",
+    name: "Sphere",
     type: "object",
-    tags: ["items"],
-    documentation: "An item.",
+    tags: ["battle"],
+    documentation: "A spherical (radial) shape. Construct with Sphere.new(radius, center).",
     members: [
-      { name: "name", type: "property", documentation: "The name of the item.", detail: "string" },
+      { name: "radius", type: "property", documentation: "The radius.", detail: "int" },
+      { name: "center", type: "property", documentation: "The center point.", detail: "Point" },
       {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the item.",
-        detail: "string",
+        name: "new",
+        type: "function",
+        documentation: "Constructs a Sphere.",
+        args: [
+          { name: "radius", type: "int" },
+          { name: "center", type: "Point" },
+        ],
+        returns: { type: "Sphere" },
       },
       {
-        name: "script",
-        type: "property",
-        documentation: "The script of the item.",
-        detail: "string",
-      },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The description of the item.",
-        detail: "string",
-      },
-      {
-        name: "rarity",
-        type: "property",
-        documentation: "The rarity of the item.",
-        detail: "ItemRarity",
-      },
-      { name: "value", type: "property", documentation: "The value of the item.", detail: "int" },
-      {
-        name: "stackSize",
-        type: "property",
-        documentation: "The stack size of the item.",
-        detail: "int",
-      },
-      {
-        name: "hasTag",
+        name: "contains",
         type: "method",
-        documentation: "Whether the item has a certain tag.",
-        args: [{ name: "tagName", type: "string" }],
+        documentation: "Whether the sphere contains a point.",
+        args: [{ name: "point", type: "Point" }],
         returns: { type: "bool" },
       },
+    ],
+  },
+  {
+    name: "Square",
+    type: "object",
+    tags: ["battle"],
+    documentation:
+      "A square shape. Construct with Square.new(length, center) — the length is the side and center is the middle tile.",
+    members: [
+      { name: "x", type: "property", documentation: "Left edge (tile).", detail: "int" },
+      { name: "y", type: "property", documentation: "Top edge (tile).", detail: "int" },
+      { name: "width", type: "property", documentation: "Width in tiles.", detail: "int" },
+      { name: "height", type: "property", documentation: "Height in tiles.", detail: "int" },
       {
-        name: "onUse",
-        type: "callback",
-        documentation: "Overridable. Called when the item is used.",
-        args: [{ name: "target", type: "Creature" }],
+        name: "new",
+        type: "function",
+        documentation: "Constructs a Square from a side length and center.",
+        args: [
+          { name: "length", type: "int" },
+          { name: "center", type: "Point" },
+        ],
+        returns: { type: "Square" },
+      },
+      {
+        name: "contains",
+        type: "method",
+        documentation: "Whether the square contains a point.",
+        args: [{ name: "point", type: "Point" }],
+        returns: { type: "bool" },
+      },
+    ],
+  },
+  {
+    name: "TickArgs",
+    type: "object",
+    documentation: "Passed to per-frame update hooks. Carries frame timing.",
+    members: [
+      {
+        name: "deltaTime",
+        type: "property",
+        documentation: "Seconds since the previous tick.",
+        detail: "double",
+      },
+    ],
+  },
+  {
+    name: "Mouse",
+    type: "object",
+    tags: ["input"],
+    documentation: "A mouse event/state passed to input handlers.",
+    members: [
+      { name: "x", type: "property", documentation: "Cursor x.", detail: "int" },
+      { name: "y", type: "property", documentation: "Cursor y.", detail: "int" },
+      {
+        name: "button",
+        type: "property",
+        documentation: "The button involved (see Button).",
+        detail: "Button",
       },
     ],
   },
@@ -1146,11 +1056,368 @@ const complexTypes = (): ApiItem[] => [
       },
     ],
   },
+];
+
+// ---------------------------------------------------------------------------
+// Game object types. Ground truth: ScriptLibraryDataTypes.h,
+// ScriptLibraryBattleManager.h, ScriptLibraryGameManager.h, ScriptLibraryArea.h,
+// Inventory.h, PlayerParty.h, __globals.lua.
+// ---------------------------------------------------------------------------
+
+const gameTypes = (): ApiItem[] => [
+  {
+    name: "Creature",
+    type: "object",
+    documentation: "A creature (out of combat).",
+    members: [
+      {
+        name: "name",
+        type: "property",
+        documentation: "The name of the creature.",
+        detail: "string",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite of the creature.",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the creature.",
+        detail: "string",
+      },
+      {
+        name: "level",
+        type: "property",
+        documentation: "The level of the creature.",
+        detail: "int",
+      },
+      {
+        name: "currentXP",
+        type: "property",
+        documentation: "The current XP of the creature (read-only).",
+        detail: "int",
+      },
+      {
+        name: "nextXP",
+        type: "property",
+        documentation: "The XP required for the next level (read-only).",
+        detail: "int",
+      },
+      {
+        name: "levelUpExp",
+        type: "property",
+        documentation: "The XP required for the next level (read-only; same as nextXP).",
+        detail: "int",
+      },
+      {
+        name: "stats",
+        type: "property",
+        documentation: "The stats of the creature.",
+        detail: "CreatureStats",
+      },
+      {
+        name: "effects",
+        type: "property",
+        documentation: "The effects on the creature.",
+        detail: "CreatureEffect[]",
+      },
+      {
+        name: "abilities",
+        type: "property",
+        documentation: "The creature's ability attacks.",
+        detail: "AbilityAttack[]",
+      },
+      {
+        name: "attacks",
+        type: "property",
+        documentation: "DEPRECATED alias for `abilities`.",
+        detail: "AbilityAttack[]",
+      },
+      {
+        name: "charms",
+        type: "property",
+        documentation: "The creature's equipped charms (read-only).",
+        detail: "Charm[]",
+      },
+      {
+        name: "applyEffect",
+        type: "method",
+        documentation:
+          "Applies an effect to the creature by id. Duration defaults to -1 (indefinite).",
+        args: [
+          { name: "effect", type: "string" },
+          { name: "duration", type: "int" },
+        ],
+      },
+      {
+        name: "removeEffect",
+        type: "method",
+        documentation: "Removes an effect from the creature by id.",
+        args: [{ name: "effectId", type: "string" }],
+      },
+      {
+        name: "removeEffect",
+        type: "method",
+        documentation: "Removes a specific effect instance from the creature.",
+        args: [{ name: "effect", type: "CreatureEffect" }],
+      },
+      {
+        name: "takeDamage",
+        type: "method",
+        documentation:
+          "Reduces health by amount (clamped at 0). Lua-prelude extension (__globals.lua) — does not run the combat pipeline.",
+        args: [
+          { name: "amount", type: "double" },
+          { name: "damageType", type: "DamageType" },
+        ],
+      },
+      {
+        name: "takeHealing",
+        type: "method",
+        documentation:
+          "Increases health by amount (clamped at maxHealth). Lua-prelude extension (__globals.lua).",
+        args: [{ name: "amount", type: "double" }],
+      },
+    ],
+  },
+  {
+    name: "BattleCreature",
+    type: "object",
+    tags: ["battle"],
+    documentation:
+      "A creature in combat (BattleCreatureV2 — wraps a Creature with combat state). The `explicitly*` variants bypass the combat action pipeline (no notifications/effects); the plain variants run it.",
+    members: [
+      {
+        name: "name",
+        type: "property",
+        documentation: "The name of the creature (read-only).",
+        detail: "string",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite of the creature (read-only).",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the creature (read-only).",
+        detail: "string",
+      },
+      {
+        name: "level",
+        type: "property",
+        documentation: "The level of the creature (read-only).",
+        detail: "int",
+      },
+      {
+        name: "stats",
+        type: "property",
+        documentation: "The stats of the creature (read-only).",
+        detail: "CreatureStats",
+      },
+      {
+        name: "effects",
+        type: "property",
+        documentation: "The effects on the creature (read-only).",
+        detail: "CreatureEffect[]",
+      },
+      {
+        name: "currentXP",
+        type: "property",
+        documentation: "The current XP (read-only).",
+        detail: "int",
+      },
+      {
+        name: "nextXP",
+        type: "property",
+        documentation: "The XP required for the next level (read-only).",
+        detail: "int",
+      },
+      {
+        name: "attacks",
+        type: "property",
+        documentation: "The creature's ability attacks (read-only).",
+        detail: "AbilityAttack[]",
+      },
+      {
+        name: "position",
+        type: "property",
+        documentation: "The tile position (read/write).",
+        detail: "Point",
+      },
+      {
+        name: "actionPoints",
+        type: "property",
+        documentation: "The current action points.",
+        detail: "double",
+      },
+      {
+        name: "maxActionPoints",
+        type: "property",
+        documentation: "The maximum action points.",
+        detail: "double",
+      },
+      {
+        name: "explicitlySetPosition",
+        type: "method",
+        documentation: "Sets the position without triggering movement side effects.",
+        args: [{ name: "position", type: "Point" }],
+      },
+      {
+        name: "applyEffect",
+        type: "method",
+        documentation: "Applies an effect by id for a duration; returns the created effect.",
+        args: [
+          { name: "effect", type: "string" },
+          { name: "duration", type: "int" },
+        ],
+        returns: { type: "CreatureEffect" },
+      },
+      {
+        name: "explicitlyApplyEffect",
+        type: "method",
+        documentation: "Applies an effect instance directly (no pipeline); returns it.",
+        args: [{ name: "effect", type: "CreatureEffect" }],
+        returns: { type: "CreatureEffect" },
+      },
+      {
+        name: "removeEffect",
+        type: "method",
+        documentation: "Removes an effect instance from the creature.",
+        args: [{ name: "effect", type: "CreatureEffect" }],
+      },
+      {
+        name: "explicitlyRemoveEffect",
+        type: "method",
+        documentation: "Removes an effect instance directly (no pipeline).",
+        args: [{ name: "effect", type: "CreatureEffect" }],
+      },
+      {
+        name: "takeDamage",
+        type: "method",
+        documentation: "Takes damage of a type (runs the combat pipeline; handles death).",
+        args: [
+          { name: "amount", type: "double" },
+          { name: "type", type: "DamageType" },
+        ],
+      },
+      {
+        name: "explicitlyTakeDamage",
+        type: "method",
+        documentation: "Takes damage directly (no pipeline).",
+        args: [
+          { name: "amount", type: "double" },
+          { name: "type", type: "DamageType" },
+        ],
+      },
+      {
+        name: "takeHealing",
+        type: "method",
+        documentation: "Takes healing (runs the pipeline; handles over-heal).",
+        args: [{ name: "amount", type: "double" }],
+      },
+      {
+        name: "explicitlyTakeHealing",
+        type: "method",
+        documentation: "Takes healing directly (no pipeline).",
+        args: [{ name: "amount", type: "double" }],
+      },
+      {
+        name: "distance",
+        type: "method",
+        documentation: "Distance to another creature.",
+        args: [{ name: "other", type: "BattleCreature" }],
+        returns: { type: "double" },
+      },
+    ],
+  },
+  {
+    name: "Item",
+    type: "object",
+    tags: ["items"],
+    documentation:
+      "An item. Supports dynamic extra properties (metatable index/newindex), so scripts may read/write custom fields beyond those below.",
+    members: [
+      { name: "id", type: "property", documentation: "The item id.", detail: "string" },
+      { name: "name", type: "property", documentation: "The name of the item.", detail: "string" },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite of the item.",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the item.",
+        detail: "string",
+      },
+      {
+        name: "rarity",
+        type: "property",
+        documentation: "The rarity of the item.",
+        detail: "ItemRarity",
+      },
+      {
+        name: "stackSize",
+        type: "property",
+        documentation: "The stack size of the item.",
+        detail: "int",
+      },
+      { name: "value", type: "property", documentation: "The value of the item.", detail: "int" },
+      {
+        name: "hasTag",
+        type: "method",
+        documentation: "Whether the item has a certain tag.",
+        args: [{ name: "tagName", type: "string" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "onUse",
+        type: "callback",
+        documentation: "Overridable. Called when the item is used, with the target creature.",
+        args: [{ name: "target", type: "BattleCreature" }],
+      },
+    ],
+  },
+  {
+    name: "Charm",
+    type: "object",
+    documentation: "A charm that can be equipped on a creature to modify its stats.",
+    members: [
+      { name: "id", type: "property", documentation: "The charm id.", detail: "string" },
+      { name: "name", type: "property", documentation: "The name of the charm.", detail: "string" },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the charm.",
+        detail: "string",
+      },
+      {
+        name: "stats",
+        type: "property",
+        documentation: "The stat modifiers of the charm.",
+        detail: "CreatureStats",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite of the charm (read-only).",
+        detail: "string",
+      },
+    ],
+  },
   {
     name: "CreatureEffect",
     type: "object",
     tags: ["battle"],
-    documentation: "An effect applied to a creature.",
+    documentation:
+      "An effect applied to a creature. Supports dynamic extra properties (metatable index/newindex). The engine invokes the overridable callbacks below at the matching moments.",
     members: [
       {
         name: "name",
@@ -1173,14 +1440,14 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "duration",
         type: "property",
-        documentation: "The duration of the effect.",
+        documentation: "The remaining duration, in turns.",
         detail: "int",
       },
       {
         name: "caster",
         type: "property",
-        documentation: "The caster of the effect.",
-        detail: "Creature",
+        documentation: "The creature that applied the effect.",
+        detail: "BattleCreature",
       },
       {
         name: "tags",
@@ -1231,9 +1498,177 @@ const complexTypes = (): ApiItem[] => [
     ],
   },
   {
+    name: "ArenaEffect",
+    type: "object",
+    tags: ["battle"],
+    documentation:
+      "An effect placed on a tile of the battle arena. Construct with ArenaEffect.new(name, description, sprite, buff, duration). Supports dynamic extra properties.",
+    members: [
+      {
+        name: "name",
+        type: "property",
+        documentation: "The name of the effect.",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the effect.",
+        detail: "string",
+      },
+      {
+        name: "buff",
+        type: "property",
+        documentation: "The creature-effect id this tile applies (its 'buff').",
+        detail: "string",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The tile sprite of the effect.",
+        detail: "string",
+      },
+      {
+        name: "duration",
+        type: "property",
+        documentation: "The duration, in turns.",
+        detail: "int",
+      },
+      {
+        name: "onSteppedOn",
+        type: "callback",
+        documentation:
+          "Overridable. Called when a creature steps on the effect (receives the creature).",
+      },
+      {
+        name: "onEffectApplied",
+        type: "callback",
+        documentation:
+          "Overridable. Called when the effect is placed on a tile (receives the position).",
+      },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs an ArenaEffect.",
+        args: [
+          { name: "name", type: "string" },
+          { name: "description", type: "string" },
+          { name: "sprite", type: "string" },
+          { name: "buff", type: "string" },
+          { name: "duration", type: "int" },
+        ],
+        returns: { type: "ArenaEffect" },
+      },
+    ],
+  },
+  {
+    name: "Ability",
+    type: "object",
+    tags: ["battle"],
+    documentation: "A creature's ability definition.",
+    members: [
+      {
+        name: "id",
+        type: "property",
+        documentation: "The ability id (read-only).",
+        detail: "string",
+      },
+      {
+        name: "name",
+        type: "property",
+        documentation: "The name of the ability.",
+        detail: "string",
+      },
+      {
+        name: "sprite",
+        type: "property",
+        documentation: "The sprite of the ability.",
+        detail: "string",
+      },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description of the ability.",
+        detail: "string",
+      },
+      {
+        name: "shape",
+        type: "property",
+        documentation: "The targeting shape (an AbilityShape enum).",
+        detail: "AbilityShape",
+      },
+      {
+        name: "tags",
+        type: "property",
+        documentation: "The tags of the ability.",
+        detail: "string[]",
+      },
+      {
+        name: "maxTargets",
+        type: "property",
+        documentation: "The max number of targets.",
+        detail: "int",
+      },
+      { name: "range", type: "property", documentation: "The range.", detail: "int" },
+      { name: "radius", type: "property", documentation: "The area radius.", detail: "int" },
+      { name: "cost", type: "property", documentation: "The action-point cost.", detail: "int" },
+      {
+        name: "hasTag",
+        type: "method",
+        documentation: "Whether the ability has a certain tag.",
+        args: [{ name: "tagName", type: "string" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "enact",
+        type: "callback",
+        documentation:
+          "Overridable convention. The engine calls this to produce the combat actions when the ability is cast.",
+        args: [{ name: "combat", type: "Combat" }],
+        returns: { type: "CombatAction[]" },
+      },
+    ],
+  },
+  {
+    name: "AbilityData",
+    type: "object",
+    tags: ["battle"],
+    documentation:
+      "A read-only ability definition from the ability library (what GetAbilityLibrary returns). Same fields as Ability, all read-only.",
+    members: [
+      { name: "id", type: "property", documentation: "The ability id.", detail: "string" },
+      { name: "name", type: "property", documentation: "The name.", detail: "string" },
+      { name: "sprite", type: "property", documentation: "The sprite.", detail: "string" },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The description.",
+        detail: "string",
+      },
+      {
+        name: "shape",
+        type: "property",
+        documentation: "The targeting shape (AbilityShape).",
+        detail: "AbilityShape",
+      },
+      { name: "tags", type: "property", documentation: "The tags.", detail: "string[]" },
+      { name: "maxTargets", type: "property", documentation: "The max targets.", detail: "int" },
+      { name: "range", type: "property", documentation: "The range.", detail: "int" },
+      { name: "radius", type: "property", documentation: "The area radius.", detail: "int" },
+      { name: "cost", type: "property", documentation: "The cost.", detail: "int" },
+      {
+        name: "hasTag",
+        type: "method",
+        documentation: "Whether it has a certain tag.",
+        args: [{ name: "tagName", type: "string" }],
+        returns: { type: "bool" },
+      },
+    ],
+  },
+  {
     name: "Biogram",
     type: "object",
-    documentation: "A biogram that can be slotted into abilities.",
+    documentation: "A biogram that can be socketed into an ability.",
     members: [
       {
         name: "name",
@@ -1269,7 +1704,8 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "enact",
         type: "callback",
-        documentation: "Overridable. Transforms the combat actions produced by an ability.",
+        documentation:
+          "Overridable convention. Transforms the combat actions produced by the ability it is socketed into.",
         args: [
           { name: "combat", type: "Combat" },
           { name: "actions", type: "CombatAction[]" },
@@ -1279,112 +1715,111 @@ const complexTypes = (): ApiItem[] => [
     ],
   },
   {
-    name: "Ability",
+    name: "StoredBiogram",
     type: "object",
-    documentation: "A creature's ability.",
+    documentation: "A biogram as stored/socketed on a creature.",
     members: [
-      {
-        name: "name",
-        type: "property",
-        documentation: "The name of the ability.",
-        detail: "string",
-      },
+      { name: "name", type: "property", documentation: "The name (read-only).", detail: "string" },
       {
         name: "sprite",
         type: "property",
-        documentation: "The sprite of the ability.",
+        documentation: "The sprite (read-only).",
         detail: "string",
       },
       {
         name: "description",
         type: "property",
-        documentation: "The description of the ability.",
+        documentation: "The description (read-only).",
         detail: "string",
-      },
-      {
-        name: "shape",
-        type: "property",
-        documentation: "The shape of the ability.",
-        detail: "Shape",
       },
       {
         name: "tags",
         type: "property",
-        documentation: "The tags of the ability.",
+        documentation: "The tags (read-only).",
         detail: "string[]",
       },
       {
-        name: "maxTargets",
+        name: "owner",
         type: "property",
-        documentation: "The max targets of the ability.",
-        detail: "int",
+        documentation: "The owning creature (read-only).",
+        detail: "Creature",
       },
       {
-        name: "range",
+        name: "ability",
         type: "property",
-        documentation: "The range of the ability.",
-        detail: "int",
+        documentation: "The ability attack it is socketed into.",
+        detail: "AbilityAttack",
       },
-      { name: "cost", type: "property", documentation: "The cost of the ability.", detail: "int" },
+      {
+        name: "biogram",
+        type: "property",
+        documentation: "The underlying biogram (read-only).",
+        detail: "Biogram",
+      },
       {
         name: "hasTag",
         type: "method",
-        documentation: "Whether the ability has a certain tag.",
+        documentation: "Whether it has a certain tag.",
         args: [{ name: "tagName", type: "string" }],
         returns: { type: "bool" },
-      },
-      {
-        name: "enact",
-        type: "callback",
-        documentation: "Overridable. Produces the combat actions when the ability is cast.",
-        args: [{ name: "combat", type: "Combat" }],
-        returns: { type: "CombatAction[]" },
       },
     ],
   },
   {
     name: "AbilityAttack",
     type: "object",
-    documentation: "An ability paired with a socketed biogram, as cast in combat.",
+    tags: ["battle"],
+    documentation: "An ability paired with its socketed biogram, as cast in combat.",
     members: [
       {
         name: "name",
         type: "property",
-        documentation: "The name of the attack.",
+        documentation: "The ability name (read-only).",
         detail: "string",
       },
       {
-        name: "sprite",
+        name: "fullName",
         type: "property",
-        documentation: "The sprite of the attack.",
+        documentation: "The full name including the biogram (read-only).",
         detail: "string",
       },
       {
         name: "description",
         type: "property",
-        documentation: "The description of the attack.",
+        documentation: "The description (read-only).",
         detail: "string",
       },
       {
-        name: "shape",
+        name: "sprite",
         type: "property",
-        documentation: "The shape of the attack.",
-        detail: "Shape",
+        documentation: "The sprite (read-only).",
+        detail: "string",
       },
       {
-        name: "tags",
+        name: "cost",
         type: "property",
-        documentation: "The tags of the attack.",
-        detail: "string[]",
+        documentation: "The action-point cost (read-only).",
+        detail: "double",
       },
       {
         name: "maxTargets",
         type: "property",
-        documentation: "The max targets of the attack.",
+        documentation: "The max targets (read-only).",
         detail: "int",
       },
-      { name: "range", type: "property", documentation: "The range of the attack.", detail: "int" },
-      { name: "cost", type: "property", documentation: "The cost of the attack.", detail: "int" },
+      { name: "range", type: "property", documentation: "The range (read-only).", detail: "int" },
+      {
+        name: "radius",
+        type: "property",
+        documentation: "The area radius (read-only).",
+        detail: "int",
+      },
+      {
+        name: "tags",
+        type: "property",
+        documentation: "The tags (read-only).",
+        detail: "string[]",
+      },
       {
         name: "ability",
         type: "property",
@@ -1407,217 +1842,445 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "acceptsBiogram",
         type: "method",
-        documentation: "Whether the attack accepts the given biogram.",
+        documentation: "Whether the attack accepts the given biogram (StoredBiogram or Biogram).",
         args: [{ name: "biogram", type: "Biogram" }],
         returns: { type: "bool" },
       },
     ],
   },
   {
-    name: "Creature",
+    name: "Inventory",
     type: "object",
-    documentation: "A creature (out of combat).",
+    tags: ["items"],
+    documentation: "The player's items and money. Obtained via GetBag().",
     members: [
+      { name: "money", type: "property", documentation: "The player's money.", detail: "int" },
       {
-        name: "name",
+        name: "premiumMoney",
         type: "property",
-        documentation: "The name of the creature.",
-        detail: "string",
-      },
-      {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the creature.",
-        detail: "string",
-      },
-      {
-        name: "description",
-        type: "property",
-        documentation: "The description of the creature.",
-        detail: "string",
-      },
-      {
-        name: "level",
-        type: "property",
-        documentation: "The level of the creature.",
+        documentation: "The player's premium currency.",
         detail: "int",
       },
       {
-        name: "currentXP",
+        name: "items",
         type: "property",
-        documentation: "The current XP of the creature.",
-        detail: "int",
+        documentation: "The items in the inventory (read-only).",
+        detail: "Item[]",
       },
       {
-        name: "nextXP",
-        type: "property",
-        documentation: "The XP required for the next level.",
-        detail: "int",
-      },
-      {
-        name: "stats",
-        type: "property",
-        documentation: "The stats of the creature.",
-        detail: "CreatureStats",
-      },
-      {
-        name: "effects",
-        type: "property",
-        documentation: "The effects on the creature.",
-        detail: "CreatureEffect[]",
-      },
-      {
-        name: "abilities",
-        type: "property",
-        documentation: "The abilities of the creature.",
-        detail: "Ability[]",
-      },
-      {
-        name: "applyEffect",
+        name: "swapItems",
         type: "method",
-        documentation: "Applies an effect to the creature.",
+        documentation: "Swaps the items at two inventory indices.",
         args: [
-          { name: "effect", type: "string" },
-          { name: "duration", type: "int" },
+          { name: "from", type: "int" },
+          { name: "to", type: "int" },
         ],
       },
       {
-        name: "removeEffect",
+        name: "addItem",
         type: "method",
-        documentation: "Removes an effect from the creature by name.",
-        args: [{ name: "effectName", type: "string" }],
+        documentation: "Adds an item to the inventory. Returns false if full.",
+        args: [{ name: "item", type: "Item" }],
+        returns: { type: "bool" },
       },
       {
-        name: "removeEffect",
+        name: "getItem",
         type: "method",
-        documentation: "Removes a specific effect instance from the creature.",
-        args: [{ name: "effect", type: "CreatureEffect" }],
+        documentation: "Retrieves the item at the given index.",
+        args: [{ name: "index", type: "int" }],
+        returns: { type: "Item" },
       },
     ],
   },
   {
-    name: "BattleCreature",
+    name: "Party",
     type: "object",
-    tags: ["battle"],
-    documentation: "A creature in combat (a Creature with combat state and actions).",
+    documentation: "The player's active party of creatures. Obtained via GetParty().",
+    members: [
+      {
+        name: "creatures",
+        type: "property",
+        documentation: "The creatures in the party.",
+        detail: "Creature[]",
+      },
+      {
+        name: "addCreature",
+        type: "method",
+        documentation: "Adds a creature to the party. Returns false if the party is full.",
+        args: [{ name: "creature", type: "Creature" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "releaseCreature",
+        type: "method",
+        documentation: "Releases a creature from the party.",
+        args: [{ name: "creature", type: "Creature" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "isFull",
+        type: "method",
+        documentation: "Whether the party is full.",
+        returns: { type: "bool" },
+      },
+      {
+        name: "swapCreatures",
+        type: "method",
+        documentation: "Swaps the creatures at two party indices.",
+        args: [
+          { name: "from", type: "int" },
+          { name: "to", type: "int" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Player",
+    type: "object",
+    documentation: "The player. Obtained via GetPlayer().",
     members: [
       {
         name: "name",
         type: "property",
-        documentation: "The name of the creature.",
+        documentation: "The player's name (read-only).",
         detail: "string",
+      },
+      { name: "x", type: "property", documentation: "The player's x position.", detail: "int" },
+      { name: "y", type: "property", documentation: "The player's y position.", detail: "int" },
+    ],
+  },
+  {
+    name: "Area",
+    type: "object",
+    documentation: "A world or battle area. Obtained via GetArea() or BattleState.battlemap.",
+    members: [
+      { name: "biome", type: "property", documentation: "The biome of the area.", detail: "Biome" },
+      { name: "level", type: "property", documentation: "The level of the area.", detail: "int" },
+      { name: "width", type: "property", documentation: "The width of the area.", detail: "int" },
+      { name: "height", type: "property", documentation: "The height of the area.", detail: "int" },
+      {
+        name: "getTilesAt",
+        type: "method",
+        documentation: "Returns the tiles at a location.",
+        args: [
+          { name: "x", type: "int" },
+          { name: "y", type: "int" },
+        ],
+        returns: { type: "Tile[]" },
       },
       {
-        name: "sprite",
-        type: "property",
-        documentation: "The sprite of the creature.",
-        detail: "string",
+        name: "setTileLit",
+        type: "method",
+        documentation: "Sets whether a tile is lit (also marks it explored).",
+        args: [
+          { name: "point", type: "Point" },
+          { name: "isLit", type: "bool" },
+        ],
       },
+      {
+        name: "isTileBlocked",
+        type: "method",
+        documentation: "Whether the tile at a location has collision (or is out of bounds).",
+        args: [
+          { name: "x", type: "int" },
+          { name: "y", type: "int" },
+        ],
+        returns: { type: "bool" },
+      },
+      {
+        name: "isTileBlocked",
+        type: "method",
+        documentation: "Whether the tile at a point has collision (or is out of bounds).",
+        args: [{ name: "point", type: "Point" }],
+        returns: { type: "bool" },
+      },
+    ],
+  },
+  {
+    name: "Tile",
+    type: "object",
+    documentation: "A tile within an area (AreaTile).",
+    members: [
+      { name: "name", type: "property", documentation: "The tile's name.", detail: "string" },
       {
         name: "description",
         type: "property",
-        documentation: "The description of the creature.",
+        documentation: "The tile's description.",
         detail: "string",
       },
       {
-        name: "level",
+        name: "blocksVision",
         type: "property",
-        documentation: "The level of the creature.",
+        documentation: "Whether the tile blocks vision.",
+        detail: "bool",
+      },
+      {
+        name: "hasCollision",
+        type: "property",
+        documentation: "Whether the tile has collision.",
+        detail: "bool",
+      },
+      {
+        name: "interactable",
+        type: "property",
+        documentation: "Whether the tile is interactable.",
+        detail: "bool",
+      },
+      {
+        name: "isTileExplored",
+        type: "property",
+        documentation: "Whether the tile has been explored.",
+        detail: "bool",
+      },
+      {
+        name: "isTileLit",
+        type: "property",
+        documentation: "Whether the tile is lit.",
+        detail: "bool",
+      },
+      { name: "tags", type: "property", documentation: "The tile's tags.", detail: "string[]" },
+      {
+        name: "hasTag",
+        type: "method",
+        documentation: "Whether the tile has a certain tag.",
+        args: [{ name: "tagName", type: "string" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "onUse",
+        type: "callback",
+        documentation: "Overridable. Called when the tile is used.",
+      },
+      {
+        name: "playerSteppedOn",
+        type: "callback",
+        documentation: "Overridable. Called when the player steps on the tile.",
+        args: [{ name: "player", type: "Player" }],
+      },
+    ],
+  },
+  {
+    name: "GlobalStore",
+    type: "object",
+    tags: ["utility"],
+    documentation:
+      "A persistent, save-backed key-value store, keyed by name. Read/write arbitrary fields directly (metatable index/newindex). Obtained via GetStore(name).",
+    members: [],
+  },
+  {
+    name: "LocalState",
+    type: "object",
+    tags: ["utility"],
+    documentation:
+      "A dynamic key-value bag for transient local state (metatable index/newindex) — read/write arbitrary fields directly.",
+    members: [],
+  },
+  {
+    name: "GameManager",
+    type: "object",
+    tags: ["utility"],
+    documentation:
+      "The game manager — creature/biogram/charm storage and party operations. Obtained via GetGameManager().",
+    members: [
+      {
+        name: "creatureStorage",
+        type: "property",
+        documentation: "Boxed creatures (read-only).",
+        detail: "Creature[]",
+      },
+      {
+        name: "biogramStorage",
+        type: "property",
+        documentation: "Stored biograms (read-only).",
+        detail: "Biogram[]",
+      },
+      {
+        name: "charmStorage",
+        type: "property",
+        documentation: "Stored charms (read-only).",
+        detail: "Charm[]",
+      },
+      {
+        name: "socketBiogram",
+        type: "method",
+        documentation: "Sockets a biogram into an ability.",
+        args: [
+          { name: "creature", type: "Creature" },
+          { name: "ability", type: "AbilityAttack" },
+          { name: "biogram", type: "Biogram" },
+        ],
+      },
+      {
+        name: "unsocketBiogram",
+        type: "method",
+        documentation: "Removes a biogram from an ability.",
+        args: [{ name: "attack", type: "AbilityAttack" }],
+      },
+      {
+        name: "swapPartyWithBoxed",
+        type: "method",
+        documentation: "Swaps a party creature with a boxed (storage) creature.",
+        args: [
+          { name: "partyIndex", type: "int" },
+          { name: "boxIndex", type: "int" },
+        ],
+      },
+      {
+        name: "swapCreatures",
+        type: "method",
+        documentation:
+          "Reorders two creatures in storage; bInsertBefore inserts A before B instead of swapping.",
+        args: [
+          { name: "a", type: "Creature" },
+          { name: "b", type: "Creature" },
+          { name: "insertBefore", type: "bool" },
+        ],
+      },
+      {
+        name: "swapCreatures",
+        type: "method",
+        documentation: "Swaps the creatures at two storage indices.",
+        args: [
+          { name: "a", type: "int" },
+          { name: "b", type: "int" },
+        ],
+      },
+      {
+        name: "sendToStorage",
+        type: "method",
+        documentation: "Moves a creature to storage (accepts a Creature or a BattleCreature).",
+        args: [{ name: "creature", type: "BattleCreature" }],
+      },
+      {
+        name: "releaseCreature",
+        type: "method",
+        documentation: "Releases a creature (from party or storage).",
+        args: [{ name: "creature", type: "Creature" }],
+        returns: { type: "bool" },
+      },
+    ],
+  },
+  {
+    name: "Journal",
+    type: "object",
+    documentation:
+      "The player's Kittydex / journal of encountered creatures. Obtained via GetJournal().",
+    members: [
+      {
+        name: "creatures",
+        type: "property",
+        documentation: "The creature entries.",
+        detail: "CreatureEntry[]",
+      },
+      {
+        name: "hasEntry",
+        type: "method",
+        documentation:
+          'Whether the journal has an entry for a creature at a status ("DISCOVERED" | "CAUGHT" | "DEFEATED").',
+        args: [
+          { name: "creature", type: "Creature" },
+          { name: "status", type: "string" },
+        ],
+        returns: { type: "bool" },
+      },
+      {
+        name: "updateCreatureEntry",
+        type: "method",
+        documentation: "Records a creature in the journal at the given status.",
+        args: [
+          { name: "creature", type: "Creature" },
+          { name: "status", type: "CreatureEntryStatus" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "CreatureEntry",
+    type: "object",
+    documentation: "A single Journal entry for a creature species (all fields read-only).",
+    members: [
+      { name: "name", type: "property", documentation: "The species name.", detail: "string" },
+      { name: "sprite", type: "property", documentation: "The species sprite.", detail: "string" },
+      {
+        name: "description",
+        type: "property",
+        documentation: "The species description.",
+        detail: "string",
+      },
+      { name: "numSeen", type: "property", documentation: "Times seen.", detail: "int" },
+      { name: "numCaught", type: "property", documentation: "Times caught.", detail: "int" },
+      { name: "numDefeated", type: "property", documentation: "Times defeated.", detail: "int" },
+      {
+        name: "highestLevelSeen",
+        type: "property",
+        documentation: "Highest level seen.",
+        detail: "int",
+      },
+      {
+        name: "highestLevelCaught",
+        type: "property",
+        documentation: "Highest level caught.",
+        detail: "int",
+      },
+      {
+        name: "highestLevelDefeated",
+        type: "property",
+        documentation: "Highest level defeated.",
         detail: "int",
       },
       {
         name: "stats",
         type: "property",
-        documentation: "The stats of the creature.",
+        documentation: "The species base stats.",
         detail: "CreatureStats",
       },
       {
-        name: "effects",
+        name: "baseAbilities",
         type: "property",
-        documentation: "The effects on the creature.",
-        detail: "CreatureEffect[]",
+        documentation: "The species base abilities.",
+        detail: "Ability[]",
       },
       {
-        name: "currentXP",
+        name: "minLevel",
         type: "property",
-        documentation: "The current XP of the creature.",
+        documentation: "The species minimum spawn level.",
         detail: "int",
       },
       {
-        name: "nextXP",
+        name: "maxLevel",
         type: "property",
-        documentation: "The XP required for the next level.",
+        documentation: "The species maximum spawn level.",
         detail: "int",
       },
       {
-        name: "maxActionPoints",
+        name: "rarity",
         type: "property",
-        documentation: "The maximum action points of the creature.",
-        detail: "double",
+        documentation: "The species rarity name.",
+        detail: "string",
       },
       {
-        name: "position",
+        name: "biomes",
         type: "property",
-        documentation: "The position of the creature.",
-        detail: "Point",
-      },
-      {
-        name: "actionPoints",
-        type: "property",
-        documentation: "The current action points of the creature.",
-        detail: "double",
-      },
-      {
-        name: "applyEffect",
-        type: "method",
-        documentation: "Applies an effect to the creature.",
-        args: [
-          { name: "effect", type: "string" },
-          { name: "duration", type: "int" },
-        ],
-      },
-      {
-        name: "removeEffect",
-        type: "method",
-        documentation: "Removes an effect from the creature.",
-        args: [{ name: "effect", type: "string" }],
-      },
-      {
-        name: "takeDamage",
-        type: "method",
-        documentation: "Takes some amount of damage. Handles death.",
-        args: [
-          { name: "amount", type: "double" },
-          { name: "type", type: "DamageType" },
-        ],
-      },
-      {
-        name: "takeHealing",
-        type: "method",
-        documentation: "Takes some amount of healing. Handles over-heal.",
-        args: [{ name: "amount", type: "double" }],
-      },
-      {
-        name: "distance",
-        type: "method",
-        documentation: "Distance to another creature.",
-        args: [{ name: "other", type: "BattleCreature" }],
-        returns: { type: "double" },
+        documentation: "The biomes the species spawns in.",
+        detail: "string[]",
       },
     ],
   },
+];
+
+// ---------------------------------------------------------------------------
+// Battle state & combat. Ground truth: ScriptLibraryBattleManager.h,
+// BattleState.h, CombatTypes.h.
+// ---------------------------------------------------------------------------
+
+const battleTypes = (): ApiItem[] => [
   {
     name: "BattleState",
     type: "object",
     tags: ["battle"],
-    documentation: "The current battle. Obtained via GetBattleState().",
+    documentation: "The current battle. Obtained via GetBattleState() (nil outside battle).",
     members: [
-      {
-        name: "battlemap",
-        type: "property",
-        documentation: "The battle map / arena.",
-        detail: "Area",
-      },
+      { name: "battlemap", type: "property", documentation: "The battle arena.", detail: "Area" },
       {
         name: "activeCreature",
         type: "property",
@@ -1639,23 +2302,32 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "targets",
         type: "property",
-        documentation: "The player-selected targets.",
+        documentation: "The player-selected targets (read-only).",
         detail: "BattleCreature[]",
+      },
+      {
+        name: "highlightedPath",
+        type: "property",
+        documentation: "The currently highlighted movement path.",
+        detail: "Point[]",
+      },
+      {
+        name: "heldAttack",
+        type: "property",
+        documentation: "The attack the player is currently holding.",
+        detail: "AbilityAttack",
+      },
+      {
+        name: "heldItem",
+        type: "property",
+        documentation: "The item the player is currently holding (read/write).",
+        detail: "Item",
       },
       {
         name: "getBattleOrder",
         type: "method",
         documentation: "The turn order of the battle.",
         returns: { type: "BattleCreature[]" },
-        insertText: "local ${1:battleOrder} = battle:getBattleOrder()",
-        detail: "BattleCreature[]",
-      },
-      {
-        name: "isPlayerOwned",
-        type: "method",
-        documentation: "Whether the creature is owned by the player.",
-        args: [{ name: "creature", type: "BattleCreature" }],
-        returns: { type: "bool" },
       },
       {
         name: "isFriendly",
@@ -1663,8 +2335,6 @@ const complexTypes = (): ApiItem[] => [
         documentation: "Whether the creature is friendly to the active creature.",
         args: [{ name: "creature", type: "BattleCreature" }],
         returns: { type: "bool" },
-        insertText: "local ${1:friendly} = battle:isFriendly(${2:creature})",
-        detail: "bool",
       },
       {
         name: "isFriendly",
@@ -1677,32 +2347,18 @@ const complexTypes = (): ApiItem[] => [
         returns: { type: "bool" },
       },
       {
-        name: "isSelected",
-        type: "method",
-        documentation:
-          "Whether the creature is currently selected as a target. (Only in the predecessor's CompletionProvider.)",
-        args: [{ name: "creature", type: "BattleCreature" }],
-        returns: { type: "bool" },
-        insertText: "local ${1:selected} = battle:isSelected(${2:creature})",
-        detail: "bool",
-      },
-      {
         name: "isCreatureVisible",
         type: "method",
         documentation: "Whether the creature is visible.",
         args: [{ name: "creature", type: "BattleCreature" }],
         returns: { type: "bool" },
-        insertText: "local ${1:visible} = battle:isCreatureVisible(${2:creature})",
-        detail: "bool",
       },
       {
         name: "findCreatures",
         type: "method",
-        documentation: "Search for creatures within a shape.",
-        args: [{ name: "shape", type: "Shape" }],
+        documentation: "Search for creatures within a sphere.",
+        args: [{ name: "shape", type: "Sphere" }],
         returns: { type: "BattleCreature[]" },
-        insertText: "local ${1:creatures} = battle:findCreatures(${2:shape})",
-        detail: "BattleCreature[]",
       },
       {
         name: "getCatchGuardRating",
@@ -1710,8 +2366,62 @@ const complexTypes = (): ApiItem[] => [
         documentation: "The catch guard rating of a creature.",
         args: [{ name: "creature", type: "BattleCreature" }],
         returns: { type: "int" },
-        insertText: "local ${1:guardRating} = battle:getCatchGuardRating(${2:creature})",
-        detail: "int",
+      },
+      {
+        name: "resolveCombat",
+        type: "method",
+        documentation: "Resolves a full combat engagement for a cast.",
+        args: [
+          { name: "caster", type: "BattleCreature" },
+          { name: "castingLocation", type: "Point" },
+          { name: "targets", type: "BattleCreature[]" },
+          { name: "attack", type: "AbilityAttack" },
+        ],
+      },
+      {
+        name: "isSelected",
+        type: "method",
+        documentation: "Whether the creature is currently a selected target.",
+        args: [{ name: "creature", type: "BattleCreature" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "toggleTargetSelected",
+        type: "method",
+        documentation:
+          "Adds/removes a creature from the selected targets. Returns the new selected state.",
+        args: [{ name: "creature", type: "BattleCreature" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "popLastTarget",
+        type: "method",
+        documentation: "Removes the most recently selected target.",
+      },
+      { name: "clearTargets", type: "method", documentation: "Clears all selected targets." },
+      {
+        name: "setHighlightedPath",
+        type: "method",
+        documentation: "Sets the highlighted movement path (only while in the move state).",
+        args: [{ name: "path", type: "Point[]" }],
+      },
+      {
+        name: "setCreatureCaught",
+        type: "method",
+        documentation:
+          "Marks a creature as caught: removes it from battle and records it in the Journal.",
+        args: [{ name: "creature", type: "BattleCreature" }],
+      },
+      {
+        name: "getCreaturesByDistance",
+        type: "method",
+        documentation: "Creatures ordered by distance from a position, filtered by friendly/enemy.",
+        args: [
+          { name: "position", type: "Point" },
+          { name: "includeFriendly", type: "bool" },
+          { name: "includeEnemy", type: "bool" },
+        ],
+        returns: { type: "BattleCreature[]" },
       },
       {
         name: "getMoveAPCost",
@@ -1722,8 +2432,6 @@ const complexTypes = (): ApiItem[] => [
           { name: "path", type: "Point[]" },
         ],
         returns: { type: "double" },
-        insertText: "local ${1:moveAPCost} = battle:getMoveAPCost(${2:creature}, ${3:path})",
-        detail: "double",
       },
       {
         name: "getCreatureAt",
@@ -1731,8 +2439,6 @@ const complexTypes = (): ApiItem[] => [
         documentation: "The creature at a specific point, if any.",
         args: [{ name: "point", type: "Point" }],
         returns: { type: "BattleCreature" },
-        insertText: "local ${1:creature} = battle:getCreatureAt(${2:point})",
-        detail: "BattleCreature",
       },
       {
         name: "isCreaturePresent",
@@ -1740,8 +2446,6 @@ const complexTypes = (): ApiItem[] => [
         documentation: "Whether a creature exists at a point.",
         args: [{ name: "point", type: "Point" }],
         returns: { type: "bool" },
-        insertText: "local ${1:present} = battle:isCreaturePresent(${2:point})",
-        detail: "bool",
       },
       {
         name: "getArenaEffect",
@@ -1752,8 +2456,6 @@ const complexTypes = (): ApiItem[] => [
           { name: "y", type: "int" },
         ],
         returns: { type: "ArenaEffect" },
-        insertText: "local ${1:arenaEffect} = battle:getArenaEffect(${2:x}, ${3:y})",
-        detail: "ArenaEffect",
       },
       {
         name: "setArenaEffect",
@@ -1764,102 +2466,19 @@ const complexTypes = (): ApiItem[] => [
           { name: "y", type: "int" },
           { name: "effect", type: "ArenaEffect" },
         ],
-        insertText: "battle:setArenaEffect(${1:x}, ${2:y}, ${3:effect})",
-        detail: "void",
       },
       {
         name: "createEntity",
         type: "method",
-        documentation: "Creates a battle entity.",
+        documentation:
+          "Creates a battle entity from a props table. Recognized keys: name, sprite, description, position (Point), caster (BattleCreature — the owner), script (string).",
         args: [{ name: "props", type: "table" }],
-        returns: { type: "BattleEntity" },
-        insertText: "local ${1:battleEntity} = battle:createEntity(${2:props})",
-        detail: "BattleEntity",
       },
       {
-        name: "getCreaturesByDistance",
+        name: "getRewards",
         type: "method",
-        documentation: "Creatures ordered by distance from a position.",
-        args: [
-          { name: "position", type: "Point" },
-          { name: "includeFriendly", type: "bool" },
-          { name: "includeEnemy", type: "bool" },
-        ],
-        returns: { type: "BattleCreature[]" },
-      },
-      {
-        name: "resolveCombat",
-        type: "method",
-        documentation: "Resolves a combat round for a cast.",
-        args: [
-          { name: "caster", type: "BattleCreature" },
-          { name: "castingLocation", type: "Point" },
-          { name: "targets", type: "BattleCreature[]" },
-          { name: "attack", type: "AbilityAttack" },
-        ],
-      },
-    ],
-  },
-  {
-    name: "Inventory",
-    type: "object",
-    tags: ["items"],
-    documentation: "The player's items and money.",
-    members: [
-      {
-        name: "money",
-        type: "property",
-        documentation: "The amount of money the player is carrying.",
-        detail: "int",
-      },
-      {
-        name: "items",
-        type: "property",
-        documentation: "The items stored in the inventory.",
-        detail: "Item[]",
-      },
-      {
-        name: "swapItems",
-        type: "method",
-        documentation: "Swaps two items in the inventory.",
-        args: [
-          { name: "itemA", type: "Item" },
-          { name: "itemB", type: "Item" },
-        ],
-      },
-      {
-        name: "addItem",
-        type: "method",
-        documentation: "Adds an item to the inventory.",
-        args: [{ name: "item", type: "Item" }],
-        returns: { type: "bool" },
-      },
-      {
-        name: "getItem",
-        type: "method",
-        documentation: "Retrieves the item at the specified index.",
-        args: [{ name: "index", type: "int" }],
-        returns: { type: "Item" },
-      },
-    ],
-  },
-  {
-    name: "Player",
-    type: "object",
-    documentation: "The player.",
-    members: [
-      { name: "name", type: "property", documentation: "The player's name.", detail: "string" },
-      {
-        name: "x",
-        type: "property",
-        documentation: "The x position of the player.",
-        detail: "int",
-      },
-      {
-        name: "y",
-        type: "property",
-        documentation: "The y position of the player.",
-        detail: "int",
+        documentation: "The battle rewards (only once the battle is won; otherwise nil).",
+        returns: { type: "BattleRewards" },
       },
     ],
   },
@@ -1868,18 +2487,18 @@ const complexTypes = (): ApiItem[] => [
     type: "object",
     tags: ["battle"],
     documentation:
-      "The combat context passed to an ability's enact. The flat combat.caster / combat.castingLocation / combat.targets completions in the predecessor are these members.",
+      "A combat engagement — the context passed to an ability's enact. Construct with Combat.new(caster, castingLocation, targets, attack).",
     members: [
       {
         name: "caster",
         type: "property",
-        documentation: "The creature casting in this combat round.",
+        documentation: "The creature casting in this engagement.",
         detail: "BattleCreature",
       },
       {
         name: "castingLocation",
         type: "property",
-        documentation: "The location at which the caster is casting.",
+        documentation: "The location the caster is casting at.",
         detail: "Point",
       },
       {
@@ -1895,15 +2514,27 @@ const complexTypes = (): ApiItem[] => [
         detail: "AbilityAttack",
       },
       {
+        name: "new",
+        type: "function",
+        documentation: "Constructs a Combat engagement.",
+        args: [
+          { name: "caster", type: "BattleCreature" },
+          { name: "castingLocation", type: "Point" },
+          { name: "targets", type: "BattleCreature[]" },
+          { name: "attack", type: "AbilityAttack" },
+        ],
+        returns: { type: "Combat" },
+      },
+      {
         name: "addAction",
         type: "method",
-        documentation: "Adds a new combat action.",
+        documentation: "Adds a combat action (a CombatAction-shaped table) to the engagement.",
         args: [{ name: "action", type: "CombatAction" }],
       },
       {
         name: "addSpriteAnimation",
         type: "method",
-        documentation: "Adds a new sprite animation.",
+        documentation: "Adds a sprite animation at a position.",
         args: [
           { name: "position", type: "Point" },
           { name: "sprite", type: "string" },
@@ -1912,7 +2543,7 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "addArenaEffect",
         type: "method",
-        documentation: "Adds a new arena effect.",
+        documentation: "Adds an arena effect over a shape.",
         args: [
           { name: "position", type: "Point" },
           { name: "shape", type: "Shape" },
@@ -1923,7 +2554,8 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "addEntity",
         type: "method",
-        documentation: "Adds a new entity.",
+        documentation:
+          "Adds a battle entity from a props table (same keys as BattleState:createEntity).",
         args: [{ name: "props", type: "table" }],
       },
       {
@@ -1931,6 +2563,63 @@ const complexTypes = (): ApiItem[] => [
         type: "method",
         documentation: "The combat actions accumulated so far.",
         returns: { type: "CombatAction[]" },
+      },
+    ],
+  },
+  {
+    name: "LevelUpDetails",
+    type: "object",
+    tags: ["battle"],
+    documentation: "Details of a creature leveling up (part of BattleRewards).",
+    members: [
+      { name: "creature", type: "property", documentation: "The creature.", detail: "Creature" },
+      {
+        name: "leveledUp",
+        type: "property",
+        documentation: "Whether it actually leveled up.",
+        detail: "bool",
+      },
+      { name: "xpGained", type: "property", documentation: "The XP gained.", detail: "double" },
+      {
+        name: "statChanges",
+        type: "property",
+        documentation: "The per-stat changes.",
+        detail: "CreatureStats",
+      },
+      {
+        name: "learnedAttacks",
+        type: "property",
+        documentation: "Attacks learned on level up.",
+        detail: "AbilityAttack[]",
+      },
+      {
+        name: "pendingAttacks",
+        type: "property",
+        documentation: "Attacks pending selection.",
+        detail: "AbilityAttack[]",
+      },
+    ],
+  },
+  {
+    name: "BattleRewards",
+    type: "object",
+    tags: ["battle"],
+    documentation: "The rewards from a won battle. Obtained via BattleState:getRewards().",
+    members: [
+      { name: "money", type: "property", documentation: "Money awarded.", detail: "int" },
+      { name: "items", type: "property", documentation: "Items awarded.", detail: "Item[]" },
+      {
+        name: "levelUps",
+        type: "property",
+        documentation: "Per-creature level-up details.",
+        detail: "LevelUpDetails[]",
+      },
+      {
+        name: "getXPForCreature",
+        type: "method",
+        documentation: "The XP awarded to a specific creature (-1 if none).",
+        args: [{ name: "creature", type: "BattleCreature" }],
+        returns: { type: "double" },
       },
     ],
   },
@@ -1962,10 +2651,10 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "useItem",
         type: "method",
-        documentation: "Uses an item outside of combat. Target is optional.",
+        documentation: "Uses an item outside of combat on a creature.",
         args: [
           { name: "item", type: "Item" },
-          { name: "target", type: "Creature" },
+          { name: "creature", type: "Creature" },
         ],
       },
       {
@@ -1986,11 +2675,11 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "socketBiogram",
         type: "method",
-        documentation: "Sockets a biogram into an ability.",
+        documentation: "Sockets a biogram into an ability (accepts a StoredBiogram or Biogram).",
         args: [
           { name: "creature", type: "Creature" },
-          { name: "ability", type: "AbilityAttack" },
-          { name: "biogram", type: "Biogram" },
+          { name: "attack", type: "AbilityAttack" },
+          { name: "biogram", type: "StoredBiogram" },
         ],
       },
       {
@@ -2008,7 +2697,7 @@ const complexTypes = (): ApiItem[] => [
       {
         name: "buyItem",
         type: "method",
-        documentation: "Buys an item from the shop.",
+        documentation: "Buys an item from the shop at a cost.",
         args: [
           { name: "item", type: "Item" },
           { name: "cost", type: "int" },
@@ -2019,26 +2708,535 @@ const complexTypes = (): ApiItem[] => [
 ];
 
 // ---------------------------------------------------------------------------
-// Global functions & libraries
-//
-// Source: gameApi.ts getGlobals() reconciled with CompletionProvider's
-// getGameAPI()/getCombatAPICompletions() globals.
-//   - GetBag, GetStore, GetBattleState: present in both. gameApi.ts's
-//     args/returns kept; CompletionProvider's insertText folded in.
-//   - GetParty, GetArea, GetGameManager: present only in CompletionProvider —
-//     added here so they are not dropped.
+// GUI runtime. Ground truth: LGUI.h (legacy imperative GUI: GUI/Widget/Text)
+// and XGUI.cpp (the XGUI runtime: View/Element and CreateScreen/CloseScreen).
+// ---------------------------------------------------------------------------
+
+const guiTypes = (): ApiItem[] => [
+  {
+    name: "GUI",
+    type: "object",
+    tags: ["gui"],
+    documentation: "The legacy (LGUI) imperative GUI root. Obtained via CreateGUI().",
+    members: [
+      {
+        name: "createPanel",
+        type: "method",
+        documentation:
+          "Creates a Panel widget from a props table (parent, name, position, size, texture, color, backgroundColor, borderColor, …).",
+        args: [{ name: "props", type: "table" }],
+        returns: { type: "Widget" },
+      },
+      {
+        name: "createText",
+        type: "method",
+        documentation:
+          "Creates a Text widget from a props table (parent, position, size, text, fontSize, textAlign, color, …).",
+        args: [{ name: "props", type: "table" }],
+        returns: { type: "Text" },
+      },
+      { name: "close", type: "method", documentation: "Closes the GUI." },
+      {
+        name: "setTimeout",
+        type: "method",
+        documentation: "Runs a callback after a delay (milliseconds).",
+        args: [
+          { name: "delayMillis", type: "int" },
+          { name: "callback", type: "function" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Widget",
+    type: "object",
+    tags: ["gui"],
+    documentation:
+      "An LGUI panel widget. Supports dynamic extra properties (metatable index/newindex) so scripts can attach fields. Position/size use the 4-tuple {relX, relY, absX, absY} form.",
+    members: [
+      {
+        name: "setParent",
+        type: "method",
+        documentation: "Reparents the widget (also adds it as a child of the parent).",
+        args: [{ name: "parent", type: "Widget" }],
+      },
+      {
+        name: "setPosition",
+        type: "method",
+        documentation: "Sets the position (relX, relY, absX, absY).",
+        args: [
+          { name: "relX", type: "double" },
+          { name: "relY", type: "double" },
+          { name: "absX", type: "int" },
+          { name: "absY", type: "int" },
+        ],
+      },
+      {
+        name: "setSize",
+        type: "method",
+        documentation: "Sets the size (relW, relH, absW, absH).",
+        args: [
+          { name: "relW", type: "double" },
+          { name: "relH", type: "double" },
+          { name: "absW", type: "int" },
+          { name: "absH", type: "int" },
+        ],
+      },
+      {
+        name: "setPadding",
+        type: "method",
+        documentation: "Sets padding.",
+        args: [{ name: "padding", type: "int" }],
+      },
+      {
+        name: "setTexture",
+        type: "method",
+        documentation: "Sets the background texture.",
+        args: [{ name: "texture", type: "string" }],
+      },
+      {
+        name: "setTrim",
+        type: "method",
+        documentation: "Sets the widget trim.",
+        args: [{ name: "trim", type: "WidgetTrim" }],
+      },
+      {
+        name: "setColor",
+        type: "method",
+        documentation: "Sets the foreground color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+      {
+        name: "setBackgroundColor",
+        type: "method",
+        documentation: "Sets the background color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+      {
+        name: "setBorderColor",
+        type: "method",
+        documentation: "Sets the border color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+      {
+        name: "setBorderSize",
+        type: "method",
+        documentation: "Sets the border size.",
+        args: [{ name: "size", type: "int" }],
+      },
+      {
+        name: "registerEvent",
+        type: "method",
+        documentation:
+          'Registers an event handler (e.g. "OnMouseClicked", "OnMouseEntered", "OnMouseExited").',
+        args: [
+          { name: "event", type: "string" },
+          { name: "callback", type: "function" },
+        ],
+      },
+      {
+        name: "isVisible",
+        type: "method",
+        documentation: "Whether the widget is visible.",
+        returns: { type: "bool" },
+      },
+      { name: "show", type: "method", documentation: "Shows the widget." },
+      { name: "hide", type: "method", documentation: "Hides the widget." },
+      { name: "toggle", type: "method", documentation: "Toggles visibility." },
+    ],
+  },
+  {
+    name: "Text",
+    type: "object",
+    tags: ["gui"],
+    documentation: "An LGUI text widget. Has all Widget members plus the text-specific ones below.",
+    members: [
+      {
+        name: "setText",
+        type: "method",
+        documentation: "Sets the text (accepts a string, int, or number).",
+        args: [{ name: "text", type: "string" }],
+      },
+      {
+        name: "setFontSize",
+        type: "method",
+        documentation: "Sets the font size.",
+        args: [{ name: "size", type: "int" }],
+      },
+      {
+        name: "setTextAlign",
+        type: "method",
+        documentation: "Sets the text alignment.",
+        args: [{ name: "align", type: "TextAlignment" }],
+      },
+    ],
+  },
+  {
+    name: "WidgetTrim",
+    type: "object",
+    tags: ["gui"],
+    documentation:
+      "A reusable widget trim. Construct with WidgetTrim.new(borderSize, color, backgroundColor, borderColor).",
+    members: [
+      { name: "borderSize", type: "property", documentation: "The border size.", detail: "int" },
+      { name: "color", type: "property", documentation: "The foreground color.", detail: "Color" },
+      {
+        name: "backgroundColor",
+        type: "property",
+        documentation: "The background color.",
+        detail: "Color",
+      },
+      {
+        name: "borderColor",
+        type: "property",
+        documentation: "The border color.",
+        detail: "Color",
+      },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs a WidgetTrim.",
+        args: [
+          { name: "borderSize", type: "int" },
+          { name: "color", type: "Color" },
+          { name: "backgroundColor", type: "Color" },
+          { name: "borderColor", type: "Color" },
+        ],
+        returns: { type: "WidgetTrim" },
+      },
+    ],
+  },
+  {
+    name: "View",
+    type: "object",
+    tags: ["xgui", "gui"],
+    documentation:
+      "The XGUI runtime view handle passed to a component controller (the `view` argument). Drives the component's data model, scopes, and per-view state.",
+    members: [
+      {
+        name: "setModel",
+        type: "method",
+        documentation: "Replaces the view's data model.",
+        args: [{ name: "model", type: "table" }],
+      },
+      {
+        name: "getModel",
+        type: "method",
+        documentation: "Returns the view's data model.",
+        returns: { type: "table" },
+      },
+      {
+        name: "getScope",
+        type: "method",
+        documentation: "Returns the model table published under a named scope (or nil).",
+        args: [{ name: "scopeName", type: "string" }],
+        returns: { type: "table" },
+      },
+      {
+        name: "getState",
+        type: "method",
+        documentation: "Returns the view's mutable state table.",
+        returns: { type: "table" },
+      },
+      {
+        name: "setState",
+        type: "method",
+        documentation: "Shallow-merges the given overrides into the view state.",
+        args: [{ name: "overrides", type: "table" }],
+      },
+      {
+        name: "broadcast",
+        type: "method",
+        documentation: "Broadcasts an event on the view.",
+        args: [{ name: "topic", type: "string" }],
+      },
+    ],
+  },
+  {
+    name: "Element",
+    type: "object",
+    tags: ["xgui", "gui"],
+    documentation:
+      "A handle to a single element within an XGUI component, retrieved by the controller.",
+    members: [
+      {
+        name: "data",
+        type: "property",
+        documentation: "The element's bound model slice (read-only).",
+        detail: "table",
+      },
+      {
+        name: "setVisible",
+        type: "method",
+        documentation: "Shows/hides the element.",
+        args: [{ name: "visible", type: "bool" }],
+      },
+      {
+        name: "setText",
+        type: "method",
+        documentation: "Sets the element's text.",
+        args: [{ name: "text", type: "string" }],
+      },
+      {
+        name: "setTexture",
+        type: "method",
+        documentation: "Sets the element's texture.",
+        args: [{ name: "texture", type: "string" }],
+      },
+      {
+        name: "setBackgroundColor",
+        type: "method",
+        documentation: "Sets the background color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+      {
+        name: "setBorderColor",
+        type: "method",
+        documentation: "Sets the border color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+      {
+        name: "setColor",
+        type: "method",
+        documentation: "Sets the foreground color.",
+        args: [{ name: "color", type: "Color" }],
+      },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Input, rendering, timers, and RNG props. Ground truth: ScriptLibraryInput.h,
+// ScriptLibraryRenderer.h, ScriptLibraryDirector.h, ScriptLibraryRng.h.
+// ---------------------------------------------------------------------------
+
+const systemTypes = (): ApiItem[] => [
+  {
+    name: "Input",
+    type: "object",
+    tags: ["input"],
+    documentation: "The input state, for polling key bindings.",
+    members: [
+      {
+        name: "isPressed",
+        type: "method",
+        documentation: "Whether the binding was pressed this frame.",
+        args: [{ name: "binding", type: "Key" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "isDown",
+        type: "method",
+        documentation: "Whether the binding is currently held down.",
+        args: [{ name: "binding", type: "Key" }],
+        returns: { type: "bool" },
+      },
+      {
+        name: "isUp",
+        type: "method",
+        documentation: "Whether the binding was released this frame.",
+        args: [{ name: "binding", type: "Key" }],
+        returns: { type: "bool" },
+      },
+    ],
+  },
+  {
+    name: "Renderer",
+    type: "object",
+    tags: ["gui"],
+    documentation: "Low-level renderer passed to custom render hooks (scene scripts).",
+    members: [
+      {
+        name: "width",
+        type: "property",
+        documentation: "The render target width (read-only).",
+        detail: "int",
+      },
+      {
+        name: "text",
+        type: "method",
+        documentation: "Draws text at (x, y), optionally with a color.",
+        args: [
+          { name: "text", type: "string" },
+          { name: "x", type: "int" },
+          { name: "y", type: "int" },
+          { name: "color", type: "FColor" },
+        ],
+      },
+      {
+        name: "box",
+        type: "method",
+        documentation: "Draws a box (filled or outline).",
+        args: [
+          { name: "box", type: "Box" },
+          { name: "color", type: "FColor" },
+          { name: "fill", type: "bool" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "FColor",
+    type: "object",
+    tags: ["gui"],
+    documentation: "An RGBA color for the Renderer. Construct with FColor.new(r, g, b, a).",
+    members: [
+      { name: "r", type: "property", documentation: "Red (0-255).", detail: "int" },
+      { name: "g", type: "property", documentation: "Green (0-255).", detail: "int" },
+      { name: "b", type: "property", documentation: "Blue (0-255).", detail: "int" },
+      { name: "a", type: "property", documentation: "Alpha (0-255).", detail: "int" },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs an FColor.",
+        args: [
+          { name: "r", type: "int" },
+          { name: "g", type: "int" },
+          { name: "b", type: "int" },
+          { name: "a", type: "int" },
+        ],
+        returns: { type: "FColor" },
+      },
+    ],
+  },
+  {
+    name: "Box",
+    type: "object",
+    tags: ["gui"],
+    documentation: "A rectangle for the Renderer. Construct with Box.new(x, y, w, h).",
+    members: [
+      { name: "x", type: "property", documentation: "Left.", detail: "int" },
+      { name: "y", type: "property", documentation: "Top.", detail: "int" },
+      { name: "w", type: "property", documentation: "Width.", detail: "int" },
+      { name: "h", type: "property", documentation: "Height.", detail: "int" },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs a Box.",
+        args: [
+          { name: "x", type: "int" },
+          { name: "y", type: "int" },
+          { name: "w", type: "int" },
+          { name: "h", type: "int" },
+        ],
+        returns: { type: "Box" },
+      },
+    ],
+  },
+  {
+    name: "TimerHandle",
+    type: "object",
+    tags: ["utility"],
+    documentation: "A handle to a running timer, returned by CreateTimer.",
+    members: [{ name: "cancel", type: "method", documentation: "Cancels the timer." }],
+  },
+  {
+    name: "RandomCreatureProps",
+    type: "object",
+    documentation:
+      "Props for RNG.GetRandomCreature. Construct with RandomCreatureProps.new(minLevel, maxLevel, biome).",
+    members: [
+      { name: "minLevel", type: "property", documentation: "Minimum level.", detail: "int" },
+      { name: "maxLevel", type: "property", documentation: "Maximum level.", detail: "int" },
+      { name: "biome", type: "property", documentation: "The biome.", detail: "Biome" },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs RandomCreatureProps.",
+        args: [
+          { name: "minLevel", type: "int" },
+          { name: "maxLevel", type: "int" },
+          { name: "biome", type: "Biome" },
+        ],
+        returns: { type: "RandomCreatureProps" },
+      },
+    ],
+  },
+  {
+    name: "RandomItemProps",
+    type: "object",
+    tags: ["items"],
+    documentation:
+      "Props for RNG.GetRandomItem. Construct with RandomItemProps.new(minLevel, maxLevel, biome).",
+    members: [
+      { name: "minLevel", type: "property", documentation: "Minimum level.", detail: "int" },
+      { name: "maxLevel", type: "property", documentation: "Maximum level.", detail: "int" },
+      { name: "biome", type: "property", documentation: "The biome.", detail: "Biome" },
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs RandomItemProps.",
+        args: [
+          { name: "minLevel", type: "int" },
+          { name: "maxLevel", type: "int" },
+          { name: "biome", type: "Biome" },
+        ],
+        returns: { type: "RandomItemProps" },
+      },
+    ],
+  },
+  {
+    name: "BattleGameModeProps",
+    type: "object",
+    tags: ["battle"],
+    documentation:
+      "Props for SetGameMode(GameMode.BATTLE_SCENE, ...). Construct with BattleGameModeProps.new(opponents).",
+    members: [
+      {
+        name: "new",
+        type: "function",
+        documentation: "Constructs BattleGameModeProps from a list of opponent creatures.",
+        args: [{ name: "opponents", type: "Creature[]" }],
+        returns: { type: "BattleGameModeProps" },
+      },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Global functions & library tables. Ground truth: the set_function / lua[...]
+// registrations across ScriptLibraryGameManager.h, ScriptLibraryBattleManager.h,
+// ScriptLibraryDirector.h, ScriptLibraryAlerts.h, ScriptLibraryAssets.h,
+// ScriptLibraryAnim8.h, ScriptLibraryRng.h, ScriptLibraryAlgorithms.h,
+// ScriptLibraryInput.h, LGUI.h, XGUI.cpp — plus the Lua preludes.
 // ---------------------------------------------------------------------------
 
 const globals = (): ApiItem[] => [
+  // --- World / game manager ---
+  {
+    name: "GetBag",
+    type: "function",
+    tags: ["items"],
+    documentation: "Returns the player's bag (inventory).",
+    returns: { type: "Inventory" },
+    insertText: "local ${1:bag} = GetBag()",
+    detail: "Inventory",
+  },
+  {
+    name: "GetParty",
+    type: "function",
+    documentation: "Returns the player's active party.",
+    returns: { type: "Party" },
+    insertText: "local ${1:party} = GetParty()",
+    detail: "Party",
+  },
+  {
+    name: "GetArea",
+    type: "function",
+    documentation: "Returns the current world area.",
+    returns: { type: "Area" },
+    insertText: "local ${1:area} = GetArea()",
+    detail: "Area",
+  },
   {
     name: "GetStore",
     type: "function",
     tags: ["utility"],
-    documentation: "Keeps track of global state per store name.",
+    documentation: "Returns a persistent, save-backed key-value store for the given name.",
     args: [{ name: "storeName", type: "string" }],
-    returns: { type: "table" },
+    returns: { type: "GlobalStore" },
     insertText: 'local ${1:store} = GetStore("${2:name}")',
-    detail: "table",
+    detail: "GlobalStore",
     examples: [
       {
         title: "Persist a flag",
@@ -2047,97 +3245,37 @@ const globals = (): ApiItem[] => [
     ],
   },
   {
-    name: "GetBag",
-    type: "function",
-    tags: ["items"],
-    documentation: "Returns the player's bag (inventory).",
-    args: [],
-    returns: { type: "Inventory" },
-    insertText: "local ${1:bag} = GetBag()",
-    detail: "Inventory",
-  },
-  {
-    name: "GetParty",
-    type: "function",
-    documentation:
-      "Returns the player's party of creatures. (Only in the predecessor's CompletionProvider.)",
-    returns: { type: "Creature[]" },
-    insertText: "local ${1:party} = GetParty()",
-    detail: "Creature[]",
-  },
-  {
-    name: "GetArea",
-    type: "function",
-    documentation: "Returns the current area. (Only in the predecessor's CompletionProvider.)",
-    returns: { type: "Area" },
-    insertText: "local ${1:area} = GetArea()",
-    detail: "Area",
-  },
-  {
     name: "GetGameManager",
     type: "function",
     tags: ["utility"],
-    documentation:
-      "Returns the game's GameManager. (Only in the predecessor's CompletionProvider; the GameManager type is not described in either source.)",
+    documentation: "Returns the game manager (creature/biogram/charm storage and party ops).",
     returns: { type: "GameManager" },
     insertText: "local ${1:gm} = GetGameManager()",
     detail: "GameManager",
-  },
-  {
-    name: "Battle",
-    type: "library",
-    tags: ["battle"],
-    documentation: "Battle utility functions.",
-    members: [
-      {
-        name: "LogCombat",
-        type: "function",
-        documentation: "Writes a battle log message.",
-        args: [{ name: "message", type: "string" }],
-      },
-    ],
-  },
-  {
-    name: "GetNearestEnemy",
-    type: "function",
-    tags: ["battle"],
-    documentation: "Returns the nearest enemy to the active creature.",
-    returns: { type: "BattleCreature" },
-  },
-  {
-    name: "GetNearestFriendly",
-    type: "function",
-    tags: ["battle"],
-    documentation: "Returns the nearest friendly to the active creature.",
-    returns: { type: "BattleCreature" },
-  },
-  {
-    name: "GetBattleState",
-    type: "function",
-    tags: ["battle"],
-    documentation: "Returns the current battle state, if the current state is a battle.",
-    returns: { type: "BattleState" },
-    insertText: "local ${1:battle} = GetBattleState()",
-    detail: "BattleState",
-  },
-  {
-    name: "IsPlayerOwned",
-    type: "function",
-    tags: ["battle"],
-    documentation: "Whether the creature is owned by the player.",
-    returns: { type: "bool" },
-  },
-  {
-    name: "GetJournal",
-    type: "function",
-    documentation: "Returns the player's journal, which tracks progress in the game.",
-    returns: { type: "Journal" },
   },
   {
     name: "GetPlayer",
     type: "function",
     documentation: "Returns the player.",
     returns: { type: "Player" },
+  },
+  {
+    name: "GetJournal",
+    type: "function",
+    documentation: "Returns the player's journal (Kittydex), which tracks encountered creatures.",
+    returns: { type: "Journal" },
+  },
+  {
+    name: "GetController",
+    type: "function",
+    documentation: "Returns the player controller (protected game interactions).",
+    returns: { type: "PlayerController" },
+  },
+  {
+    name: "GetAbilityLibrary",
+    type: "function",
+    documentation: "Returns the ability library the player can train new abilities from.",
+    returns: { type: "AbilityData[]" },
   },
   {
     name: "GetAbilityById",
@@ -2150,73 +3288,352 @@ const globals = (): ApiItem[] => [
     name: "GetItemById",
     type: "function",
     tags: ["items"],
-    documentation: "Returns the item with the given id.",
+    documentation: "Returns a fresh item instance for the given id.",
     args: [{ name: "id", type: "string" }],
+    returns: { type: "Item" },
+  },
+  {
+    name: "CreateItem",
+    type: "function",
+    tags: ["items"],
+    documentation: "Creates a fresh item instance for the given id (same as GetItemById).",
+    args: [{ name: "itemId", type: "string" }],
     returns: { type: "Item" },
   },
   {
     name: "SaveGame",
     type: "function",
-    documentation: "Attempts to save the game. You cannot save during combat.",
+    documentation: "Attempts to save the game. Throws during combat (you cannot save mid-battle).",
+  },
+  // --- Battle ---
+  {
+    name: "GetBattleState",
+    type: "function",
+    tags: ["battle"],
+    documentation: "Returns the current battle state, or nil if not in a battle.",
+    returns: { type: "BattleState" },
+    insertText: "local ${1:battle} = GetBattleState()",
+    detail: "BattleState",
   },
   {
-    name: "GetController",
+    name: "IsPlayerOwned",
     type: "function",
-    documentation: "Returns the player controller.",
-    returns: { type: "PlayerController" },
-  },
-  {
-    name: "GetAbilityLibrary",
-    type: "function",
-    documentation:
-      "Returns the ability library from which the player can train their kitties new abilities.",
-    returns: { type: "Ability[]" },
-  },
-  {
-    name: "GetUnlockedDLC",
-    type: "function",
-    documentation: "Returns all unlocked DLC.",
-    returns: { type: "DLCPack[]" },
-  },
-  {
-    name: "GetAllDLC",
-    type: "function",
-    documentation: "Returns all DLC, locked included.",
-    returns: { type: "DLCPack[]" },
-  },
-  {
-    name: "IsDLCUnlocked",
-    type: "function",
-    documentation: "Returns true if the player has unlocked the DLC.",
-    args: [{ name: "id", type: "string" }],
+    tags: ["battle"],
+    documentation: "Whether the creature is owned by the player.",
+    args: [{ name: "creature", type: "BattleCreature" }],
     returns: { type: "bool" },
   },
   {
-    name: "UnlockDLC",
+    name: "GetNearestEnemy",
     type: "function",
-    documentation: "Unlocks a DLC if possible.",
-    args: [{ name: "id", type: "string" }],
+    tags: ["battle"],
+    documentation:
+      "Returns the nearest enemy to the active creature and its distance (two return values). Lua-prelude helper (__libcombat.lua).",
+    returns: { type: "BattleCreature" },
+  },
+  {
+    name: "GetNearestFriendly",
+    type: "function",
+    tags: ["battle"],
+    documentation:
+      "Returns the nearest friendly to the active creature and its distance (two return values). Lua-prelude helper (__libcombat.lua).",
+    returns: { type: "BattleCreature" },
+  },
+  {
+    name: "AnimateAbilitySprite",
+    type: "function",
+    tags: ["battle"],
+    documentation: "Plays a floating ability sprite animation at a battle position.",
+    args: [
+      { name: "sprite", type: "string" },
+      { name: "position", type: "Point" },
+    ],
+  },
+  {
+    name: "ExitBattle",
+    type: "function",
+    tags: ["battle"],
+    documentation: "Tears down the battle scene (only valid once the battle is won).",
+  },
+  {
+    name: "Battle",
+    type: "library",
+    tags: ["battle"],
+    documentation: "Battle utility functions.",
+    members: [
+      {
+        name: "LogCombat",
+        type: "function",
+        documentation: "Writes a battle log / combat notification.",
+        args: [{ name: "message", type: "string" }],
+      },
+    ],
+  },
+  // --- Messaging / director ---
+  {
+    name: "Broadcast",
+    type: "function",
+    tags: ["utility"],
+    documentation:
+      "Broadcasts a message on a topic with up to 6 arguments (global form of MessageBroker.Broadcast).",
+    args: [{ name: "topic", type: "string" }],
+  },
+  {
+    name: "MessageBroker",
+    type: "library",
+    tags: ["utility"],
+    documentation: "The pub/sub message bus.",
+    members: [
+      {
+        name: "Subscribe",
+        type: "function",
+        documentation:
+          "Subscribes a callback to a topic. Returns a Subscription (keep a reference to stay subscribed).",
+        args: [
+          { name: "topic", type: "string" },
+          { name: "callback", type: "function" },
+        ],
+        returns: { type: "Subscription" },
+      },
+      {
+        name: "Broadcast",
+        type: "function",
+        documentation: "Broadcasts a message on a topic with up to 6 arguments.",
+        args: [{ name: "topic", type: "string" }],
+      },
+    ],
+  },
+  {
+    name: "CreateTimer",
+    type: "function",
+    tags: ["utility"],
+    documentation: "Runs a callback after a delay (seconds). Returns a handle you can cancel.",
+    args: [
+      { name: "delay", type: "float" },
+      { name: "callback", type: "function" },
+    ],
+    returns: { type: "TimerHandle" },
+  },
+  {
+    name: "OpenWindow",
+    type: "function",
+    tags: ["gui"],
+    documentation: "Opens a scene/window from a script, optionally passing a props table.",
+    args: [
+      { name: "scriptName", type: "string" },
+      { name: "props", type: "table" },
+    ],
+  },
+  {
+    name: "SetGameMode",
+    type: "function",
+    documentation:
+      "Switches the top-level game mode. For BATTLE_SCENE, pass BattleGameModeProps; for TITLE_SCENE / SAVE_SELECTOR_SCENE, pass the mode alone.",
+    args: [
+      { name: "mode", type: "GameMode" },
+      { name: "props", type: "BattleGameModeProps" },
+    ],
+  },
+  {
+    name: "Npc",
+    type: "library",
+    documentation: "NPC / world interaction helpers (dialog and shops).",
+    members: [
+      {
+        name: "CloseDialog",
+        type: "function",
+        documentation: "Closes the current dialog and returns to movement.",
+      },
+      {
+        name: "StartDialog",
+        type: "function",
+        documentation: "Starts a dialog from a dialog-tree table.",
+        args: [{ name: "dialogTree", type: "table" }],
+      },
+      {
+        name: "OpenShopWindow",
+        type: "function",
+        documentation:
+          "Opens a shop window from a stock file, with a shopkeeper name and optional greeting.",
+        args: [
+          { name: "stockfile", type: "string" },
+          { name: "shopkeeperName", type: "string" },
+          { name: "greeting", type: "string" },
+        ],
+      },
+    ],
+  },
+  // --- RNG ---
+  {
+    name: "RNG",
+    type: "library",
+    documentation: "Random content generation.",
+    members: [
+      {
+        name: "GetRandomCreature",
+        type: "function",
+        documentation: "Returns a random creature for the given props.",
+        args: [{ name: "props", type: "RandomCreatureProps" }],
+        returns: { type: "Creature" },
+      },
+      {
+        name: "GetRandomItem",
+        type: "function",
+        tags: ["items"],
+        documentation: "Returns a random item for the given props.",
+        args: [{ name: "props", type: "RandomItemProps" }],
+        returns: { type: "Item" },
+      },
+    ],
+  },
+  // --- Pathfinding ---
+  {
+    name: "FindPathAStar",
+    type: "function",
+    tags: ["battle"],
+    documentation: "A* pathfinding across an area between two points (empty if unreachable).",
+    args: [
+      { name: "area", type: "Area" },
+      { name: "start", type: "Point" },
+      { name: "end", type: "Point" },
+    ],
+    returns: { type: "Point[]" },
+  },
+  {
+    name: "FindPathLinear",
+    type: "function",
+    tags: ["battle"],
+    documentation: "Straight-line (Bresenham) path between two points.",
+    args: [
+      { name: "area", type: "Area" },
+      { name: "start", type: "Point" },
+      { name: "end", type: "Point" },
+    ],
+    returns: { type: "Point[]" },
+  },
+  // --- Alerts / toasts ---
+  {
+    name: "Alert",
+    type: "library",
+    documentation: "In-game toasts and info dialogs.",
+    members: [
+      {
+        name: "ToastInfo",
+        type: "function",
+        documentation: "Shows an info toast.",
+        args: [{ name: "message", type: "string" }],
+      },
+      {
+        name: "ToastSuccess",
+        type: "function",
+        documentation: "Shows a success toast.",
+        args: [{ name: "message", type: "string" }],
+      },
+      {
+        name: "ToastError",
+        type: "function",
+        documentation: "Shows an error toast.",
+        args: [{ name: "message", type: "string" }],
+      },
+      {
+        name: "DisplayInfo",
+        type: "function",
+        documentation: "Shows a titled info dialog.",
+        args: [
+          { name: "title", type: "string" },
+          { name: "message", type: "string" },
+        ],
+      },
+    ],
+  },
+  // --- Assets / scripts / cursor ---
+  {
+    name: "GetAssetFilepath",
+    type: "function",
+    tags: ["utility"],
+    documentation: "Resolves a logical asset name to its on-disk filepath.",
+    args: [{ name: "assetName", type: "string" }],
+    returns: { type: "string" },
+  },
+  {
+    name: "LoadScript",
+    type: "function",
+    tags: ["utility"],
+    documentation: "Loads and runs another script by name, returning its result.",
+    args: [{ name: "scriptName", type: "string" }],
+  },
+  {
+    name: "SetCursor",
+    type: "function",
+    tags: ["gui"],
+    documentation: "Sets the mouse cursor from an image asset.",
+    args: [{ name: "assetName", type: "string" }],
+  },
+  // --- Animation ---
+  {
+    name: "Anim8",
+    type: "library",
+    documentation: "Animation helpers.",
+    members: [
+      {
+        name: "OneShot",
+        type: "function",
+        documentation:
+          'Plays a one-shot animation from a props table (e.g. {animation="sprite_linear_up", sprite=..., startPosition=Point, size=Point, duration=...}).',
+        args: [{ name: "props", type: "table" }],
+      },
+      { name: "Loop", type: "function", documentation: "Plays a looping animation (reserved)." },
+    ],
+  },
+  // --- Input ---
+  {
+    name: "IsGamepadConnected",
+    type: "function",
+    tags: ["input"],
+    documentation: "Whether a gamepad is connected.",
+    returns: { type: "bool" },
+  },
+  // --- GUI construction ---
+  {
+    name: "CreateGUI",
+    type: "function",
+    tags: ["gui"],
+    documentation: "Creates a new legacy (LGUI) imperative GUI.",
+    returns: { type: "GUI" },
+  },
+  {
+    name: "CreateScreen",
+    type: "function",
+    tags: ["xgui", "gui"],
+    documentation:
+      "Opens an XGUI component as a screen, optionally passing a props table to its root model.",
+    args: [
+      { name: "scriptName", type: "string" },
+      { name: "props", type: "table" },
+    ],
+  },
+  {
+    name: "CloseScreen",
+    type: "function",
+    tags: ["xgui", "gui"],
+    documentation: "Tears down the current screen/scene.",
   },
 ];
 
 // ---------------------------------------------------------------------------
 // `self` — the script's own object
 //
-// Source: CompletionProvider's getSelfCompletions / per-entity self.*.
-// gameApi.ts had no `self` surface. Inside a creature/ability/item/effect/
-// biogram script, `self` is the object being scripted. The members vary by
-// entity kind; we collect them under one `self` namespace and tag each member
-// with the entity kind(s) it applies to, so a future context-aware completion
-// provider can filter by the active script's entity type.
+// Inside a creature/ability/item/effect/biogram script, `self` is the object
+// being scripted (a LuaObject whose fields are the bound type's members). The
+// members vary by entity kind; each is tagged with the kind(s) it applies to.
 // ---------------------------------------------------------------------------
 
 const selfApi = (): ApiItem => ({
   name: "self",
   type: "namespace",
   documentation:
-    "The object this script belongs to. Available members depend on the entity kind (creature, ability, item, effect, biogram).",
+    "The object this script belongs to. Available members depend on the entity kind (ability, item, effect, biogram). See the matching type (Ability / Item / CreatureEffect / Biogram) for the full member list.",
   members: [
-    // Common to all entity scripts.
     {
       name: "name",
       type: "property",
@@ -2228,7 +3645,7 @@ const selfApi = (): ApiItem => ({
       name: "sprite",
       type: "property",
       documentation: "The sprite.",
-      detail: "Image",
+      detail: "string",
       tags: ["ability", "item", "effect", "biogram"],
     },
     {
@@ -2238,18 +3655,17 @@ const selfApi = (): ApiItem => ({
       detail: "string",
       tags: ["ability", "item", "effect", "biogram"],
     },
-    // Ability-only.
     {
       name: "shape",
       type: "property",
-      documentation: "The shape (ability scripts).",
-      detail: "Shape",
+      documentation: "The targeting shape (ability scripts).",
+      detail: "AbilityShape",
       tags: ["ability"],
     },
     {
       name: "cost",
       type: "property",
-      documentation: "The cost (ability scripts).",
+      documentation: "The action-point cost (ability scripts).",
       detail: "int",
       tags: ["ability"],
     },
@@ -2263,7 +3679,7 @@ const selfApi = (): ApiItem => ({
     {
       name: "radius",
       type: "property",
-      documentation: "The radius (ability scripts).",
+      documentation: "The area radius (ability scripts).",
       detail: "int",
       tags: ["ability"],
     },
@@ -2274,13 +3690,12 @@ const selfApi = (): ApiItem => ({
       detail: "int",
       tags: ["ability"],
     },
-    // tags / hasTag are available on ability and biogram scripts.
     {
       name: "tags",
       type: "property",
       documentation: "The tags.",
       detail: "string[]",
-      tags: ["ability", "biogram"],
+      tags: ["ability", "biogram", "effect"],
     },
     {
       name: "hasTag",
@@ -2290,7 +3705,7 @@ const selfApi = (): ApiItem => ({
       returns: { type: "bool" },
       insertText: "local ${1:hasTag} = self:hasTag(${2:tag})",
       detail: "bool",
-      tags: ["ability", "biogram"],
+      tags: ["ability", "biogram", "effect", "item"],
     },
   ],
 });
@@ -2304,8 +3719,7 @@ const selfApi = (): ApiItem => ({
 // handler signatures a controller implements. These are XML attributes (not Lua
 // globals), but they live in this one tree so the reference pane and future
 // intellisense share a single source. Ground truth for the derivation rules is
-// the engine (see src/lib/guiInteraction.ts, which cites the engine file:line);
-// the prose here is kept tight — reference, not tutorial.
+// the engine (see src/lib/guiInteraction.ts, which cites the engine file:line).
 // ---------------------------------------------------------------------------
 
 /** Which element tags accept the mouse + focus (non-key) input handlers. */
@@ -2477,15 +3891,19 @@ end`,
 /**
  * The merged Lua API tree — the single source of truth.
  *
- * Order is reference-pane-friendly: language first, then types, then the
- * globals you actually call, the contextual `self` object, and finally the XGUI
- * interaction reference (GUI editor knowledge, not a Lua global).
+ * Order is reference-pane-friendly: language first, then enums and types, then
+ * the globals you actually call, the contextual `self` object, and finally the
+ * XGUI interaction reference (GUI editor knowledge, not a Lua global).
  */
 export const GAME_API: ApiItem[] = [
   luaKeywords(),
   ...luaStdlib(),
-  ...basicTypes(),
-  ...complexTypes(),
+  ...enums(),
+  ...coreTypes(),
+  ...gameTypes(),
+  ...battleTypes(),
+  ...guiTypes(),
+  ...systemTypes(),
   ...globals(),
   selfApi(),
   xguiInteraction(),

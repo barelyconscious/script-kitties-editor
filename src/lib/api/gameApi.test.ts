@@ -43,7 +43,12 @@ describe("GAME_API well-formedness", () => {
   it("only allows duplicate member names where the game genuinely overloads", () => {
     // Member names may repeat only as deliberate overloads. We pin the known
     // ones so an accidental copy-paste duplicate elsewhere is caught.
-    const allowedOverloads = new Set(["Creature.removeEffect", "BattleState.isFriendly"]);
+    const allowedOverloads = new Set([
+      "Creature.removeEffect",
+      "BattleState.isFriendly",
+      "Area.isTileBlocked",
+      "GameManager.swapCreatures",
+    ]);
     const offenders: string[] = [];
     walk(GAME_API, (item) => {
       if (!item.members) return;

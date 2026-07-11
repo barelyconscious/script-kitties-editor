@@ -36,6 +36,7 @@ function dirtyState(): EditorState {
   return {
     open: openComponent(),
     selectedNodeId: null,
+    pendingIdFocusNodeId: null,
     lockedNodeIds: new Set(),
     hiddenNodeIds: new Set(),
     activeTab: "view",
@@ -93,6 +94,7 @@ describe("save flow dirty discipline", () => {
     const clean: EditorState = {
       open: null,
       selectedNodeId: null,
+      pendingIdFocusNodeId: null,
       lockedNodeIds: new Set(),
     hiddenNodeIds: new Set(),
       activeTab: "view",

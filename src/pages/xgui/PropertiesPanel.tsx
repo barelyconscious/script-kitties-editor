@@ -23,7 +23,7 @@
  */
 
 import { Check, ChevronRight, Copy, Lock, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -110,9 +110,8 @@ export function PropertiesPanel() {
   };
 
   const computed = computedId(path);
-  // 475: Event nodes have NO id (task 471) — they are addressed by `name`/`handler`,
-  // not by a hierarchical id. So hide BOTH the computed read-only id and the editable
-  // local id for an Event; every other tag still shows them.
+  // Tags with no id (GridLayout, the root View) hide BOTH the computed read-only id
+  // and the editable local id; every other tag shows them.
   const hasId = nodeHasId(node.tag);
   // The parent tag (the node just above the selected one in the path) decides
   // whether the selected node OWNS its geometry: a child of a <GridLayout> does
@@ -178,8 +177,8 @@ export function PropertiesPanel() {
             </FieldRow>
           )}
 
-          {/* Computed read-only hierarchical id + editable local id — hidden for Event
-            nodes, which have no id (475). */}
+          {/* Computed read-only hierarchical id + editable local id — hidden for tags
+            with no id (GridLayout, the root View). */}
           {hasId && (
             <>
               <FieldRow label="computed id">
@@ -195,11 +194,11 @@ export function PropertiesPanel() {
               </FieldRow>
 
               <FieldRow label="id">
-                <Input
+                <IdField
                   value={node.attrs.id ?? ""}
-                  onChange={(e) => setAttr("id", e.currentTarget.value)}
-                  placeholder="local id"
-                  className="h-7 font-mono text-xs"
+                  onChange={(value) => setAttr("id", value)}
+                  autoFocus={state.pendingIdFocusNodeId === node.nodeId}
+                  onAutoFocused={() => dispatch({ type: "consumeIdFocus" })}
                 />
               </FieldRow>
             </>
@@ -226,6 +225,53 @@ export function PropertiesPanel() {
         </fieldset>
       </div>
     </div>
+  );
+}
+
+/**
+ * The editable local-`id` input. Extracted into its own component so it can own a
+ * ref + effect: when `autoFocus` flips true (the node was just CREATED via the
+ * tree/View add-child, which sets {@link import("./editorState").EditorState.pendingIdFocusNodeId}),
+ * it focuses and SELECTS the field so the first keystroke replaces the auto-assigned
+ * id (`Panel1`, …), then calls `onAutoFocused` to consume the one-shot request.
+ * Selecting an existing element by CLICK never sets `autoFocus`, so clicking around
+ * the tree never steals focus into this field. A focus attempt is skipped when the
+ * input is disabled (a locked node's fieldset), which never coincides with a fresh add.
+ */
+function IdField({
+  value,
+  onChange,
+  autoFocus,
+  onAutoFocused,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  autoFocus: boolean;
+  onAutoFocused: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const input = ref.current;
+    if (!input || input.disabled) return;
+    // Defer to the next frame: the add-child menu (a Radix ContextMenu) restores
+    // focus to its trigger row when it closes, which can land AFTER this commit and
+    // steal focus. Focusing on the next frame runs after that, so the id field wins.
+    const raf = requestAnimationFrame(() => {
+      input.focus();
+      input.select(); // pre-select the auto-id so the first keystroke replaces it
+      onAutoFocused();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [autoFocus, onAutoFocused]);
+  return (
+    <Input
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      placeholder="local id"
+      className="h-7 font-mono text-xs"
+    />
   );
 }
 

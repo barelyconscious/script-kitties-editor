@@ -30,6 +30,7 @@ function openDoc(root: GuiNode): OpenComponent {
 const CLEAN: EditorState = {
   open: null,
   selectedNodeId: null,
+  pendingIdFocusNodeId: null,
   lockedNodeIds: new Set(),
   hiddenNodeIds: new Set(),
   activeTab: "view",

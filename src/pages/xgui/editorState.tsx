@@ -147,6 +147,15 @@ export type EditorState = {
   /** The single selection (a `nodeId` in `open.root`), shared tree↔preview. */
   selectedNodeId: string | null;
   /**
+   * A ONE-SHOT request to focus the editable local-`id` field in the Properties
+   * panel, carrying the `nodeId` whose id field should take focus. Set by
+   * `addChildNode` for a freshly-created id-bearing element (Panel/Text/Component) so
+   * the user can immediately type its id; the Properties panel focuses+selects that
+   * field on render and dispatches `consumeIdFocus` to clear this. `null` the rest of
+   * the time. Ephemeral view state — never dirties, never serialized, not undoable.
+   */
+  pendingIdFocusNodeId: string | null;
+  /**
    * The `nodeId`s the user has LOCKED (task: element lock). A locked element
    * cannot be selected by clicking the preview and its properties are read-only
    * in the Properties panel — it is an editor-only protection, NOT part of the
@@ -224,6 +233,11 @@ export type EditorAction =
   | { type: "close" }
   /** Set the shared selection (tree click / preview click). */
   | { type: "select"; nodeId: string | null }
+  /**
+   * Clear the one-shot {@link EditorState.pendingIdFocusNodeId} after the Properties
+   * panel has focused the id field. Idempotent; carries no payload.
+   */
+  | { type: "consumeIdFocus" }
   /**
    * Toggle the LOCK on the node identified by `nodeId` (task: element lock). A
    * locked element cannot be selected from the preview and its properties are
@@ -387,6 +401,7 @@ export type EditorAction =
 const initialState: EditorState = {
   open: null,
   selectedNodeId: null,
+  pendingIdFocusNodeId: null,
   lockedNodeIds: new Set(),
   hiddenNodeIds: new Set(),
   activeTab: "view",
@@ -476,6 +491,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         open: action.component,
         selectedNodeId: null,
+        pendingIdFocusNodeId: null,
         // Seed locks from persisted structural keys (resolved by the caller against
         // the just-parsed tree); empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
@@ -491,7 +507,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // Clears the document and its history alike.
       return initialState;
     case "select":
-      return { ...state, selectedNodeId: action.nodeId };
+      // A manual selection (tree/preview click) is never an id-focus trigger, so drop
+      // any pending one-shot request rather than let it fire on the newly-picked node.
+      return { ...state, selectedNodeId: action.nodeId, pendingIdFocusNodeId: null };
+    case "consumeIdFocus":
+      return state.pendingIdFocusNodeId === null
+        ? state
+        : { ...state, pendingIdFocusNodeId: null };
     case "toggleLock": {
       // Editor-only view state: flip membership in the locked set immutably (a
       // fresh Set so the reference change drives a re-render). Never dirties and
@@ -556,6 +578,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // immediately — the user sees what they just added (nodeId is unchanged by
         // the auto-id, so this still points at the inserted node).
         selectedNodeId: child.nodeId,
+        // Request focus on the new element's id field so the user can immediately
+        // type/replace its auto-id — only for id-bearing tags (Panel/Text/Component);
+        // a <GridLayout> has no id field to focus. Consumed by the Properties panel.
+        pendingIdFocusNodeId: nodeHasId(child.tag) ? child.nodeId : null,
         dirty: true,
         // A discrete add is its own undo step (no coalescing).
         ...pushHistory(state, undefined),
@@ -705,6 +731,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Selection is pre-remapped by the caller (the new tree re-mints nodeIds,
         // so the old id is meaningless); `null` when the selected node is gone.
         selectedNodeId: action.selectedNodeId,
+        // The re-read tree re-mints nodeIds, so any pending id-focus request is stale.
+        pendingIdFocusNodeId: null,
         // The re-read tree re-mints nodeIds, so locks are re-resolved by the caller
         // from persisted structural keys; empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),

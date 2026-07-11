@@ -23,6 +23,7 @@ function openDoc(overrides: Partial<OpenComponent> = {}): OpenComponent {
 const CLEAN: EditorState = {
   open: null,
   selectedNodeId: null,
+  pendingIdFocusNodeId: null,
   lockedNodeIds: new Set(),
   hiddenNodeIds: new Set(),
   activeTab: "view",
@@ -218,6 +219,47 @@ describe("editorReducer", () => {
       child: { nodeId: "p", tag: "Panel", attrs: { id: "healthBar" }, children: [] },
     });
     expect(next.open?.root.children[0]?.attrs.id).toBe("healthBar");
+  });
+
+  it("addChildNode requests id-field focus for an id-bearing child (Panel/Text/Component)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    for (const tag of ["Panel", "Text", "Component"] as const) {
+      const next = editorReducer(s0, {
+        type: "addChildNode",
+        parentNodeId: "root",
+        child: { nodeId: `n-${tag}`, tag, attrs: {}, children: [] },
+      });
+      expect(next.pendingIdFocusNodeId).toBe(`n-${tag}`);
+    }
+  });
+
+  it("addChildNode does NOT request id-field focus for a <GridLayout> (no id field)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(s0, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "g", tag: "GridLayout", attrs: { rows: "1", columns: "1" }, children: [] },
+    });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+  });
+
+  it("consumeIdFocus clears a pending id-focus request (and no-ops when already null)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), pendingIdFocusNodeId: "p" };
+    const next = editorReducer(state, { type: "consumeIdFocus" });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+    // Already null → same reference (no needless re-render).
+    expect(editorReducer(next, { type: "consumeIdFocus" })).toBe(next);
+  });
+
+  it("select clears a pending id-focus request (a click is never a focus trigger)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), pendingIdFocusNodeId: "p" };
+    const next = editorReducer(state, { type: "select", nodeId: "root" });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+    expect(next.selectedNodeId).toBe("root");
   });
 
   it("addChildNode is a no-op (no dirty, no selection move) when the parent is missing", () => {

@@ -120,8 +120,6 @@ const BARE_TOKEN_EXCLUDED = new Set<string>([
   "id",
   "src",
   "controller",
-  "name",
-  "handler",
   ...MOUSE_HANDLER_ATTRS,
   ...FOCUS_HANDLER_ATTRS,
   MODAL_ATTR,
@@ -134,11 +132,9 @@ const CLEAN_BOOL = /^(true|false|1|0|yes|no)$/i;
 /** Matches each embedded `{token}` (mirrors guiBinding's interpolation grammar). */
 const EMBEDDED_TOKEN = /\{([^{}]+)\}/g;
 
-/** The handler-valued attribute names present on a node (Event uses `handler`). */
+/** The handler-valued attribute names present on a node. */
 function handlerAttrNames(node: GuiNode): string[] {
-  const names = HANDLER_ATTRS.filter((n) => n in node.attrs);
-  if (node.tag === "Event" && "handler" in node.attrs) names.push("handler");
-  return names;
+  return HANDLER_ATTRS.filter((n) => n in node.attrs);
 }
 
 /** Rule 1 + 2: braces in a handler are corruption (ERROR); an unknown name is soft (WARNING). */

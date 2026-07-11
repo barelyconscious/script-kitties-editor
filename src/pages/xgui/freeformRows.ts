@@ -72,7 +72,7 @@ function freeformNames(node: GuiNode): string[] {
   // `id` is special for every tag that has one; `src` is special on Component.
   // (We keep this in lockstep with guiProperties.specialAttrs — both exclude the
   // same set so a known/special attr never leaks into the freeform rows.)
-  const special = new Set<string>(node.tag === "Event" ? [] : ["id"]);
+  const special = new Set<string>(["id"]);
   if (node.tag === "Component") {
     special.add("src");
     // `data` is now a first-class schema field (kind `binding`) — excluded via the

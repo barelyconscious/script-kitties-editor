@@ -193,7 +193,7 @@ describe("fieldsForTag", () => {
   });
 
   it("does not list id or src among schema fields (handled specially)", () => {
-    for (const tag of ["View", "Panel", "Text", "Component", "Event"] as const) {
+    for (const tag of ["View", "Panel", "Text", "Component"] as const) {
       const names = fieldsForTag(tag).map((f) => f.name);
       expect(names).not.toContain("id");
       expect(names).not.toContain("src");
@@ -215,19 +215,6 @@ describe("fieldsForTag", () => {
     const layer = fields.find((f) => f.name === "layer");
     expect(layer).toBeDefined();
     expect(layer?.kind).toBe("text");
-  });
-
-  it("gives Event a plain-text name + a handler-kind handler (thin model)", () => {
-    // Events are edited in the Properties panel (the dedicated events panel is gone):
-    // name→handler, both verbatim literal strings. `name` is a plain literal; `handler`
-    // is kind `handler` (#504) so it shares the element handlers' controller-function
-    // dropdown — an Event handler is still a controller function name. Neither is
-    // grouped (Event has no Interaction section).
-    const fields = fieldsForTag("Event");
-    expect(fields.map((f) => f.name)).toEqual(["name", "handler"]);
-    expect(fields.find((f) => f.name === "name")?.kind).toBe("text");
-    expect(fields.find((f) => f.name === "handler")?.kind).toBe("handler");
-    expect(fields.every((f) => f.group === undefined)).toBe(true);
   });
 
   it("gives the root View a scopeName text field first, then an onKeyPressed handler", () => {
@@ -346,11 +333,9 @@ describe("interaction fields (B1)", () => {
     expect(names).toEqual(["onKeyPressed"]);
   });
 
-  it("does NOT add interaction fields to Event or GridLayout", () => {
-    for (const tag of ["Event", "GridLayout"] as const) {
-      const grouped = fieldsForTag(tag).filter((f) => f.group === INTERACTION_GROUP);
-      expect(grouped).toEqual([]);
-    }
+  it("does NOT add interaction fields to GridLayout", () => {
+    const grouped = fieldsForTag("GridLayout").filter((f) => f.group === INTERACTION_GROUP);
+    expect(grouped).toEqual([]);
   });
 
   it("the default (ungrouped) fields carry no group tag", () => {
@@ -427,17 +412,15 @@ describe("bindingDisplayValue", () => {
   });
 });
 
-describe("nodeHasId — id rows hidden for Event (475) and View", () => {
+describe("nodeHasId — id rows hidden for GridLayout and View", () => {
   it("child structural/visual tags have an id", () => {
     for (const tag of ["Panel", "Text", "Component"] as const) {
       expect(nodeHasId(tag)).toBe(true);
     }
   });
 
-  it("Event has NO id (only name + handler in Properties)", () => {
-    // Task 471 — events are addressed by name/handler, not a hierarchical id; the
-    // panel hides both the computed id and the editable id row for an Event.
-    expect(nodeHasId("Event")).toBe(false);
+  it("GridLayout has NO id (non-visual control element, not Lua-addressable)", () => {
+    expect(nodeHasId("GridLayout")).toBe(false);
   });
 
   it("the root View has NO id rows (no editable properties at all)", () => {
@@ -454,10 +437,10 @@ describe("nodeHasId — id rows hidden for Event (475) and View", () => {
 });
 
 describe("freeformAttrs", () => {
-  it("a stray id on an Event surfaces as freeform, not special (475)", () => {
-    // Event has no id, so `id` is not special for it — a stray authored `id` should
-    // appear as an editable freeform row rather than vanish silently.
-    const n = node("Event", { name: "onClick", handler: "doThing", id: "oops" });
+  it("a stray id on a GridLayout surfaces as freeform, not special", () => {
+    // GridLayout has no id row, so `id` is not special for it — a stray authored `id`
+    // should appear as an editable freeform row rather than vanish silently.
+    const n = node("GridLayout", { rows: "1", columns: "1", id: "oops" });
     expect(freeformAttrs(n)).toEqual(["id"]);
   });
 
@@ -608,9 +591,7 @@ describe("interactionHandlerFields", () => {
   });
 
   it("offers nothing for tags with no interaction handlers", () => {
-    // <Event> carries a `handler` field, but it is UNGROUPED (the event's own
-    // handler, not an interaction attr), so it is excluded; GridLayout has none.
-    expect(interactionHandlerFields("Event")).toEqual([]);
+    // GridLayout is a non-visual control element — no interaction handlers.
     expect(interactionHandlerFields("GridLayout")).toEqual([]);
   });
 });

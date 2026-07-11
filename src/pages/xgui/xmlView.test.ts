@@ -97,13 +97,13 @@ describe("XML view live derivation (task 476)", () => {
       nodeId: "root",
       tag: "View",
       attrs: {},
-      children: [{ nodeId: "evt", tag: "Event", attrs: { name: "onLoad" }, children: [] }],
+      children: [{ nodeId: "child", tag: "Panel", attrs: { id: "gone" }, children: [] }],
     };
     const state: EditorState = { ...CLEAN, open: openDoc(root) };
-    expect(liveXml(state)).toContain("<Event");
+    expect(liveXml(state)).toContain("<Panel");
 
-    const next = editorReducer(state, { type: "removeNode", nodeId: "evt" });
-    expect(liveXml(next)).not.toContain("<Event");
+    const next = editorReducer(state, { type: "removeNode", nodeId: "child" });
+    expect(liveXml(next)).not.toContain("<Panel");
   });
 
   it("never injects nodeId into the serialized XML", () => {

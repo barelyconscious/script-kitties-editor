@@ -148,18 +148,17 @@ export function isBoundField(value: string): boolean {
  * Whether a node of `tag` shows id rows in the Properties panel — i.e. whether the
  * panel should render the computed read-only id + the editable local id.
  *
- * `<Panel>`/`<Text>`/`<Component>` do. `<Event>` does NOT (task 471 — events are
- * addressed by `name`/`handler`, not a hierarchical id). `<GridLayout>` does NOT
- * either: it is a non-visual control element with no `id` and cannot be referenced
- * by Lua (the design's req 2) — keeping it id-less also keeps the missing-id
- * TriangleAlert from firing on it in the tree. The root `<View>` does NOT either:
- * it is the component itself, its `id` is auto-set on create, and the panel shows
- * it no editable properties at all (its `controller` is wired via the Controller
- * tab). Each still carries its `id` on the node where it has one — it's just not
- * edited here, and {@link computedId} still reads it to prefix descendants.
+ * `<Panel>`/`<Text>`/`<Component>` do. `<GridLayout>` does NOT: it is a non-visual
+ * control element with no `id` and cannot be referenced by Lua (the design's req 2) —
+ * keeping it id-less also keeps the missing-id TriangleAlert from firing on it in the
+ * tree. The root `<View>` does NOT either: it is the component itself, its `id` is
+ * auto-set on create, and the panel shows it no editable properties at all (its
+ * `controller` is wired via the Controller tab). Each still carries its `id` on the
+ * node where it has one — it's just not edited here, and {@link computedId} still
+ * reads it to prefix descendants.
  */
 export function nodeHasId(tag: GuiTag): boolean {
-  return tag !== "Event" && tag !== "View" && tag !== "GridLayout";
+  return tag !== "View" && tag !== "GridLayout";
 }
 
 // ---------------------------------------------------------------------------
@@ -404,15 +403,6 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
         { name: "layer", label: "layer", kind: "text" },
         ...INTERACTION_FIELDS,
       ];
-    case "Event":
-      // The `handler` names a controller function (fired with the event payload at
-      // call time), so it gets the SAME controller-function dropdown as the element
-      // interaction handlers (#504) — a literal-only name, warn-on-unknown. `name` is
-      // the event key the runtime dispatches on, a plain literal.
-      return [
-        { name: "name", label: "name", kind: "text" },
-        { name: "handler", label: "handler", kind: "handler" },
-      ];
     case "GridLayout":
       // A non-visual control element: no id, no position/size of its OWN (the grid
       // fills its parent). `dataCollection` is a whole-value BINDING
@@ -447,9 +437,8 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
  * handlers grouped under {@link INTERACTION_GROUP} in the per-tag schema. Derived
  * FROM the schema (not a re-listed set of attr names) so the structure tree's
  * "Add handler" menu and the Properties panel never drift: whatever handlers a tag
- * shows in the panel are exactly the ones the menu offers. Excludes the `<Event>`
- * `handler` (it is ungrouped — the event's own handler, not an interaction attr),
- * so `<Event>`/`<GridLayout>` return an empty list.
+ * shows in the panel are exactly the ones the menu offers. Only the interaction-group
+ * handlers count, so `<GridLayout>` returns an empty list.
  */
 export function interactionHandlerFields(tag: GuiTag): PropertyField[] {
   return fieldsForTag(tag).filter((f) => f.kind === "handler" && f.group === INTERACTION_GROUP);
@@ -462,9 +451,9 @@ export function interactionHandlerFields(tag: GuiTag): PropertyField[] {
  * a freeform override.
  */
 function specialAttrs(tag: GuiTag): Set<string> {
-  // `id` is special only for tags that HAVE an id row (475): an `<Event>` shows no
-  // id rows, so a stray `id` attr on one should surface as a freeform row rather
-  // than vanish.
+  // `id` is special only for tags that HAVE an id row (475): a tag that shows no id
+  // rows (e.g. `<GridLayout>`) should surface a stray `id` attr as a freeform row
+  // rather than let it vanish.
   const special = new Set<string>(nodeHasId(tag) ? ["id"] : []);
   if (tag === "Component") {
     special.add("src");

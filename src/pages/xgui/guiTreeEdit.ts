@@ -16,32 +16,21 @@
  * immutable transform returning a fresh root; the store wraps them with dirty/history.
  *
  * @see design/xgui_ta.md — "Structure column" (the tree slice) and "XML Elements"
- *   (the element rules: View top-level, Event only under View, Component childless).
+ *   (the element rules: View top-level, Component childless).
  */
 
 import { type GuiNode, type GuiTag, mintNodeId } from "../../lib/guiNode";
 import type { GuiFolder } from "./guiTree";
 
-/** The placeholder shown for an `<Event>` row whose `name` attr is empty. */
-export const EVENT_PLACEHOLDER_LABEL = "(event)";
-
 /**
- * The secondary label for a tree row, beside its tag chip:
- *  - `<Event>` nodes have NO `id` (events are name→handler, not id'd), so they are
- *    labeled by their `name` attribute — falling back to {@link EVENT_PLACEHOLDER_LABEL}
- *    when the name is blank/whitespace so a freshly-added event is still visible and
- *    selectable in the tree.
- *  - Every other tag keeps its authored `id` (trimmed) as the secondary label, or
- *    `null` when it has none (the panel then shows just the tag chip).
+ * The secondary label for a tree row, beside its tag chip: the element's authored
+ * `id` (trimmed) when present, or `null` when it has none (the panel then shows just
+ * the tag chip).
  *
  * Pure (no React) so the labeling rule is unit-tested without rendering the tree;
  * the {@link StructureTree} row is a thin consumer of this.
  */
 export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | null } {
-  if (node.tag === "Event") {
-    const name = node.attrs.name?.trim();
-    return { tag: node.tag, secondary: name ? name : EVENT_PLACEHOLDER_LABEL };
-  }
   const id = node.attrs.id?.trim();
   return { tag: node.tag, secondary: id ? id : null };
 }
@@ -49,22 +38,14 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
 /**
  * The PRIMARY label a tree row shows — the element's IDENTITY rather than its tag
  * (the tag is conveyed by the row's per-tag icon + color), so e.g. a `<Panel
- * id="Panel1">` reads as `Panel1`, not `Panel`:
- *  - `<Event>` has no id (events are name→handler), so it labels by its `name`,
- *    falling back to {@link EVENT_PLACEHOLDER_LABEL} (flagged `placeholder`) when blank;
- *  - every other tag labels by its authored `id` (trimmed) when present, and falls
- *    back to the bare tag name when it has none — so the row is never empty (an idless
- *    id-bearing element is additionally flagged by the tree's missing-id warning).
+ * id="Panel1">` reads as `Panel1`, not `Panel`. A tag labels by its authored `id`
+ * (trimmed) when present, and falls back to the bare tag name when it has none — so
+ * the row is never empty (an idless id-bearing element is additionally flagged by the
+ * tree's missing-id warning).
  *
  * Pure (no React) so the labeling rule is unit-tested without rendering the tree.
  */
 export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder: boolean } {
-  if (node.tag === "Event") {
-    const name = node.attrs.name?.trim();
-    return name
-      ? { text: name, placeholder: false }
-      : { text: EVENT_PLACEHOLDER_LABEL, placeholder: true };
-  }
   const id = node.attrs.id?.trim();
   return id ? { text: id, placeholder: false } : { text: node.tag, placeholder: false };
 }
@@ -82,28 +63,20 @@ export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder
  *    children"), so its allow-list is empty.
  *  - `<Text>` is a LEAF — it carries text content and cannot hold children (nesting
  *    under it is a runtime parse error), so its allow-list is empty too.
- *  - `<Event>` may appear ONLY as an immediate child of `<View>`, so it is offered
- *    under `View` and nowhere else.
- *  - `<Panel>` is an ordinary visual container: it may hold `<Panel>`/`<Text>`/
- *    `<Component>` and a single `<GridLayout>` (only when it doesn't ALREADY contain
- *    one — a grid fills its container, so sibling grids are meaningless). `<View>`
- *    holds the same plus the View-only `<Event>`.
+ *  - `<Panel>` and `<View>` are ordinary visual containers: they may hold `<Panel>`/
+ *    `<Text>`/`<Component>` and a single `<GridLayout>` (only when they don't ALREADY
+ *    contain one — a grid fills its container, so sibling grids are meaningless).
  *  - `<GridLayout>` repeats a SINGLE child of tag Panel/Text/Component — so it
  *    offers those three ONLY while it is empty, and offers NOTHING once it has its
  *    one child (no `+`).
  *
- * Returned in a stable, human-sensible order (containers first, then GridLayout,
- * then Event) so the context menu reads the same every time.
+ * Returned in a stable, human-sensible order (containers first, then GridLayout) so
+ * the context menu reads the same every time.
  */
 export function allowedChildTags(parent: GuiNode): GuiTag[] {
   const hasGrid = parent.children.some((c) => c.tag === "GridLayout");
   switch (parent.tag) {
     case "View":
-      // Visual children plus the View-only <Event> and nestable <Component>; a
-      // single <GridLayout> when one isn't already present.
-      return hasGrid
-        ? ["Panel", "Text", "Component", "Event"]
-        : ["Panel", "Text", "Component", "GridLayout", "Event"];
     case "Panel":
       // Visual container: any box-producing child plus a single <GridLayout>.
       return hasGrid
@@ -117,8 +90,7 @@ export function allowedChildTags(parent: GuiNode): GuiTag[] {
       // A grid repeats ONE child; offer its legal child tags only while empty.
       return parent.children.length === 0 ? ["Panel", "Text", "Component"] : [];
     case "Component":
-    case "Event":
-      // <Component> is childless by rule; <Event> is a leaf registration.
+      // <Component> is childless by rule.
       return [];
     default: {
       const _never: never = parent.tag;
@@ -144,7 +116,6 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  *    placeholder `text` so it paints something.
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
- *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
  *  - `<GridLayout>` gets `rows="1"`/`columns="1"` (the documented defaults);
  *    `gutter` defaults to "0,0" at render time so it need not be written, and
  *    `dataCollection` is left empty for the user to fill. A grid is a non-visual
@@ -158,8 +129,8 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  * `id` is left UNSET here — the auto-id (`Panel1`, `Text2`, …) is assigned at
  * INSERTION time by the store's `addChildNode` action (which needs the whole tree
  * to pick a free running number), not minted in this per-node factory. The user
- * then renames it in the Properties panel (F9b). `<Event>`, `<GridLayout>`, and the
- * root `<View>` get no auto-id (see {@link nextAutoId} / {@link nodeHasId}).
+ * then renames it in the Properties panel (F9b). `<GridLayout>` and the root `<View>`
+ * get no auto-id (see {@link nextAutoId} / {@link nodeHasId}).
  */
 export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): GuiNode {
   const node: GuiNode = { nodeId: mintNodeId(), tag, attrs: {}, children: [] };
@@ -178,9 +149,6 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
       node.attrs = underGrid
         ? { src: src ?? "" }
         : { src: src ?? "", position: "0,0,0,0", size: "0,0,100,100" };
-      break;
-    case "Event":
-      node.attrs = { name: "", handler: "" };
       break;
     case "GridLayout":
       // Non-visual control element: documented defaults, no geometry, no id.
@@ -214,8 +182,8 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
  * explicit `Panel7` pushes the next number past 7.
  *
  * This computes the value only; the store's `addChildNode` decides WHICH tags get
- * one (id-bearing tags — not `<Event>`, `<GridLayout>`, or the root `<View>`) and
- * assigns it at insertion time, when the whole tree is in hand.
+ * one (id-bearing tags — not `<GridLayout>` or the root `<View>`) and assigns it at
+ * insertion time, when the whole tree is in hand.
  */
 export function nextAutoId(root: GuiNode, tag: GuiTag): string {
   let max = 0;
@@ -298,9 +266,9 @@ export function setNodeAttrs(
  * reference as a no-op (don't dirty on a phantom remove).
  *
  * The structure TREE exposes this on every non-root row (right-click "Delete" /
- * the inline trash button) — removing the element and its whole subtree. `<Event>`
- * removal is one case of this general delete. This function is the shared immutable
- * primitive; root-protection lives here (a root `nodeId` is a no-op).
+ * the inline trash button) — removing the element and its whole subtree. This
+ * function is the shared immutable primitive; root-protection lives here (a root
+ * `nodeId` is a no-op).
  */
 export function removeNode(root: GuiNode, nodeId: string): GuiNode {
   // The root is never removable — only descendants.
@@ -372,8 +340,8 @@ function insertChildAt(
  * This function is MECHANICAL: it guards only against structurally-impossible moves
  * (unknown node/target, moving the root, or a cycle where the target is the node or
  * one of its descendants), returning the original root unchanged for those. The
- * element-RULE legality (allow-lists, one-grid, Event-only-under-View, self-exclusion)
- * lives in {@link canMoveTo}; the store validates with that BEFORE calling this.
+ * element-RULE legality (allow-lists, one-grid, self-exclusion) lives in
+ * {@link canMoveTo}; the store validates with that BEFORE calling this.
  */
 export function moveNode(
   root: GuiNode,
@@ -409,9 +377,9 @@ export function moveNode(
  * Whether the node identified by `nodeId` may be MOVED to become a child of
  * `targetParentId` — the drop-legality predicate behind the structure tree's
  * drag-and-drop. Built ON {@link allowedChildTags} / {@link canAddChild} (so every
- * element rule — one-grid-per-container, `<Event>` only under `<View>`, leaves reject
- * children, an occupied `<GridLayout>` takes nothing) plus three rules the add-child
- * allow-list cannot express:
+ * element rule — one-grid-per-container, leaves reject children, an occupied
+ * `<GridLayout>` takes nothing) plus three rules the add-child allow-list cannot
+ * express:
  *
  *  - NO-CYCLE — the target may not be the node itself nor any descendant of it (you
  *    cannot drop a subtree inside itself).
@@ -478,8 +446,8 @@ function uniqueCopyId(baseId: string, usedIds: ReadonlySet<string>): string {
  * to a unique `{id}-copy` (preserving the editor's tree-wide-unique-id invariant).
  * `usedIds` is mutated as ids are claimed so sibling/descendant clones stay distinct.
  *
- * Id-less nodes (`<Event>`, `<GridLayout>`, or a node whose `id` is blank) are left
- * as-is. Controller code and binding tokens that referenced the old id are NOT
+ * Id-less nodes (`<GridLayout>`, or a node whose `id` is blank) are left as-is.
+ * Controller code and binding tokens that referenced the old id are NOT
  * rewritten — the editor is deliberately thin about runtime semantics, so a
  * duplicated `Panel1`→`Panel1-copy` leaving the controller knowing only `Panel1` is
  * the same expected outcome as adding any fresh element.

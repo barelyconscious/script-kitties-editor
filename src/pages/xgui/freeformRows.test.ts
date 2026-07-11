@@ -47,11 +47,6 @@ describe("deriveRows", () => {
     expect(deriveRows(n).map((r) => r.name)).toEqual(["custom"]);
   });
 
-  it("treats a stray id on an Event as freeform (Event has no id)", () => {
-    const n = node("Event", { name: "onClick", handler: "doThing", id: "oops" });
-    expect(deriveRows(n).map((r) => r.name)).toEqual(["id"]);
-  });
-
   it("returns no rows for a node with only known/special attrs", () => {
     expect(deriveRows(node("Component", { id: "c", src: "x", position: "0,0,0,0" }))).toEqual([]);
   });

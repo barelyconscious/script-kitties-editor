@@ -40,12 +40,9 @@
  *    replace lives in the pure `guiTreeEdit.setNodeAttrs` so it is unit-tested
  *    off-store). A nodeId that is not found is a no-op (no dirty). F7 (drag)
  *    writes a moved node's `position` through this SAME action.
- *  • F9c (events) — `<Event>` children of `<View>` are ordinary nodes in `root`,
- *    so ADD flows through the same `addChildNode` action as F9a, and REMOVE uses
- *    the `removeNode` action (the immutable detach lives in the pure
- *    `guiTreeEdit.removeNode`). The structure TREE is the only caller of
- *    `removeNode` today — and only for `<Event>` rows — so general tree delete
- *    stays deferred.
+ *  • Tree delete — REMOVE uses the `removeNode` action (the immutable detach lives
+ *    in the pure `guiTreeEdit.removeNode`), driven from the structure tree's per-row
+ *    delete affordance, which removes the element and its whole subtree.
  *  • F10 (controller tab) — `activeTab` toggles View/Controller. The controller
  *    TEXT lives in `open.controllerText` (`null` = not-yet-loaded). Three actions
  *    feed it: `loadControllerText` seats disk contents WITHOUT dirtying (the tab
@@ -534,7 +531,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // Auto-assign a working local id (`Panel1`, `Text2`, …) so every added
       // element is addressable from the controller/bindings the instant it exists
       // — the user renames it in Properties. Only id-bearing tags get one
-      // (`<Event>` is name→handler, the root `<View>` is the component itself), and
+      // (not `<GridLayout>`; the root `<View>` is the component itself), and
       // only when the child doesn't already carry an explicit id. Assigned HERE,
       // not in `makeChildNode`, because picking a free running number needs the
       // whole tree. `id` goes FIRST in attrs so the serialized XML reads naturally.

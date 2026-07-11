@@ -76,7 +76,7 @@ describe("resolveLayer", () => {
 });
 
 describe("flattenBoxes — document order + sibling-group structure", () => {
-  it("walks visual boxes in pre-order (document order) and skips the View + Event", () => {
+  it("walks visual boxes in pre-order (document order); the View is the stage and <Event> is dropped at parse", () => {
     const { root, nodeId } = parse(`
       <View>
         <Event name="OnX" handler="h"/>
@@ -89,7 +89,7 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
     `);
     const boxes = flattenBoxes(root);
     const aKey = makeBoxKey("", nodeId("a"));
-    // View is the stage (not a box); Event is non-visual. a, a1, a2, b in order.
+    // View is the stage (not a box); the <Event> was ignored at parse. a, a1, a2, b in order.
     expect(boxes.map((box) => box.boxKey)).toEqual([
       aKey,
       makeBoxKey(aKey, nodeId("a1")),

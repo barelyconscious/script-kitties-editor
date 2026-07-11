@@ -10,17 +10,16 @@
  *
  * Add child: right-clicking a row opens a context menu offering only the tags the
  * element rules permit under that node ({@link allowedChildTags} — Component is
- * childless, Event only under View). Picking a non-Component tag dispatches
- * `addChildNode` immediately; picking Component opens the {@link ComponentPicker}
- * and adds once the user chooses a basename for `src`. Both mutate the store's tree
- * (so the preview updates) and select the new node.
+ * childless). Picking a non-Component tag dispatches `addChildNode` immediately;
+ * picking Component opens the {@link ComponentPicker} and adds once the user chooses
+ * a basename for `src`. Both mutate the store's tree (so the preview updates) and
+ * select the new node.
  *
  * Delete: every NON-ROOT row carries a delete affordance (right-click "Delete" /
  * an inline trash button) wired to the store's `removeNode` action, which removes
  * the element AND its whole subtree. The root `<View>` is never deletable. Deletion
  * goes through the document history, so Cmd+Z restores it; a selection the removal
- * orphans is cleared by the reducer. `<Event>` rows are just one case of this
- * general delete (their affordance reads "Remove event").
+ * orphans is cleared by the reducer.
  *
  * @see design/xgui_ta.md — "Structure column" (tree slice) and "Selection model".
  */
@@ -43,7 +42,6 @@ import {
   Trash2,
   TriangleAlert,
   Type,
-  Zap,
 } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -119,9 +117,9 @@ function useTooltipComponentRoots(root: GuiNode | null): (tooltipRef: string) =>
 
 /**
  * Per-tag accent color, shared by a row's type icon and its identity label so the
- * element kind reads at a glance. The colored tags (View/Component/Event/Grid) keep
- * their accent; Panel/Text fall back to plain foreground so their id stays readable
- * as the primary label.
+ * element kind reads at a glance. The colored tags (View/Component/Grid) keep their
+ * accent; Panel/Text fall back to plain foreground so their id stays readable as the
+ * primary label.
  */
 function tagColorClass(tag: GuiTag): string {
   switch (tag) {
@@ -132,8 +130,6 @@ function tagColorClass(tag: GuiTag): string {
       // colliding with a semantic color (amber = missing-id warning; plain green =
       // "added" in a diff/VCS).
       return "text-[#86e3c6]";
-    case "Event":
-      return "text-sky-400";
     case "GridLayout":
       return "text-violet-400";
     default:
@@ -149,7 +145,6 @@ const TAG_ICON: Record<GuiTag, LucideIcon> = {
   Panel: AppWindow,
   Text: Type,
   Component: Plug,
-  Event: Zap,
   GridLayout: LayoutGrid,
 };
 
@@ -459,8 +454,6 @@ export function StructureTree() {
     //                       onMouseMoved / onFocus / onBlur)  -> function(self, mouse)
     //   • key handler     (onKeyPressed)                      -> function(self, input)
     //                       — the 2nd arg is NOT yet frozen engine-side
-    //   • <Event> handlers (<Event handler="...">)            -> function(payload)
-    //                       — no `self`
     // NEVER emit the aspirational (mouse, targetId, targetItemData, currentId) 4-arg
     // form — that signature ships nowhere.
   };
@@ -593,17 +586,16 @@ function TreeRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const hasChildren = node.children.length > 0;
   const tag = node.tag;
-  // The row's PRIMARY label is the element's identity (id, or event name), replacing
-  // the tag name — the tag is conveyed by the per-tag icon + color instead.
-  const { text: label, placeholder: labelPlaceholder } = treeNodePrimaryLabel(node);
-  const isEvent = tag === "Event";
+  // The row's PRIMARY label is the element's identity (its id), replacing the tag
+  // name — the tag is conveyed by the per-tag icon + color instead.
+  const { text: label } = treeNodePrimaryLabel(node);
   const TagIcon = TAG_ICON[tag];
   const selected = node.nodeId === selectedNodeId;
   // Flag an id-bearing element (Panel/Text/Component) that has no `id`: it can't be
   // referenced from the controller or data bindings, and won't appear in any
   // descendant's computed id path. Newly-added elements are auto-id'd, so this only
   // lights up for imported components or an id the user deliberately cleared — which
-  // keeps the warning rare enough to stay trustworthy. Events/View never carry an id.
+  // keeps the warning rare enough to stay trustworthy. The View never carries an id.
   const missingId = nodeHasId(tag) && !node.attrs.id?.trim();
   // Interaction lints on this node (task 506) — rendered as a badge on the row.
   // Never blocks anything; purely advisory.
@@ -612,10 +604,10 @@ function TreeRow({
   // The interaction handlers this node can still gain — the tag's schema handlers
   // (from guiProperties, not a re-listed set) minus the ones already on the node, so
   // "Add handler" only offers unwired ones. Empty for tags with no interaction
-  // handlers (`<Event>`/`<GridLayout>`), which hides the submenu.
+  // handlers (`<GridLayout>`), which hides the submenu.
   const addableHandlers = interactionHandlerFields(tag).filter((f) => !(f.name in node.attrs));
   // Every non-root element is deletable (the root `<View>` is rendered at depth 0
-  // and is never removable). Events are just one case of this general delete.
+  // and is never removable).
   const removable = depth > 0;
   // Whether this row can be duplicated — asked of the shared predicate, never
   // re-derived here. False for the root `<View>`, the sole child of a `<GridLayout>`,
@@ -724,13 +716,7 @@ function TreeRow({
                   <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
                 )}
                 <span
-                  className={cn(
-                    "min-w-0 truncate font-medium font-mono",
-                    tagColorClass(tag),
-                    // An unnamed event's placeholder reads muted/italic so an empty
-                    // event is clearly a stub waiting for a name.
-                    isEvent && labelPlaceholder && "text-muted-foreground/60 italic",
-                  )}
+                  className={cn("min-w-0 truncate font-medium font-mono", tagColorClass(tag))}
                 >
                   {label}
                 </span>
@@ -813,11 +799,7 @@ function TreeRow({
                   <TagIcon className={cn("size-3 shrink-0", tagColorClass(tag))} />
                 )}
                 <span
-                  className={cn(
-                    "min-w-0 truncate font-medium font-mono",
-                    tagColorClass(tag),
-                    isEvent && labelPlaceholder && "text-muted-foreground/60 italic",
-                  )}
+                  className={cn("min-w-0 truncate font-medium font-mono", tagColorClass(tag))}
                 >
                   {label}
                 </span>
@@ -915,7 +897,7 @@ function TreeRow({
                   onSelect={() => onRemove(node.nodeId)}
                   className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-destructive outline-none data-[highlighted]:bg-muted"
                 >
-                  <Trash2 className="size-3" /> {isEvent ? "Remove event" : "Delete"}
+                  <Trash2 className="size-3" /> Delete
                 </ContextMenu.Item>
               )}
             </ContextMenu.Content>

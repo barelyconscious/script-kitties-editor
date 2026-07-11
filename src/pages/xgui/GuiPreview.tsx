@@ -91,7 +91,7 @@ import {
 /** The DOM attribute marking a `<Component>` mount's missing/recursive placeholder. */
 export const PLACEHOLDER_ATTR = "data-gui-placeholder";
 
-/** A box-producing element tag. `View` is the stage; `Event` is non-visual. */
+/** A box-producing element tag. `View` is the stage; `GridLayout` is non-visual. */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
 }

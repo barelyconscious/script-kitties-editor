@@ -9,7 +9,6 @@ import {
   canMoveTo,
   componentPickItems,
   duplicateNode,
-  EVENT_PLACEHOLDER_LABEL,
   filterPickItems,
   findNode,
   makeChildNode,
@@ -98,20 +97,18 @@ describe("nextAutoId — running auto-id for newly-added elements", () => {
 });
 
 describe("allowedChildTags / canAddChild — element rules (children-aware)", () => {
-  it("an empty View accepts Panel, Text, Component, GridLayout, and Event", () => {
+  it("an empty View accepts Panel, Text, Component, and GridLayout", () => {
     expect(allowedChildTags(node("v", "View"))).toEqual([
       "Panel",
       "Text",
       "Component",
       "GridLayout",
-      "Event",
     ]);
   });
 
-  it("an empty Panel accepts boxes plus a GridLayout, but NOT Event (Event is View-only)", () => {
+  it("an empty Panel accepts boxes plus a GridLayout", () => {
     const panel = node("p", "Panel");
     expect(allowedChildTags(panel)).toEqual(["Panel", "Text", "Component", "GridLayout"]);
-    expect(canAddChild(panel, "Event")).toBe(false);
   });
 
   it("Text is a leaf — no children (nesting under a Text is a runtime parse error)", () => {
@@ -121,7 +118,6 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(text, "Text")).toBe(false);
     expect(canAddChild(text, "Component")).toBe(false);
     expect(canAddChild(text, "GridLayout")).toBe(false);
-    expect(canAddChild(text, "Event")).toBe(false);
   });
 
   it("Component cannot have children", () => {
@@ -129,20 +125,10 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(node("c", "Component"), "Panel")).toBe(false);
   });
 
-  it("Event is a leaf — no children", () => {
-    expect(allowedChildTags(node("e", "Event"))).toEqual([]);
-  });
-
   it("View is never offered as a child of anything (top-level only)", () => {
-    for (const tag of ["View", "Panel", "Text", "Component", "Event", "GridLayout"] as GuiTag[]) {
+    for (const tag of ["View", "Panel", "Text", "Component", "GridLayout"] as GuiTag[]) {
       expect(allowedChildTags(node("x", tag))).not.toContain("View");
     }
-  });
-
-  it("Event is allowed only under View", () => {
-    expect(canAddChild(node("v", "View"), "Event")).toBe(true);
-    expect(canAddChild(node("p", "Panel"), "Event")).toBe(false);
-    expect(canAddChild(node("c", "Component"), "Event")).toBe(false);
   });
 
   it("a Panel/View that ALREADY contains a GridLayout no longer offers GridLayout", () => {
@@ -151,7 +137,7 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(panelWithGrid, "GridLayout")).toBe(false);
 
     const viewWithGrid = node("v", "View", [node("g", "GridLayout")]);
-    expect(allowedChildTags(viewWithGrid)).toEqual(["Panel", "Text", "Component", "Event"]);
+    expect(allowedChildTags(viewWithGrid)).toEqual(["Panel", "Text", "Component"]);
     expect(canAddChild(viewWithGrid, "GridLayout")).toBe(false);
   });
 
@@ -171,45 +157,26 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
 });
 
 describe("nodeLabel — tree row labeling", () => {
-  it("labels an <Event> by its name attribute (events have no id)", () => {
-    const ev = nodeWith("Event", { name: "Battle:OnCreatureDied", handler: "onDied" });
-    expect(nodeLabel(ev)).toEqual({ tag: "Event", secondary: "Battle:OnCreatureDied" });
-  });
-
-  it("uses the placeholder when an <Event> name is empty or whitespace", () => {
-    expect(nodeLabel(nodeWith("Event", { name: "", handler: "" })).secondary).toBe(
-      EVENT_PLACEHOLDER_LABEL,
-    );
-    expect(nodeLabel(nodeWith("Event", { name: "   " })).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
-    // A missing name attr (not just empty) also falls back to the placeholder.
-    expect(nodeLabel(nodeWith("Event", {})).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
-  });
-
-  it("ignores an <Event> id even if one is somehow present (events label by name)", () => {
-    const ev = nodeWith("Event", { id: "evt1", name: "Tick" });
-    expect(nodeLabel(ev).secondary).toBe("Tick");
-  });
-
-  it("labels non-Event tags by their trimmed id", () => {
+  it("labels a tag by its trimmed id", () => {
     expect(nodeLabel(nodeWith("Panel", { id: "  stats " })).secondary).toBe("stats");
     expect(nodeLabel(nodeWith("View", { id: "view" }))).toEqual({ tag: "View", secondary: "view" });
   });
 
-  it("gives a non-Event node with no id a null secondary label", () => {
+  it("gives a node with no id a null secondary label", () => {
     expect(nodeLabel(nodeWith("Panel", {})).secondary).toBeNull();
     expect(nodeLabel(nodeWith("Text", { id: "  " })).secondary).toBeNull();
   });
 });
 
 describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
-  it("labels a non-Event node by its trimmed id (replacing the tag name)", () => {
+  it("labels a node by its trimmed id (replacing the tag name)", () => {
     expect(treeNodePrimaryLabel(nodeWith("Panel", { id: " Panel1 " }))).toEqual({
       text: "Panel1",
       placeholder: false,
     });
   });
 
-  it("falls back to the bare tag name when a non-Event node has no id", () => {
+  it("falls back to the bare tag name when a node has no id", () => {
     expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({
       text: "Panel",
       placeholder: false,
@@ -217,17 +184,6 @@ describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
     expect(treeNodePrimaryLabel(nodeWith("Text", { id: "  " }))).toEqual({
       text: "Text",
       placeholder: false,
-    });
-  });
-
-  it("labels an <Event> by its name, flagging the placeholder when blank", () => {
-    expect(treeNodePrimaryLabel(nodeWith("Event", { name: "Tick" }))).toEqual({
-      text: "Tick",
-      placeholder: false,
-    });
-    expect(treeNodePrimaryLabel(nodeWith("Event", {}))).toEqual({
-      text: EVENT_PLACEHOLDER_LABEL,
-      placeholder: true,
     });
   });
 });
@@ -260,11 +216,6 @@ describe("makeChildNode", () => {
 
   it("Component defaults src to empty when none supplied", () => {
     expect(makeChildNode("Component").attrs.src).toBe("");
-  });
-
-  it("Event gets empty name/handler for the Events slice to fill", () => {
-    const n = makeChildNode("Event");
-    expect(n.attrs).toEqual({ name: "", handler: "" });
   });
 
   it("does NOT auto-set the local id attribute (user chooses it in Properties)", () => {
@@ -409,12 +360,12 @@ describe("setNodeAttrs — immutable attr replace", () => {
   });
 });
 
-describe("removeNode — immutable detach (F9c Event delete)", () => {
+describe("removeNode — immutable detach (tree delete)", () => {
   it("removes a matching child, preserving sibling order", () => {
     const root = node("root", "View", [
-      node("e1", "Event"),
-      node("e2", "Event"),
-      node("e3", "Event"),
+      node("e1", "Panel"),
+      node("e2", "Panel"),
+      node("e3", "Panel"),
     ]);
     const next = removeNode(root, "e2");
     expect(next.children.map((c) => c.nodeId)).toEqual(["e1", "e3"]);
@@ -717,22 +668,14 @@ describe("canMoveTo — drop-legality predicate", () => {
     expect(canMoveTo(root, "panelA", "full")).toBe(false);
   });
 
-  it("allows an Event only under the View, never under a Panel", () => {
-    const root = node("root", "View", [node("p", "Panel"), node("e", "Event")]);
-    expect(canMoveTo(root, "e", "root")).toBe(true); // self-exclusion: reorder under View
-    expect(canMoveTo(root, "e", "p")).toBe(false); // Event not allowed under Panel
-  });
-
-  it("rejects any child under a leaf (Text / Component / Event)", () => {
+  it("rejects any child under a leaf (Text / Component)", () => {
     const root = node("root", "View", [
       node("t", "Text"),
       node("c", "Component"),
-      node("e", "Event"),
       node("p", "Panel"),
     ]);
     expect(canMoveTo(root, "p", "t")).toBe(false);
     expect(canMoveTo(root, "p", "c")).toBe(false);
-    expect(canMoveTo(root, "p", "e")).toBe(false);
   });
 
   it("rejects an unknown node or an unknown target", () => {
@@ -884,17 +827,17 @@ describe("duplicateNode — clone a subtree as the next sibling", () => {
     expect(grid.children[0].attrs.id).toBe("Cell1-copy");
   });
 
-  it("duplicates an id-less <Event>, copying its attrs verbatim and minting a fresh nodeId", () => {
-    const ev: GuiNode = {
+  it("duplicates an id-less node, copying its attrs verbatim and minting a fresh nodeId", () => {
+    const panel: GuiNode = {
       nodeId: "e",
-      tag: "Event",
-      attrs: { name: "Tick", handler: "onTick" },
+      tag: "Panel",
+      attrs: { position: "0,0,0,0", size: "1,1,0,0" },
       children: [],
     };
-    const root = node("root", "View", [ev]);
+    const root = node("root", "View", [panel]);
     const clone = duplicateNode(root, "e").children[1];
-    expect(clone.tag).toBe("Event");
-    expect(clone.attrs).toEqual({ name: "Tick", handler: "onTick" }); // no id added
+    expect(clone.tag).toBe("Panel");
+    expect(clone.attrs).toEqual({ position: "0,0,0,0", size: "1,1,0,0" }); // no id added
     expect(clone.nodeId).not.toBe("e");
   });
 });
@@ -914,11 +857,6 @@ describe("canDuplicate — duplicate-legality predicate", () => {
     const root = node("root", "View", [node("p", "Panel", [node("t", "Text")])]);
     expect(canDuplicate(root, "p")).toBe(true);
     expect(canDuplicate(root, "t")).toBe(true);
-  });
-
-  it("allows duplicating an <Event> under the View", () => {
-    const root = node("root", "View", [node("e", "Event")]);
-    expect(canDuplicate(root, "e")).toBe(true);
   });
 
   it("rejects the sole child of a GridLayout (a grid holds exactly one child)", () => {

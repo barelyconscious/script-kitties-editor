@@ -61,11 +61,6 @@ describe("handler lints (rule 1 + 2)", () => {
     expect(lint(node("Panel", { onMouseClicked: "" }))).toEqual([]);
   });
 
-  it("checks the Event handler attr too", () => {
-    const lints = lint(node("Event", { name: "x", handler: "{bad}" }));
-    expect(find(lints, "handler", "error")).toBeDefined();
-  });
-
   it("warns when a handler name is absent from the controller exports", () => {
     const ctx: LintContext = { exportedFunctions: ["onOpen"], resolveComponent: () => null };
     const lints = lint(node("Panel", { onMouseClicked: "onClose" }), ctx);

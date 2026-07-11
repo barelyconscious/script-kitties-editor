@@ -68,14 +68,10 @@ describe("parseGui + serializeGui round-trip", () => {
     expect(root.tag).toBe("View");
     expect(root.attrs).toEqual({ controller: "bag_controller.lua" });
 
-    // Two Events as immediate children of View, then the root Panel.
-    const [ev1, ev2, rootPanel] = root.children;
-    expect(ev1).toMatchObject({ tag: "Event", attrs: { name: "OnItemSold", handler: "refresh" } });
-    expect(ev2).toMatchObject({
-      tag: "Event",
-      attrs: { name: "OnItemBought", handler: "refresh" },
-    });
-
+    // The two <Event> children are IGNORED (dropped at parse) — the root Panel is the
+    // View's only surviving child.
+    expect(root.children).toHaveLength(1);
+    const [rootPanel] = root.children;
     expect(rootPanel.tag).toBe("Panel");
     expect(rootPanel.attrs).toEqual({
       id: "root",
@@ -195,11 +191,11 @@ describe("nodeId", () => {
       n.children.forEach(visit);
     };
     visit(root);
-    // 1 View + 2 Events + 1 Panel + (1 Component + 1 Text + 1 Panel + 3 Components)
-    //   + (moneyBg: 1 Panel + 2 Text) = 13 nodes.
+    // 1 View + 1 Panel + (1 Component + 1 Text + 1 Panel + 3 Components)
+    //   + (moneyBg: 1 Panel + 2 Text) = 11 nodes. The two <Event>s are ignored.
     const count = (n: GuiNode): number => 1 + n.children.reduce((s, c) => s + count(c), 0);
-    expect(count(root)).toBe(13);
-    expect(ids.size).toBe(13);
+    expect(count(root)).toBe(11);
+    expect(ids.size).toBe(11);
   });
 
   it("never appears in serialized output", () => {
@@ -219,15 +215,33 @@ describe("structural rules", () => {
     expect(() => parseGui(`<Panel id="x"/>`)).toThrow(GuiParseError);
   });
 
-  it("rejects <Event> that is not an immediate child of <View>", () => {
-    expect(() =>
-      parseGui(`<View><Panel id="p"><Event name="X" handler="h"/></Panel></View>`),
-    ).toThrow(/Event.*immediate child of <View>/);
+  it("ignores an <Event> child of <View> (events live in Lua, not the XML)", () => {
+    const root = parseGui(
+      `<View><Event name="X" handler="h"/><Panel id="p"/><Event name="Y" handler="g"/></View>`,
+    );
+    // Both <Event>s are dropped; only the <Panel> survives.
+    expect(root.children.map((c) => c.tag)).toEqual(["Panel"]);
   });
 
-  it("accepts <Event> as an immediate child of <View>", () => {
-    const root = parseGui(`<View><Event name="X" handler="h"/></View>`);
-    expect(root.children[0].tag).toBe("Event");
+  it("ignores an <Event> wherever it appears, including nested under a Panel", () => {
+    const root = parseGui(
+      `<View><Panel id="p"><Event name="X" handler="h"/><Text id="t"/></Panel></View>`,
+    );
+    expect(root.children[0].children.map((c) => c.tag)).toEqual(["Text"]);
+  });
+
+  it("ignores an <Event> that has its own (dropped) subtree", () => {
+    const root = parseGui(
+      `<View><Event name="X" handler="h"><Panel id="ghost"/></Event><Panel id="real"/></View>`,
+    );
+    expect(root.children.map((c) => c.attrs.id)).toEqual(["real"]);
+  });
+
+  it("drops <Event> elements from the serialized output", () => {
+    const serialized = serializeGui(
+      parseGui(`<View><Event name="X" handler="h"/><Panel id="p"/></View>`),
+    );
+    expect(serialized).not.toContain("Event");
   });
 
   it("rejects a <Component> with children", () => {
@@ -294,15 +308,12 @@ describe("GridLayout structural rules", () => {
     ).toThrow(/at most one child/);
   });
 
-  it("rejects a non-Panel/Text/Component grid child (here caught by the Event rule)", () => {
-    // An <Event> child is rejected — in practice the Event-only-under-View rule
-    // fires first, but the GridLayout child-tag guard is the same outcome: a grid
-    // may only wrap a Panel/Text/Component. (Every other KNOWN tag — View, Event,
-    // GridLayout — is rejected by its own placement rule before reaching the grid
-    // guard, so the guard is defense-in-depth, asserted clearly in the parser.)
-    expect(() =>
-      parseGui(`<View><GridLayout><Event name="X" handler="h"/></GridLayout></View>`),
-    ).toThrow(GuiParseError);
+  it("ignores an <Event> inside a GridLayout, leaving the grid empty", () => {
+    // <Event> is dropped everywhere, so a grid whose only authored child is an
+    // <Event> parses to an empty (childless) grid rather than throwing.
+    const root = parseGui(`<View><GridLayout><Event name="X" handler="h"/></GridLayout></View>`);
+    expect(root.children[0].tag).toBe("GridLayout");
+    expect(root.children[0].children).toEqual([]);
   });
 
   it("rejects a GridLayout under a parent other than Panel/View (e.g. Text)", () => {

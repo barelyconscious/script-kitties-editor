@@ -198,13 +198,13 @@ describe("editorReducer", () => {
     expect(s2.open?.root.children[1]?.attrs.id).toBe("Text2");
   });
 
-  it("addChildNode does NOT auto-id an <Event> (events are name→handler)", () => {
+  it("addChildNode does NOT auto-id a <GridLayout> (non-visual control element)", () => {
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
     const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
     const next = editorReducer(s0, {
       type: "addChildNode",
       parentNodeId: "root",
-      child: { nodeId: "e", tag: "Event", attrs: { name: "", handler: "" }, children: [] },
+      child: { nodeId: "g", tag: "GridLayout", attrs: { rows: "1", columns: "1" }, children: [] },
     });
     expect(next.open?.root.children[0]?.attrs.id).toBeUndefined();
   });
@@ -262,8 +262,8 @@ describe("editorReducer", () => {
   });
 
   it("removeNode detaches the node and marks dirty", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
-    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -272,7 +272,7 @@ describe("editorReducer", () => {
   });
 
   it("removeNode clears the selection when the removed node was selected", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e1" };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -280,8 +280,8 @@ describe("editorReducer", () => {
   });
 
   it("removeNode preserves an unrelated selection", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
-    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e2" };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -536,29 +536,6 @@ describe("editorReducer", () => {
 
     it("is a no-op when nothing is open", () => {
       expect(editorReducer(CLEAN, { type: "duplicateNode", nodeId: "p1" })).toBe(CLEAN);
-    });
-  });
-
-  it("stores an Event's name/handler verbatim (no validation/normalization)", () => {
-    // The events panel is intentionally thin: whatever the user types is stored as
-    // an <Event> node's attrs, untouched — even a namespaced/colon-bearing name and
-    // a handler that may not exist anywhere.
-    const event: GuiNode = {
-      nodeId: "e1",
-      tag: "Event",
-      attrs: { name: "", handler: "" },
-      children: [],
-    };
-    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [event] };
-    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
-    const next = editorReducer(state, {
-      type: "setNodeAttrs",
-      nodeId: "e1",
-      attrs: { name: "Battle:OnCreatureDied", handler: "doesNotExistYet" },
-    });
-    expect(next.open?.root.children[0].attrs).toEqual({
-      name: "Battle:OnCreatureDied",
-      handler: "doesNotExistYet",
     });
   });
 

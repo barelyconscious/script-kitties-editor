@@ -3,6 +3,15 @@
 > **Status: DECIDED 2026-07-06** (Matt + architect). Settles the cell-size/position
 > contract the engine's hardcoded `64×64` was squatting on. Supplements
 > `gridLayout_element_design_prompt.md`; where they disagree on geometry, this wins.
+>
+> **UPDATE 2026-07-11 (Matt) — the no-`cellSize` default is `1,1,0,0`, NOT area
+> division.** Engine ground truth: when a `<GridLayout>` authors no `cellSize`, the
+> runtime assumes `cellSize="1,1,0,0"` (each cell fills the parent box) and lays every
+> cell out through the ONE fixed-cell path — it does **not** area-divide the parent
+> among cells. The editor now mirrors this exactly and the area-division code path
+> (`cellGeometry`) has been **removed** from `guiGridGeometry.ts`. Everywhere below that
+> says "absent → even area division" / "parent-share division," read **"absent →
+> `1,1,0,0`"**. (Per CLAUDE.md, engine source wins over this doc where they disagree.)
 
 ## The divergence this settles
 

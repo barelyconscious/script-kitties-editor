@@ -413,8 +413,9 @@ function fieldsForTagInner(tag: GuiTag): PropertyField[] {
       // of them can never resolve (it is an ERROR lint). `cellSize` is a full UDim2
       // `"relX,relY,absX,absY"` — the system's ONE dimension grammar, edited through the
       // same four-input `compound` UI as `position`/`size` (literalOnly suppresses the
-      // per-field token affordance) — that fixes each cell's size; absent/blank, the grid
-      // divides its parent's content box evenly. Only `dataCollection` is grammar (a scope
+      // per-field token affordance) — that fixes each cell's size; absent/blank, the engine
+      // defaults it to `1,1,0,0` (each cell fills the parent box — it does NOT divide the
+      // parent among cells). Only `dataCollection` is grammar (a scope
       // path resolved at stamp time). All of this is layout policy on the one element that
       // IS the layout (design req 5 + design/gridlayout_cell_geometry.md, "Grid structure
       // is LITERAL-ONLY").

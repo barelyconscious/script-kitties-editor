@@ -9,31 +9,23 @@
  *
  * It does NOT invent a new layout engine: a cell's geometry is expressed in the
  * SAME `relX,relY,absX,absY` UDim2 comma-string form the renderer already consumes,
- * so {@link computeBoxGeometry} renders a cell unchanged. The grid divides its
- * parent's content box EVENLY — relative cell width = `1/columns`, relative height =
- * `1/rows` — with the pixel gutter folded into the absolute (`abs`) fields so the
- * gutters sit BETWEEN cells only (N-1 gutters across N cells, NO outer-edge margin).
+ * so {@link computeBoxGeometry} renders a cell unchanged.
  *
- * The derivation (per axis, columns shown; rows are identical with `gy`):
- *   - Available width is the parent's 100%. The `C` cells collectively give up the
- *     total inter-cell gutter `(C-1)·gx`, so each cell's width is
- *     `100%/C − (C-1)/C·gx`  →  UDim2 `relX = 1/C`, `absX = −(C-1)/C·gx`.
- *   - The cell in column `c` (0-based) sits at left
- *     `c·(cellWidth + gx) = c/C·100% + c·gx/C`  →  `relX = c/C`, `absX = c·gx/C`.
- *   Worked check (C=2, gx=10): cell0 = pos `0,_,0,_` size `0.5,_,−5,_` (0%..50%−5);
- *   cell1 = pos `0.5,_,5,_` size `0.5,_,−5,_` (50%+5..100%). The gap between them is
- *   exactly 10px; neither edge cell has an outer margin.
+ * A cell's SIZE is the grid's `cellSize` — a LITERAL full UDim2 `"relX,relY,absX,absY"`
+ * (the system's ONE dimension grammar; `"0,0,64,64"` = fixed 64px). When `cellSize` is
+ * absent/blank the engine DEFAULTS it to {@link DEFAULT_CELL_SIZE} (`"1,1,0,0"` — each
+ * cell fills the parent box); the editor mirrors that exactly. This is engine ground
+ * truth: the runtime does NOT area-divide the parent among cells (an earlier editor
+ * default that has been removed). {@link cellGeometryFixed} computes every cell from
+ * that one `cellSize` — the SAME size for all cells, positions accumulating
+ * `index·(cell + gutter)` per axis. With the `"1,1,0,0"` default, cells are each full
+ * parent size and step 100% + gutter apart per column/row, so a multi-cell grid with no
+ * `cellSize` stacks/overflows — the author sets `cellSize` (and/or gutter) to lay out a
+ * real grid, exactly as in-game.
  *
  * PURE: no React, no DOM. The caller (`GuiPreview`) maps a cell index → its
  * `{ position, size }` here, then renders the template node with that geometry.
  *
- * A grid may instead author an explicit `cellSize` — a LITERAL full UDim2
- * `"relX,relY,absX,absY"` (the system's ONE dimension grammar; `"0,0,64,64"` = fixed
- * 64px) — in which case cells are a FIXED size and positions accumulate
- * `index·(cell+gutter)` per axis; see {@link cellGeometryFixed}. Absent/blank `cellSize`,
- * the area-division default here runs unchanged.
- *
- * @see design/gridLayout_element_design_prompt.md — "Calculating Position and Size".
  * @see design/gridlayout_cell_geometry.md — the settled cell size/position contract.
  */
 
@@ -51,22 +43,12 @@ export type CellGeometry = {
 type Axis = { rel: number; abs: number };
 
 /**
- * Compute one axis's position + size fields for the cell at 0-based `index` along an
- * axis of `count` cells separated by `gutter` px.
- *
- * - size: `rel = 1/count`, `abs = −(count−1)/count · gutter` (each cell sheds its
- *   even share of the total inter-cell gutter).
- * - position: `rel = index/count`, `abs = index · gutter / count`.
- *
- * `count` is assumed ≥ 1 (the renderer settles the `0`/default rules before calling;
- * a `0` grid renders no cells, so this is never reached with `count = 0`).
+ * The `cellSize` the engine ASSUMES when a `<GridLayout>` authors none (or a blank
+ * one): a full UDim2 `"1,1,0,0"` — each cell fills the parent box (100% × 100%, no
+ * pixel offset). Engine ground truth: the runtime has no area-division mode, so the
+ * editor defaults to this and lays every cell out through {@link cellGeometryFixed}.
  */
-function axisFields(index: number, count: number, gutter: number): { pos: Axis; size: Axis } {
-  return {
-    pos: { rel: index / count, abs: (index * gutter) / count },
-    size: { rel: 1 / count, abs: -((count - 1) / count) * gutter },
-  };
-}
+export const DEFAULT_CELL_SIZE = "1,1,0,0";
 
 /** Join an x/y axis pair into a `relX,relY,absX,absY` comma string. */
 function udim2(x: Axis, y: Axis): string {
@@ -74,44 +56,11 @@ function udim2(x: Axis, y: Axis): string {
 }
 
 /**
- * The geometry for the cell at a 0-based `index` (left-to-right, top-to-bottom) in a
- * `rows × columns` grid with an `x,y` pixel `gutter` BETWEEN cells.
- *
- * The index maps to a grid coordinate as `column = index % columns`,
- * `row = floor(index / columns)`, then each axis is laid out independently
- * ({@link axisFields}). The returned `position`/`size` are the same comma-string form
- * {@link computeBoxGeometry} parses, so a cell renders through the existing pipeline
- * with no special casing.
- *
- * @param index 0-based cell index in fill order (0 … rows·columns−1).
- * @param rows number of rows (≥ 1; the renderer handles the `0`/default rules).
- * @param columns number of columns (≥ 1).
- * @param gutterX horizontal px between columns (default 0).
- * @param gutterY vertical px between rows (default 0).
- */
-export function cellGeometry(
-  index: number,
-  rows: number,
-  columns: number,
-  gutterX = 0,
-  gutterY = 0,
-): CellGeometry {
-  const column = index % columns;
-  const row = Math.floor(index / columns);
-  const x = axisFields(column, columns, gutterX);
-  const y = axisFields(row, rows, gutterY);
-  return {
-    position: udim2(x.pos, y.pos),
-    size: udim2(x.size, y.size),
-  };
-}
-
-/**
- * The geometry for the cell at 0-based `index` when the grid authors an EXPLICIT
- * `cellSize` (design/gridlayout_cell_geometry.md). Unlike the area-division
- * {@link cellGeometry}, every cell is the SAME fixed size — the `cellSize` UDim2
- * verbatim — and positions accumulate `index·(cell + gutter)` per axis from the
- * parent's content-box origin.
+ * The geometry for the cell at 0-based `index` from the grid's `cellSize`
+ * (design/gridlayout_cell_geometry.md). Every cell is the SAME size — the `cellSize`
+ * UDim2 verbatim — and positions accumulate `index·(cell + gutter)` per axis from the
+ * parent's content-box origin. The caller passes {@link DEFAULT_CELL_SIZE} when the
+ * grid authors no `cellSize`, so this is the ONE cell-geometry path.
  *
  * `cellSize` is a full UDim2 (`relX,relY,absX,absY`) — the system's ONE dimension
  * grammar, not an exception to it. Its `rel` fields resolve against the PARENT box (the

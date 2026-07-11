@@ -3869,7 +3869,7 @@ end`,
           name: "pixel-sized root",
           type: "property",
           documentation:
-            "A tooltip component's root must be PIXEL-SIZED (absolute size, relative width/height zero) — a relative root size won't lay out predictably. The New-component dialog's Tooltip template scaffolds this.",
+            "A tooltip component's root must be PIXEL-SIZED (absolute size, relative width/height zero) — a relative root size won't lay out predictably.",
         },
         {
           name: "no controller",

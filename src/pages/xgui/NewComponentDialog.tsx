@@ -26,8 +26,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
-import { COMPONENT_TEMPLATES, DEFAULT_TEMPLATE_ID, templateById } from "./componentTemplates";
 import {
   collisionMessage,
   folderScopeLabel,
@@ -35,6 +33,9 @@ import {
   isValidBasename,
   toComponentBasename,
 } from "./guiTree";
+
+/** The body every new component is created with — an empty `<View>` to build up from. */
+const BLANK_XML = "<View>\n</View>\n";
 
 export type NewComponentDialogProps = {
   open: boolean;
@@ -66,7 +67,6 @@ export function NewComponentDialog({
   onCreated,
 }: NewComponentDialogProps) {
   const [name, setName] = useState("");
-  const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Remember the last real scope so the title doesn't flash to "gui/" during the
@@ -87,7 +87,6 @@ export function NewComponentDialog({
   useEffect(() => {
     if (open) {
       setName("");
-      setTemplateId(DEFAULT_TEMPLATE_ID);
       setBusy(false);
       setSubmitError(null);
     }
@@ -113,7 +112,7 @@ export function NewComponentDialog({
       await invoke("create_component", {
         folderRel,
         name: basename,
-        xml: templateById(templateId).xml,
+        xml: BLANK_XML,
         controller: null,
       });
     } catch (err) {
@@ -121,6 +120,12 @@ export function NewComponentDialog({
       setSubmitError(err instanceof Error ? err.message : String(err));
       return;
     }
+    // Clear the name BEFORE closing: `onCreated` refreshes the tree to include the
+    // just-created component, and the dialog stays mounted through Radix's close
+    // animation — leaving the name populated would re-fire the collision check
+    // against the now-present component and flash an "already exists" error as it
+    // animates out. An empty name makes `nameError` null, so nothing flashes.
+    setName("");
     onOpenChange(false);
     onCreated({ name: basename, folderRel });
   }
@@ -160,6 +165,13 @@ export function NewComponentDialog({
                   const value = e.currentTarget.value;
                   setName(value);
                 }}
+                onKeyDown={(e) => {
+                  // Enter submits from the name field (guarded by canSubmit inside).
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreate();
+                  }
+                }}
                 placeholder="name"
                 aria-invalid={!!nameError}
                 className="pr-11 font-mono"
@@ -176,33 +188,6 @@ export function NewComponentDialog({
               </p>
             )}
             {nameError && <p className="text-destructive text-xs">{nameError}</p>}
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label>Template</Label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {COMPONENT_TEMPLATES.map((template) => {
-                const selected = template.id === templateId;
-                return (
-                  <button
-                    key={template.id}
-                    type="button"
-                    disabled={busy}
-                    aria-pressed={selected}
-                    onClick={() => setTemplateId(template.id)}
-                    className={cn(
-                      "rounded-md border px-2.5 py-2 text-left transition-colors disabled:opacity-50",
-                      selected ? "border-primary bg-primary/10" : "border-input hover:bg-muted",
-                    )}
-                  >
-                    <span className="block font-medium text-sm">{template.label}</span>
-                    <span className="mt-0.5 block text-[11px] text-muted-foreground leading-tight">
-                      {template.description}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
 

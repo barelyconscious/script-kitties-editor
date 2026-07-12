@@ -27,6 +27,13 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { colorCodeToCss } from "../../lib/guiBinding";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
@@ -788,37 +795,47 @@ function BooleanField({
 }) {
   const bound = isBoundField(value);
 
+  // Radix's <Select> forbids an empty-string item value, so the "default" (unset)
+  // choice rides a sentinel that maps back to "" on write.
+  const DEFAULT_OPT = "__default__";
+
   if (literalOnly) {
+    const selected = value === "true" || value === "false" ? value : DEFAULT_OPT;
     return (
-      <select
-        value={value === "true" || value === "false" ? value : ""}
-        onChange={(e) => onSet(name, e.currentTarget.value)}
-        className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
-      >
-        <option value="">default</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </select>
+      <Select value={selected} onValueChange={(v) => onSet(name, v === DEFAULT_OPT ? "" : v)}>
+        <SelectTrigger size="sm" className="w-24 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_OPT}>default</SelectItem>
+          <SelectItem value="true">true</SelectItem>
+          <SelectItem value="false">false</SelectItem>
+        </SelectContent>
+      </Select>
     );
   }
 
+  const selected = bound ? "__token__" : value === "" ? DEFAULT_OPT : value;
   return (
     <div className="flex items-center gap-1.5">
-      <select
-        value={bound ? "__token__" : value === "" ? "" : value}
-        onChange={(e) => {
-          const v = e.currentTarget.value;
-          if (v === "__token__") return; // keep typing the token in the input
-          onSet(name, v);
-        }}
+      <Select
+        value={selected}
         disabled={bound}
-        className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs disabled:opacity-50"
+        onValueChange={(v) => {
+          if (v === "__token__") return; // keep typing the token in the input
+          onSet(name, v === DEFAULT_OPT ? "" : v);
+        }}
       >
-        <option value="">default</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-        {bound && <option value="__token__">{`{token}`}</option>}
-      </select>
+        <SelectTrigger size="sm" className="w-24 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_OPT}>default</SelectItem>
+          <SelectItem value="true">true</SelectItem>
+          <SelectItem value="false">false</SelectItem>
+          {bound && <SelectItem value="__token__">{`{token}`}</SelectItem>}
+        </SelectContent>
+      </Select>
       <Input
         value={value}
         onChange={(e) => onSet(name, e.currentTarget.value)}

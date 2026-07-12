@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flatRootScope } from "./guiBinding";
+import { viewScope } from "./guiBinding";
 import {
   mountDecision,
   resolveChildRoot,
@@ -47,7 +47,7 @@ describe("srcBasename", () => {
 describe("resolveOverrides — child fresh-root model (F6a)", () => {
   it("passes literal overrides straight through as concrete values", () => {
     const node = component({ src: "row.xml", actionText: "Sell", qty: "3" });
-    const overrides = resolveOverrides(node, flatRootScope({}));
+    const overrides = resolveOverrides(node, viewScope({}));
     expect(overrides).toEqual({ actionText: "Sell", qty: "3" });
   });
 
@@ -61,47 +61,47 @@ describe("resolveOverrides — child fresh-root model (F6a)", () => {
       visible: "true",
       label: "Hi",
     });
-    const overrides = resolveOverrides(node, flatRootScope({}));
+    const overrides = resolveOverrides(node, viewScope({}));
     // Only the freeform `label` survives as a data override.
     expect(overrides).toEqual({ label: "Hi" });
   });
 
-  it("PRE-RESOLVES a bare token override in the PARENT scope", () => {
-    const scope = flatRootScope({ name: "Bitlynx" });
-    const node = component({ src: "slot.xml", label: "{name}" });
+  it("PRE-RESOLVES a `$.` token override in the PARENT scope", () => {
+    const scope = viewScope({ name: "Bitlynx" });
+    const node = component({ src: "slot.xml", label: "{$.name}" });
     const overrides = resolveOverrides(node, scope);
     expect(overrides).toEqual({ label: "Bitlynx" });
   });
 
   it("interpolates string-form overrides in the parent scope", () => {
-    const scope = flatRootScope({ n: 7 });
-    const node = component({ src: "slot.xml", caption: "Item {n}" });
+    const scope = viewScope({ n: 7 });
+    const node = component({ src: "slot.xml", caption: "Item {$.n}" });
     const overrides = resolveOverrides(node, scope);
     expect(overrides).toEqual({ caption: "Item 7" });
   });
 
   it("passes an UNRESOLVED-in-parent override as its literal token form (visible miss)", () => {
-    // {missing} is not in the parent model → it stays "{missing}", surfacing the
+    // {$.missing} is not in the parent model → it stays "{$.missing}", surfacing the
     // miss visibly at the boundary rather than silently re-resolving in the child.
-    const node = component({ src: "slot.xml", label: "{missing}" });
-    const overrides = resolveOverrides(node, flatRootScope({ other: 1 }));
-    expect(overrides).toEqual({ label: "{missing}" });
+    const node = component({ src: "slot.xml", label: "{$.missing}" });
+    const overrides = resolveOverrides(node, viewScope({ other: 1 }));
+    expect(overrides).toEqual({ label: "{$.missing}" });
   });
 
   it("builds a fresh root with NO parent data leak", () => {
     // The parent has `money`; the child is NOT handed it (not named as an override).
     const node = component({ src: "slot.xml", qty: "3" });
-    const overrides = resolveOverrides(node, flatRootScope({ money: 999 }));
+    const overrides = resolveOverrides(node, viewScope({ money: 999 }));
     expect(overrides).not.toHaveProperty("money");
-    // And the child root resolves its own bare tokens against overrides only:
-    const childScope = flatRootScope(overrides);
-    expect(childScope.lookup("qty")).toBe("3");
-    expect(childScope.lookup("money")).toBeUndefined(); // no parent fall-through
+    // And the child root resolves its own `$.` tokens against overrides only:
+    const childScope = viewScope(overrides);
+    expect(childScope.lookup("$.qty")).toBe("3");
+    expect(childScope.lookup("$.money")).toBeUndefined(); // no parent fall-through
   });
 
   it("excludes the `data` attr from the flat overrides", () => {
-    const node = component({ src: "button.xml", data: "buttonProps", label: "Hi" });
-    expect(resolveOverrides(node, flatRootScope({ buttonProps: { label: "x" } }))).toEqual({
+    const node = component({ src: "button.xml", data: "{$.buttonProps}", label: "Hi" });
+    expect(resolveOverrides(node, viewScope({ buttonProps: { label: "x" } }))).toEqual({
       label: "Hi",
     });
   });
@@ -109,34 +109,34 @@ describe("resolveOverrides — child fresh-root model (F6a)", () => {
 
 describe("resolveChildRoot — data base + overrides layered on top", () => {
   it("seats the named data object as the child's whole root", () => {
-    const node = component({ src: "button.xml", data: "buttonProps" });
-    const parent = flatRootScope({ buttonProps: { label: "Save", tint: "{accent}" } });
+    const node = component({ src: "button.xml", data: "{$.buttonProps}" });
+    const parent = viewScope({ buttonProps: { label: "Save", tint: "{accent}" } });
     expect(resolveChildRoot(node, parent)).toEqual({ label: "Save", tint: "{accent}" });
   });
 
   it("layers explicit override attrs ON TOP of the data base", () => {
-    const node = component({ src: "button.xml", data: "buttonProps", label: "Override" });
-    const parent = flatRootScope({ buttonProps: { label: "Base", icon: "star" } });
+    const node = component({ src: "button.xml", data: "{$.buttonProps}", label: "Override" });
+    const parent = viewScope({ buttonProps: { label: "Base", icon: "star" } });
     // The override wins for `label`; untouched base fields survive.
     expect(resolveChildRoot(node, parent)).toEqual({ label: "Override", icon: "star" });
   });
 
   it("yields an empty root when the data key is missing or non-object (visible miss)", () => {
-    const missing = component({ src: "button.xml", data: "absent" });
-    expect(resolveChildRoot(missing, flatRootScope({ other: 1 }))).toEqual({});
-    const scalar = component({ src: "button.xml", data: "n" });
-    expect(resolveChildRoot(scalar, flatRootScope({ n: 5 }))).toEqual({});
+    const missing = component({ src: "button.xml", data: "{$.absent}" });
+    expect(resolveChildRoot(missing, viewScope({ other: 1 }))).toEqual({});
+    const scalar = component({ src: "button.xml", data: "{$.n}" });
+    expect(resolveChildRoot(scalar, viewScope({ n: 5 }))).toEqual({});
   });
 
   it("reduces to the flat overrides when there is no data attr", () => {
     const node = component({ src: "button.xml", label: "Hi", qty: "3" });
-    expect(resolveChildRoot(node, flatRootScope({}))).toEqual({ label: "Hi", qty: "3" });
+    expect(resolveChildRoot(node, viewScope({}))).toEqual({ label: "Hi", qty: "3" });
   });
 
   it("does not mutate the parent model object (shallow copy)", () => {
     const buttonProps = { label: "Base" };
-    const node = component({ src: "button.xml", data: "buttonProps", label: "New" });
-    resolveChildRoot(node, flatRootScope({ buttonProps }));
+    const node = component({ src: "button.xml", data: "{$.buttonProps}", label: "New" });
+    resolveChildRoot(node, viewScope({ buttonProps }));
     expect(buttonProps).toEqual({ label: "Base" });
   });
 });

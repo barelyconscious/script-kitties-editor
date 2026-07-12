@@ -10,37 +10,27 @@
  * immutable function, returning a fresh root (the store's `replaceRoot` reducer
  * marks dirty). The panel is then a thin shell that calls this and dispatches.
  *
- * SCOPE (F9a): ADD a child only. Delete and reparent are explicitly deferred
- * (design subsection 2 / task 452), so this module offers no remove/move — adding
- * them later is a new function here, not a reshaping of these.
+ * SCOPE: grew from ADD-only (F9a) to the full structural edit set — {@link addChild}
+ * (append), {@link removeNode} (delete a subtree), and {@link moveNode} /
+ * {@link canMoveTo} (re-parent/reorder via drag-and-drop, task 512). Each is a pure
+ * immutable transform returning a fresh root; the store wraps them with dirty/history.
  *
  * @see design/xgui_ta.md — "Structure column" (the tree slice) and "XML Elements"
- *   (the element rules: View top-level, Event only under View, Component childless).
+ *   (the element rules: View top-level, Component childless).
  */
 
 import { type GuiNode, type GuiTag, mintNodeId } from "../../lib/guiNode";
 import type { GuiFolder } from "./guiTree";
 
-/** The placeholder shown for an `<Event>` row whose `name` attr is empty. */
-export const EVENT_PLACEHOLDER_LABEL = "(event)";
-
 /**
- * The secondary label for a tree row, beside its tag chip:
- *  - `<Event>` nodes have NO `id` (events are name→handler, not id'd), so they are
- *    labeled by their `name` attribute — falling back to {@link EVENT_PLACEHOLDER_LABEL}
- *    when the name is blank/whitespace so a freshly-added event is still visible and
- *    selectable in the tree.
- *  - Every other tag keeps its authored `id` (trimmed) as the secondary label, or
- *    `null` when it has none (the panel then shows just the tag chip).
+ * The secondary label for a tree row, beside its tag chip: the element's authored
+ * `id` (trimmed) when present, or `null` when it has none (the panel then shows just
+ * the tag chip).
  *
  * Pure (no React) so the labeling rule is unit-tested without rendering the tree;
  * the {@link StructureTree} row is a thin consumer of this.
  */
 export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | null } {
-  if (node.tag === "Event") {
-    const name = node.attrs.name?.trim();
-    return { tag: node.tag, secondary: name ? name : EVENT_PLACEHOLDER_LABEL };
-  }
   const id = node.attrs.id?.trim();
   return { tag: node.tag, secondary: id ? id : null };
 }
@@ -48,22 +38,14 @@ export function nodeLabel(node: GuiNode): { tag: GuiTag; secondary: string | nul
 /**
  * The PRIMARY label a tree row shows — the element's IDENTITY rather than its tag
  * (the tag is conveyed by the row's per-tag icon + color), so e.g. a `<Panel
- * id="Panel1">` reads as `Panel1`, not `Panel`:
- *  - `<Event>` has no id (events are name→handler), so it labels by its `name`,
- *    falling back to {@link EVENT_PLACEHOLDER_LABEL} (flagged `placeholder`) when blank;
- *  - every other tag labels by its authored `id` (trimmed) when present, and falls
- *    back to the bare tag name when it has none — so the row is never empty (an idless
- *    id-bearing element is additionally flagged by the tree's missing-id warning).
+ * id="Panel1">` reads as `Panel1`, not `Panel`. A tag labels by its authored `id`
+ * (trimmed) when present, and falls back to the bare tag name when it has none — so
+ * the row is never empty (an idless id-bearing element is additionally flagged by the
+ * tree's missing-id warning).
  *
  * Pure (no React) so the labeling rule is unit-tested without rendering the tree.
  */
 export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder: boolean } {
-  if (node.tag === "Event") {
-    const name = node.attrs.name?.trim();
-    return name
-      ? { text: name, placeholder: false }
-      : { text: EVENT_PLACEHOLDER_LABEL, placeholder: true };
-  }
   const id = node.attrs.id?.trim();
   return id ? { text: id, placeholder: false } : { text: node.tag, placeholder: false };
 }
@@ -81,28 +63,20 @@ export function treeNodePrimaryLabel(node: GuiNode): { text: string; placeholder
  *    children"), so its allow-list is empty.
  *  - `<Text>` is a LEAF — it carries text content and cannot hold children (nesting
  *    under it is a runtime parse error), so its allow-list is empty too.
- *  - `<Event>` may appear ONLY as an immediate child of `<View>`, so it is offered
- *    under `View` and nowhere else.
- *  - `<Panel>` is an ordinary visual container: it may hold `<Panel>`/`<Text>`/
- *    `<Component>` and a single `<GridLayout>` (only when it doesn't ALREADY contain
- *    one — a grid fills its container, so sibling grids are meaningless). `<View>`
- *    holds the same plus the View-only `<Event>`.
+ *  - `<Panel>` and `<View>` are ordinary visual containers: they may hold `<Panel>`/
+ *    `<Text>`/`<Component>` and a single `<GridLayout>` (only when they don't ALREADY
+ *    contain one — a grid fills its container, so sibling grids are meaningless).
  *  - `<GridLayout>` repeats a SINGLE child of tag Panel/Text/Component — so it
  *    offers those three ONLY while it is empty, and offers NOTHING once it has its
  *    one child (no `+`).
  *
- * Returned in a stable, human-sensible order (containers first, then GridLayout,
- * then Event) so the context menu reads the same every time.
+ * Returned in a stable, human-sensible order (containers first, then GridLayout) so
+ * the context menu reads the same every time.
  */
 export function allowedChildTags(parent: GuiNode): GuiTag[] {
   const hasGrid = parent.children.some((c) => c.tag === "GridLayout");
   switch (parent.tag) {
     case "View":
-      // Visual children plus the View-only <Event> and nestable <Component>; a
-      // single <GridLayout> when one isn't already present.
-      return hasGrid
-        ? ["Panel", "Text", "Component", "Event"]
-        : ["Panel", "Text", "Component", "GridLayout", "Event"];
     case "Panel":
       // Visual container: any box-producing child plus a single <GridLayout>.
       return hasGrid
@@ -116,8 +90,7 @@ export function allowedChildTags(parent: GuiNode): GuiTag[] {
       // A grid repeats ONE child; offer its legal child tags only while empty.
       return parent.children.length === 0 ? ["Panel", "Text", "Component"] : [];
     case "Component":
-    case "Event":
-      // <Component> is childless by rule; <Event> is a leaf registration.
+      // <Component> is childless by rule.
       return [];
     default: {
       const _never: never = parent.tag;
@@ -136,12 +109,13 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  * sensible default attributes so it is visible/selectable in the preview the
  * instant it is added (the Properties slice F9b edits the rest):
  *
- *  - `<Panel>` / `<Text>` get a small default `position`/`size` so the new box is
- *    a visible, clickable target rather than a zero/full-bleed surprise. `<Text>`
- *    also gets placeholder `text` so it paints something.
+ *  - `<Panel>` gets `position="0,0,0,0"` `size="1,1,0,0"` — it FILLS its parent
+ *    (100% relative, no pixel offset), the sensible default for a container box.
+ *  - `<Text>` gets a small fixed default `position`/`size` so the new label is a
+ *    visible, clickable target rather than a zero/full-bleed surprise, plus
+ *    placeholder `text` so it paints something.
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
- *  - `<Event>` gets empty `name`/`handler` the Properties panel (F9b) fills in.
  *  - `<GridLayout>` gets `rows="1"`/`columns="1"` (the documented defaults);
  *    `gutter` defaults to "0,0" at render time so it need not be written, and
  *    `dataCollection` is left empty for the user to fill. A grid is a non-visual
@@ -155,8 +129,8 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  * `id` is left UNSET here — the auto-id (`Panel1`, `Text2`, …) is assigned at
  * INSERTION time by the store's `addChildNode` action (which needs the whole tree
  * to pick a free running number), not minted in this per-node factory. The user
- * then renames it in the Properties panel (F9b). `<Event>`, `<GridLayout>`, and the
- * root `<View>` get no auto-id (see {@link nextAutoId} / {@link nodeHasId}).
+ * then renames it in the Properties panel (F9b). `<GridLayout>` and the root `<View>`
+ * get no auto-id (see {@link nextAutoId} / {@link nodeHasId}).
  */
 export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): GuiNode {
   const node: GuiNode = { nodeId: mintNodeId(), tag, attrs: {}, children: [] };
@@ -164,7 +138,7 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
   const underGrid = parentTag === "GridLayout";
   switch (tag) {
     case "Panel":
-      node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "0,0,100,100" };
+      node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "1,1,0,0" };
       break;
     case "Text":
       node.attrs = underGrid
@@ -175,9 +149,6 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
       node.attrs = underGrid
         ? { src: src ?? "" }
         : { src: src ?? "", position: "0,0,0,0", size: "0,0,100,100" };
-      break;
-    case "Event":
-      node.attrs = { name: "", handler: "" };
       break;
     case "GridLayout":
       // Non-visual control element: documented defaults, no geometry, no id.
@@ -211,8 +182,8 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
  * explicit `Panel7` pushes the next number past 7.
  *
  * This computes the value only; the store's `addChildNode` decides WHICH tags get
- * one (id-bearing tags — not `<Event>`, `<GridLayout>`, or the root `<View>`) and
- * assigns it at insertion time, when the whole tree is in hand.
+ * one (id-bearing tags — not `<GridLayout>` or the root `<View>`) and assigns it at
+ * insertion time, when the whole tree is in hand.
  */
 export function nextAutoId(root: GuiNode, tag: GuiTag): string {
   let max = 0;
@@ -295,9 +266,9 @@ export function setNodeAttrs(
  * reference as a no-op (don't dirty on a phantom remove).
  *
  * The structure TREE exposes this on every non-root row (right-click "Delete" /
- * the inline trash button) — removing the element and its whole subtree. `<Event>`
- * removal is one case of this general delete. This function is the shared immutable
- * primitive; root-protection lives here (a root `nodeId` is a no-op).
+ * the inline trash button) — removing the element and its whole subtree. This
+ * function is the shared immutable primitive; root-protection lives here (a root
+ * `nodeId` is a no-op).
  */
 export function removeNode(root: GuiNode, nodeId: string): GuiNode {
   // The root is never removable — only descendants.
@@ -314,6 +285,242 @@ export function removeNode(root: GuiNode, nodeId: string): GuiNode {
     children.push(next);
   }
   return changed ? { ...root, children } : root;
+}
+
+/**
+ * Insert `child` at `index` among the children of the node identified by
+ * `parentNodeId`, returning a NEW root (immutable — untouched subtrees are reused
+ * by reference). `index` is a splice position into the parent's children array:
+ * `0` prepends, `children.length` appends, values outside `[0, length]` clamp. If
+ * `parentNodeId` is not found, the original root is returned UNCHANGED (same
+ * reference). Internal helper behind {@link moveNode}; the public add-child path is
+ * {@link addChild} (append-only).
+ */
+function insertChildAt(
+  root: GuiNode,
+  parentNodeId: string,
+  child: GuiNode,
+  index: number,
+): GuiNode {
+  if (root.nodeId === parentNodeId) {
+    const at = Math.max(0, Math.min(index, root.children.length));
+    const children = [...root.children];
+    children.splice(at, 0, child);
+    return { ...root, children };
+  }
+  let changed = false;
+  const children = root.children.map((c) => {
+    const next = insertChildAt(c, parentNodeId, child, index);
+    if (next !== c) changed = true;
+    return next;
+  });
+  return changed ? { ...root, children } : root;
+}
+
+/**
+ * Move the node identified by `nodeId` (and its whole subtree) so it becomes a
+ * child of `targetParentId` at `index`, returning a NEW root (immutable — untouched
+ * subtrees are reused by reference, and the MOVED subtree's node objects — and thus
+ * its `nodeId`s — are preserved by reference, so selection / locks / badges keyed by
+ * nodeId survive the move).
+ *
+ * INDEX CONVENTION — `index` is a position in the target parent's CURRENT children
+ * array (the array as it stands BEFORE the move), i.e. "place the moved node at this
+ * slot among the children you can see right now". `0` is first, and the target's
+ * current `children.length` (or more) appends; out-of-range values clamp. For a
+ * SAME-PARENT reorder the moved node is still in that current array, so this function
+ * compensates for the remove-then-insert shift internally: dropping the node first
+ * shifts every later sibling down by one, so a requested `index` PAST the node's own
+ * current position lands one slot earlier after removal (the classic off-by-one). The
+ * caller therefore always reasons in current-array terms and never subtracts itself —
+ * keeping that arithmetic here is what lets #513's drop-plan helper stay a pure
+ * pointer→index mapping. A move that would leave the node exactly where it already is
+ * returns the SAME root reference (a no-op, so callers don't dirty on a null move).
+ *
+ * This function is MECHANICAL: it guards only against structurally-impossible moves
+ * (unknown node/target, moving the root, or a cycle where the target is the node or
+ * one of its descendants), returning the original root unchanged for those. The
+ * element-RULE legality (allow-lists, one-grid, self-exclusion) lives in
+ * {@link canMoveTo}; the store validates with that BEFORE calling this.
+ */
+export function moveNode(
+  root: GuiNode,
+  nodeId: string,
+  targetParentId: string,
+  index: number,
+): GuiNode {
+  // The root never moves; an unknown node/target or a self-target is a no-op.
+  if (root.nodeId === nodeId || nodeId === targetParentId) return root;
+  const moving = findNode(root, nodeId);
+  if (!moving) return root;
+  const targetParent = findNode(root, targetParentId);
+  if (!targetParent) return root;
+  // No-cycle: the target must not live inside the moved subtree.
+  if (findNode(moving, targetParentId) != null) return root;
+
+  // Same-parent reorder? Then the moved node is a direct child of the target, and
+  // its current slot governs the remove-then-insert shift.
+  const from = targetParent.children.findIndex((c) => c.nodeId === nodeId);
+  const sameParent = from !== -1;
+  const clamped = Math.max(0, Math.min(index, targetParent.children.length));
+  // Post-removal insertion index: only a same-parent move PAST the node's own slot
+  // needs the -1 (removing the node shifts later siblings down by one).
+  const insertAt = sameParent && clamped > from ? clamped - 1 : clamped;
+  // Landing right back on the current slot changes nothing — signal a no-op.
+  if (sameParent && insertAt === from) return root;
+
+  const detached = removeNode(root, nodeId);
+  return insertChildAt(detached, targetParentId, moving, insertAt);
+}
+
+/**
+ * Whether the node identified by `nodeId` may be MOVED to become a child of
+ * `targetParentId` — the drop-legality predicate behind the structure tree's
+ * drag-and-drop. Built ON {@link allowedChildTags} / {@link canAddChild} (so every
+ * element rule — one-grid-per-container, leaves reject children, an occupied
+ * `<GridLayout>` takes nothing) plus three rules the add-child allow-list cannot
+ * express:
+ *
+ *  - NO-CYCLE — the target may not be the node itself nor any descendant of it (you
+ *    cannot drop a subtree inside itself).
+ *  - ROOT IMMOVABLE — the `<View>` root never moves; and since the root has no parent
+ *    to target, nothing can be dropped as a sibling of the root either.
+ *  - SELF-EXCLUSION — the target's allow-list is evaluated as if the dragged node were
+ *    ALREADY removed from it, so reordering a `<GridLayout>` within its own parent
+ *    doesn't fail the one-grid-per-container check against ITSELF (a same-parent move
+ *    would otherwise see the container as "already has a grid" and reject the move).
+ *
+ * Keeping ALL of this here (rather than in the pointer/UI layer) means the drop UI
+ * never re-derives a rule — it asks this and honors the answer. {@link moveNode}
+ * performs the mechanical move; the store validates with this first.
+ */
+export function canMoveTo(root: GuiNode, nodeId: string, targetParentId: string): boolean {
+  // Root immovable, and a self-target is never legal.
+  if (root.nodeId === nodeId || nodeId === targetParentId) return false;
+  const moving = findNode(root, nodeId);
+  if (!moving) return false;
+  const targetParent = findNode(root, targetParentId);
+  if (!targetParent) return false;
+  // No-cycle: the target must not live inside the moved subtree.
+  if (findNode(moving, targetParentId) != null) return false;
+  // Self-exclusion: judge the allow-list against the target as if the dragged node
+  // were already gone (a no-op for a cross-parent move, since it isn't a child there).
+  const targetExcludingNode: GuiNode = {
+    ...targetParent,
+    children: targetParent.children.filter((c) => c.nodeId !== nodeId),
+  };
+  return allowedChildTags(targetExcludingNode).includes(moving.tag);
+}
+
+/**
+ * Collect every authored `id` (trimmed, non-empty) anywhere in the tree into
+ * `into`. Backs {@link duplicateNode}'s uniqueness check — the clone's re-suffixed
+ * ids must collide with neither the existing tree nor each other.
+ */
+function collectAuthoredIds(node: GuiNode, into: Set<string>): void {
+  const id = node.attrs.id?.trim();
+  if (id) into.add(id);
+  for (const child of node.children) collectAuthoredIds(child, into);
+}
+
+/**
+ * A unique `{baseId}-copy` id, disambiguating with a trailing number on collision:
+ * `Panel1-copy`, then `Panel1-copy-2`, `Panel1-copy-3`, … The `usedIds` set is the
+ * live set of ids already spoken for (the existing tree PLUS clone ids minted so
+ * far in the same duplication), so a subtree holding several id-bearing nodes never
+ * mints the same id twice.
+ */
+function uniqueCopyId(baseId: string, usedIds: ReadonlySet<string>): string {
+  const first = `${baseId}-copy`;
+  if (!usedIds.has(first)) return first;
+  let n = 2;
+  while (usedIds.has(`${first}-${n}`)) n += 1;
+  return `${first}-${n}`;
+}
+
+/**
+ * Deep-clone a subtree for {@link duplicateNode}: every node — top to leaf — gets a
+ * FRESH {@link mintNodeId} (the clone is NEW nodes, so nothing may share a nodeId
+ * with the source; two nodes sharing one would make selecting/locking the copy also
+ * hit the original), and every id-bearing node's authored `attrs.id` is re-suffixed
+ * to a unique `{id}-copy` (preserving the editor's tree-wide-unique-id invariant).
+ * `usedIds` is mutated as ids are claimed so sibling/descendant clones stay distinct.
+ *
+ * Id-less nodes (`<GridLayout>`, or a node whose `id` is blank) are left as-is.
+ * Controller code and binding tokens that referenced the old id are NOT
+ * rewritten — the editor is deliberately thin about runtime semantics, so a
+ * duplicated `Panel1`→`Panel1-copy` leaving the controller knowing only `Panel1` is
+ * the same expected outcome as adding any fresh element.
+ */
+function cloneSubtreeFresh(node: GuiNode, usedIds: Set<string>): GuiNode {
+  const attrs = { ...node.attrs };
+  const id = node.attrs.id?.trim();
+  if (id) {
+    const newId = uniqueCopyId(id, usedIds);
+    usedIds.add(newId);
+    attrs.id = newId;
+  }
+  return {
+    nodeId: mintNodeId(),
+    tag: node.tag,
+    attrs,
+    children: node.children.map((child) => cloneSubtreeFresh(child, usedIds)),
+  };
+}
+
+/**
+ * Duplicate the node identified by `nodeId` (and its WHOLE subtree), inserting the
+ * clone as the original's NEXT SIBLING (its index + 1 among the parent's children),
+ * and returning a NEW root (immutable — untouched subtrees, including the original
+ * itself, are reused by reference; only the ancestor spine down to the parent is
+ * rebuilt). The clone is a set of NEW nodes: {@link cloneSubtreeFresh} re-mints every
+ * `nodeId` and re-suffixes every authored `id` to a tree-unique `{id}-copy`.
+ *
+ * The root `<View>` cannot be duplicated (it has no parent to hold a sibling), and an
+ * unknown `nodeId` is a no-op — both return the original root UNCHANGED (same
+ * reference), so callers (and the store) treat an unchanged reference as a no-op. The
+ * element-RULE legality (may the clone be a legal sibling of the original?) lives in
+ * {@link canDuplicate}; the store validates with that BEFORE calling this.
+ */
+export function duplicateNode(root: GuiNode, nodeId: string): GuiNode {
+  // The root has no parent to take a sibling clone → no-op.
+  if (root.nodeId === nodeId) return root;
+  const path = nodePath(root, nodeId);
+  // Not found, or somehow the root (no parent) → no-op.
+  if (!path || path.length < 2) return root;
+  const original = path[path.length - 1];
+  const parent = path[path.length - 2];
+  // Seed the used-id set with every authored id already in the WHOLE tree, so the
+  // clone's `-copy` ids collide with neither the originals nor one another.
+  const usedIds = new Set<string>();
+  collectAuthoredIds(root, usedIds);
+  const clone = cloneSubtreeFresh(original, usedIds);
+  const index = parent.children.findIndex((c) => c.nodeId === nodeId);
+  // insertChildAt clamps, so an original in the last slot appends the clone.
+  return insertChildAt(root, parent.nodeId, clone, index + 1);
+}
+
+/**
+ * Whether the node identified by `nodeId` may be DUPLICATED — the legality predicate
+ * behind the structure tree's Duplicate affordance. The clone becomes a SECOND child
+ * of the original's parent (the original stays), so this asks {@link allowedChildTags}
+ * whether the parent may hold ANOTHER child of the node's tag — with NO self-exclusion
+ * (contrast {@link canMoveTo}, where the moved node LEAVES its slot). That difference
+ * is load-bearing: the sole child of a `<GridLayout>` (a grid holds exactly one child)
+ * and a `<GridLayout>` under a container already capped at one grid are BOTH rejected,
+ * because adding a second such child is illegal. The root `<View>` (no parent) and an
+ * unknown node are rejected too. The rules are NOT re-derived in the UI — the tree
+ * asks this and honors the answer.
+ */
+export function canDuplicate(root: GuiNode, nodeId: string): boolean {
+  if (root.nodeId === nodeId) return false;
+  const path = nodePath(root, nodeId);
+  if (!path || path.length < 2) return false;
+  const node = path[path.length - 1];
+  const parent = path[path.length - 2];
+  // No self-exclusion: the original remains, so the clone is genuinely an ADDITIONAL
+  // child — judge the parent's allow-list exactly as it stands.
+  return allowedChildTags(parent).includes(node.tag);
 }
 
 /**

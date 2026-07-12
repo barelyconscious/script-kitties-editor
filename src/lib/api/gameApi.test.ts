@@ -43,7 +43,12 @@ describe("GAME_API well-formedness", () => {
   it("only allows duplicate member names where the game genuinely overloads", () => {
     // Member names may repeat only as deliberate overloads. We pin the known
     // ones so an accidental copy-paste duplicate elsewhere is caught.
-    const allowedOverloads = new Set(["Creature.removeEffect", "BattleState.isFriendly"]);
+    const allowedOverloads = new Set([
+      "Creature.removeEffect",
+      "BattleState.isFriendly",
+      "Area.isTileBlocked",
+      "GameManager.swapCreatures",
+    ]);
     const offenders: string[] = [];
     walk(GAME_API, (item) => {
       if (!item.members) return;
@@ -173,5 +178,39 @@ describe("GAME_API merged surface coverage", () => {
     for (const t of ["Creature", "BattleCreature", "Ability", "Item", "Combat", "BattleState"]) {
       expect(top(t)).toBeDefined();
     }
+  });
+
+  // XGUI interaction reference (task 507).
+  it("includes the XGUI Interaction section with attributes, derivation, and tooltips", () => {
+    const xgui = top("XGUI Interaction");
+    expect(xgui).toBeDefined();
+    const groups = (xgui?.members ?? []).map((m) => m.name);
+    expect(groups).toEqual(["attributes", "derivation", "tooltips"]);
+  });
+
+  it("documents the seven handlers plus modal / tooltip / tooltipData", () => {
+    const attrs = top("XGUI Interaction")?.members?.find((m) => m.name === "attributes");
+    const names = (attrs?.members ?? []).map((m) => m.name);
+    for (const n of [
+      "onMouseClicked",
+      "onMouseEntered",
+      "onMouseExited",
+      "onMouseMoved",
+      "onKeyPressed",
+      "onFocus",
+      "onBlur",
+      "modal",
+      "tooltip",
+      "tooltipData",
+    ]) {
+      expect(names).toContain(n);
+    }
+  });
+
+  it("documents the two derivation rules", () => {
+    const derivation = top("XGUI Interaction")?.members?.find((m) => m.name === "derivation");
+    const names = (derivation?.members ?? []).map((m) => m.name);
+    expect(names).toContain("hit-testable");
+    expect(names).toContain("focusable");
   });
 });

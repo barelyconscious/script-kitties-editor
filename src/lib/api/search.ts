@@ -84,3 +84,57 @@ export function hasSignature(item: ApiItem): boolean {
 export function isDrillable(item: ApiItem): boolean {
   return !!item.members && item.members.length > 0;
 }
+
+/**
+ * The closed set of language/game primitive type names. These are never
+ * linkable in the reference pane — they resolve to nothing to drill into, so a
+ * `TypeRef` renders them as plain muted text. Matched case-insensitively so a
+ * stray `Bool`/`String` is still treated as a primitive rather than a dead link.
+ */
+const PRIMITIVE_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "int",
+  "double",
+  "bool",
+  "table",
+  "any",
+  "void",
+  "number",
+  "function",
+  "nil",
+]);
+
+/** Whether a bare type name is a non-linkable primitive. */
+export function isPrimitiveType(name: string): boolean {
+  return PRIMITIVE_TYPES.has(name.trim().toLowerCase());
+}
+
+/**
+ * Build a `name → ApiItem` index over the TOP-LEVEL items of an API tree.
+ *
+ * Top-level names are unique per the module's authoring rules (see
+ * `gameApi.ts`), so a lookup is unambiguous. This must be built over the
+ * UNFILTERED tree so a type ref resolved from inside a filtered view lands on
+ * the complete type, not a filtered stub. The first occurrence of a name wins;
+ * later duplicates (which should not exist) are ignored.
+ */
+export function buildTypeIndex(items: ApiItem[]): Map<string, ApiItem> {
+  const index = new Map<string, ApiItem>();
+  for (const item of items) {
+    if (!index.has(item.name)) index.set(item.name, item);
+  }
+  return index;
+}
+
+/**
+ * Resolve a type name (as written in a `detail`/arg/return string) to its
+ * canonical top-level {@link ApiItem}, or `null` if it names no known type.
+ *
+ * A trailing `[]` (array types like `CreatureEffect[]`) is stripped before
+ * lookup — the element type is what you drill into. Unknown names (typos,
+ * unmodeled types) and primitives (which are never indexed) return `null`.
+ */
+export function resolveTypeRef(name: string, index: Map<string, ApiItem>): ApiItem | null {
+  const base = name.trim().replace(/\[\]$/, "");
+  return index.get(base) ?? null;
+}

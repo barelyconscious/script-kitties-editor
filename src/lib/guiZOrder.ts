@@ -43,7 +43,7 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model".
  */
 
-import { flatRootScope, type ResolveScope, resolveTypedProp } from "./guiBinding";
+import { type ResolveScope, resolveTypedProp, viewScope } from "./guiBinding";
 import type { GuiNode } from "./guiNode";
 
 /** The attribute name carrying a box's paint order among its siblings. Bindable. */
@@ -54,8 +54,9 @@ export const DEFAULT_LAYER = 0;
 
 /**
  * A box-producing element tag. Mirrors the renderer's `isVisualTag`: `View` is the
- * stage (not itself a participating box) and `Event` is non-visual. Kept in lockstep
- * with `GuiPreview` so the flatten enumerates exactly the boxes the renderer paints.
+ * stage (not itself a participating box) and `GridLayout` is a non-visual control
+ * element. Kept in lockstep with `GuiPreview` so the flatten enumerates exactly the
+ * boxes the renderer paints.
  */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
@@ -130,12 +131,12 @@ export function resolveLayer(node: GuiNode, scope: ResolveScope): number {
  *
  * `root` is expected to be the `<View>` stage; its children are the first
  * participating boxes (the stage itself is not a box, so its children's
- * `parentKey` is `""`). `layer` tokens resolve against the single flat model —
- * identical to how the renderer resolves the rest of a box's attributes.
+ * `parentKey` is `""`). `layer` tokens resolve against the View frame (a `{$.x}`
+ * binding) — identical to how the renderer resolves the rest of a box's attributes.
  */
 export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   const boxes: FlatBox[] = [];
-  const scope = flatRootScope(model);
+  const scope = viewScope(model);
 
   /**
    * Visit the visual children of `parent` in document order. Each child is one box;
@@ -146,7 +147,7 @@ export function flattenBoxes(root: GuiNode, model?: unknown): FlatBox[] {
   function visitChildren(children: GuiNode[], parentKey: BoxKey): void {
     let siblingIndex = 0; // position WITHIN this sibling group
     for (const child of children) {
-      if (!isVisualTag(child.tag)) continue; // <Event> et al. — non-visual, no box
+      if (!isVisualTag(child.tag)) continue; // <GridLayout> et al. — non-visual, no box
       emit(child, parentKey, siblingIndex);
       siblingIndex += 1;
     }

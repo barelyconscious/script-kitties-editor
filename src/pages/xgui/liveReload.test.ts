@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { type GuiNode, type GuiTag, parseGui } from "../../lib/guiNode";
 import {
   changedPathIsOpenComponent,
+  changedPathIsOpenController,
+  changedPathStem,
+  classifyOpenChange,
   decideLiveReload,
   nodeIdAtIndexPath,
   nodeIndexPath,
@@ -13,24 +16,66 @@ function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
 }
 
+describe("changedPathStem — normalize a payload path to the mount-cache key", () => {
+  it("strips the folder and the .xml extension to the bare stem", () => {
+    expect(changedPathStem("widgets/bag_slot.xml")).toBe("bag_slot");
+    expect(changedPathStem("bag_slot.xml")).toBe("bag_slot");
+    expect(changedPathStem("a/b/c/deep.xml")).toBe("deep");
+  });
+
+  it("strips .xml case-insensitively (matches srcBasename)", () => {
+    expect(changedPathStem("widgets/bag_slot.XML")).toBe("bag_slot");
+  });
+
+  it("leaves a non-.xml file (e.g. a controller .lua) as a stem that matches no XML entry", () => {
+    // A controller edit fires gui-changed too; its stem must NOT collapse to a
+    // clear-all (that's null's job) — it stays a distinct string that no mounted
+    // XML child is keyed by, so the targeted invalidation is a harmless no-op.
+    expect(changedPathStem("widgets/bag_controller.lua")).toBe("bag_controller.lua");
+    expect(changedPathStem("bag_controller.lua")).toBe("bag_controller.lua");
+  });
+
+  it("returns null for a null payload (the clear-all fallback)", () => {
+    expect(changedPathStem(null)).toBeNull();
+  });
+});
+
 describe("onGuiChangedAlways — unconditional per-change side effects", () => {
-  it("refreshes the list AND invalidates the mount cache on every change", () => {
+  it("refreshes the list AND invalidates the CHANGED mount by its normalized stem", () => {
     const refreshList = vi.fn();
     const invalidateMounts = vi.fn();
-    onGuiChangedAlways(refreshList, invalidateMounts);
-    // Both must fire regardless of branch — the mount-cache clear is what makes
-    // includers re-fetch a saved/edited child (task 488).
+    onGuiChangedAlways(refreshList, invalidateMounts, "widgets/bag_slot.xml");
+    // Both must fire regardless of branch — the targeted mount-cache drop is what
+    // makes includers re-fetch a saved/edited child (task 488) without flashing the
+    // OTHER embedded children (task 523).
     expect(refreshList).toHaveBeenCalledTimes(1);
     expect(invalidateMounts).toHaveBeenCalledTimes(1);
+    expect(invalidateMounts).toHaveBeenCalledWith("bag_slot");
+  });
+
+  it("passes null through on an unattributable payload (clear-all fallback)", () => {
+    const refreshList = vi.fn();
+    const invalidateMounts = vi.fn();
+    onGuiChangedAlways(refreshList, invalidateMounts, null);
+    expect(refreshList).toHaveBeenCalledTimes(1);
+    expect(invalidateMounts).toHaveBeenCalledWith(null);
   });
 });
 
 describe("decideLiveReload — the three reconciliation branches", () => {
-  const base = { openName: "bag", openPath: "widgets/bag.xml", dirty: false };
+  const base = {
+    openName: "bag",
+    openPath: "widgets/bag.xml",
+    openControllerFileName: "bag_controller.lua",
+    dirty: false,
+  };
 
   it("refresh-only when nothing is open (list still refreshes upstream)", () => {
     expect(
-      decideLiveReload({ openName: null, openPath: null, dirty: false }, "widgets/bag.xml"),
+      decideLiveReload(
+        { openName: null, openPath: null, openControllerFileName: null, dirty: false },
+        "widgets/bag.xml",
+      ),
     ).toBe("refresh-only");
   });
 
@@ -53,6 +98,20 @@ describe("decideLiveReload — the three reconciliation branches", () => {
   it("notice-dirty when the OPEN component changed and the editor is DIRTY (no stomp)", () => {
     expect(decideLiveReload({ ...base, dirty: true }, "widgets/bag.xml")).toBe("notice-dirty");
   });
+
+  it("reload-open when the open component's CONTROLLER changed and the editor is CLEAN", () => {
+    // A controller `.lua` edit reconciles through the SAME clean→reload path as
+    // the `.xml` — matched by basename against openControllerFileName.
+    expect(decideLiveReload({ ...base, dirty: false }, "widgets/bag_controller.lua")).toBe(
+      "reload-open",
+    );
+  });
+
+  it("notice-dirty when the open component's CONTROLLER changed and the editor is DIRTY", () => {
+    expect(decideLiveReload({ ...base, dirty: true }, "widgets/bag_controller.lua")).toBe(
+      "notice-dirty",
+    );
+  });
 });
 
 describe("changedPathIsOpenComponent", () => {
@@ -68,6 +127,74 @@ describe("changedPathIsOpenComponent", () => {
     );
     expect(changedPathIsOpenComponent({ openPath: "widgets/bag.xml" }, null)).toBe(false);
     expect(changedPathIsOpenComponent({ openPath: null }, "widgets/bag.xml")).toBe(false);
+  });
+});
+
+describe("changedPathIsOpenController", () => {
+  it("matches the open controller by basename (across differing folders)", () => {
+    expect(
+      changedPathIsOpenController(
+        { openControllerFileName: "bag_controller.lua" },
+        "widgets/bag_controller.lua",
+      ),
+    ).toBe(true);
+    // Basename identity: a bare filename with no folder still matches.
+    expect(
+      changedPathIsOpenController(
+        { openControllerFileName: "bag_controller.lua" },
+        "bag_controller.lua",
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a different basename, a null path, or no controller", () => {
+    expect(
+      changedPathIsOpenController(
+        { openControllerFileName: "bag_controller.lua" },
+        "widgets/shop_controller.lua",
+      ),
+    ).toBe(false);
+    expect(
+      changedPathIsOpenController({ openControllerFileName: "bag_controller.lua" }, null),
+    ).toBe(false);
+    expect(
+      changedPathIsOpenController({ openControllerFileName: null }, "widgets/bag_controller.lua"),
+    ).toBe(false);
+  });
+});
+
+describe("classifyOpenChange", () => {
+  const base = {
+    openName: "bag",
+    openPath: "widgets/bag.xml",
+    openControllerFileName: "bag_controller.lua",
+    dirty: false,
+  };
+
+  it("returns 'xml' for the open component's .xml path", () => {
+    expect(classifyOpenChange(base, "widgets/bag.xml")).toBe("xml");
+  });
+
+  it("returns 'controller' for the open component's controller basename", () => {
+    expect(classifyOpenChange(base, "widgets/bag_controller.lua")).toBe("controller");
+  });
+
+  it("returns 'other' for an unrelated path", () => {
+    expect(classifyOpenChange(base, "widgets/shop.xml")).toBe("other");
+  });
+
+  it("returns 'other' when nothing is open, even for a matching path", () => {
+    expect(
+      classifyOpenChange(
+        {
+          openName: null,
+          openPath: "widgets/bag.xml",
+          openControllerFileName: "bag_controller.lua",
+          dirty: false,
+        },
+        "widgets/bag.xml",
+      ),
+    ).toBe("other");
   });
 });
 

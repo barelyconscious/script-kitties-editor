@@ -11,12 +11,13 @@ import type { ComponentResolver } from "./guiModelScaffold";
 
 const tree = (xml: string) => parseGui(xml);
 
-// A "button" child that now binds only {label}; a "card" parent that includes it.
-const button = tree('<View><Text text="{label}"/></View>');
-const card = tree('<View><Component src="button.xml" data="buttonProps"/></View>');
-const plain = tree('<View><Text text="{title}"/></View>'); // references nothing
+// A "button" child that now binds only {$.label}; a "card" parent that includes it.
+const button = tree('<View><Text text="{$.label}"/></View>');
+const card = tree('<View><Component src="button.xml" data="{$.buttonProps}"/></View>');
+const plain = tree('<View><Text text="{$.title}"/></View>'); // references nothing new
 
-const resolve: ComponentResolver = (name) => (name.replace(/\.xml$/, "") === "button" ? button : undefined);
+const resolve: ComponentResolver = (name) =>
+  name.replace(/\.xml$/, "") === "button" ? button : undefined;
 
 const components = [
   { name: "button", path: "button.xml", root: button },

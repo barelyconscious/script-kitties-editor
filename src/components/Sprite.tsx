@@ -1,42 +1,26 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { loadSprite, useSpriteCacheVersion } from "./spriteCache";
 
-// Module-level cache so the same sprite isn't fetched once per row. Keyed by
-// sprite name; the value is the in-flight (or settled) promise of its data URL
-// (null = no art). Cleared wholesale when the install path changes is not yet
-// wired here — a future config-change event could call spriteCache.clear().
-const spriteCache = new Map<string, Promise<string | null>>();
-
-/**
- * Fetch a sprite's data URL through the `get_sprite` Tauri command, memoized in
- * the module-level {@link spriteCache} so a name is fetched at most once across
- * the whole app (the `<Sprite>` component, the XGUI preview's textured boxes, and
- * any other consumer all share this one cache). Resolves to `null` for art that
- * is missing or fails to load.
- */
-export function loadSprite(name: string): Promise<string | null> {
-  let pending = spriteCache.get(name);
-  if (!pending) {
-    pending = invoke<string | null>("get_sprite", { name }).catch(() => null);
-    spriteCache.set(name, pending);
-  }
-  return pending;
-}
+export { loadSprite } from "./spriteCache";
 
 /**
  * Resolve a sprite name to its data URL (or `null`), sharing the module-level
- * {@link spriteCache} with {@link Sprite}. A `null`/empty name short-circuits to
- * `null` without a fetch. The result arrives asynchronously: the hook returns
- * `null` until the cached promise settles, then the data URL. Stale results from a
+ * sprite cache with {@link Sprite}. A `null`/empty name short-circuits to `null`
+ * without a fetch. The result arrives asynchronously: the hook returns `null`
+ * until the cached promise settles, then the data URL. Stale results from a
  * superseded name are dropped (the effect's cancel guard), so rapid name changes
  * never paint an out-of-date sprite.
  *
  * This is the reuse point for the XGUI preview's textured boxes — it shares the
- * one cache rather than adding a second.
+ * one cache rather than adding a second. Subscribing to the cache version means an
+ * external image edit (a `sprites-changed` clear) re-runs the fetch and re-paints.
  */
 export function useSprite(name: string | null | undefined): string | null {
   const [src, setSrc] = useState<string | null>(null);
+  // A cache clear bumps this, re-running the effect against the now-empty cache.
+  const version = useSpriteCacheVersion();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger — a clearSpriteCache() bump must re-run this effect so it re-fetches fresh bytes, even though the body doesn't read `version` directly (matches guiComponentCache's `ver`)
   useEffect(() => {
     if (!name) {
       setSrc(null);
@@ -50,7 +34,7 @@ export function useSprite(name: string | null | undefined): string | null {
     return () => {
       cancelled = true;
     };
-  }, [name]);
+  }, [name, version]);
   return src;
 }
 
@@ -69,6 +53,8 @@ export function Sprite({
   const [src, setSrc] = useState<string | null>(null);
   const [inView, setInView] = useState(!lazy);
   const placeholderRef = useRef<HTMLDivElement | null>(null);
+  // A cache clear (external image edit) bumps this, re-running the fetch below.
+  const version = useSpriteCacheVersion();
 
   // Flip `inView` once the placeholder scrolls near the viewport.
   useEffect(() => {
@@ -88,6 +74,7 @@ export function Sprite({
     return () => obs.disconnect();
   }, [inView]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger — a clearSpriteCache() bump must re-run this effect so it re-fetches fresh bytes, even though the body doesn't read `version` directly (matches guiComponentCache's `ver`)
   useEffect(() => {
     if (!inView) return;
     let cancelled = false;
@@ -98,7 +85,7 @@ export function Sprite({
     return () => {
       cancelled = true;
     };
-  }, [name, inView]);
+  }, [name, inView, version]);
 
   if (!src) {
     // Placeholder for art that's missing, still loading, or not yet in view.

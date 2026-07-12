@@ -22,16 +22,17 @@
  *   "Colors and the palette".
  */
 
-import { Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ChevronRight, Copy, Lock, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { colorCodeToCss } from "../../lib/guiBinding";
-import type { GuiNode } from "../../lib/guiNode";
+import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { usePalette } from "../../lib/guiPalette";
 import { ComponentPicker } from "./ComponentPicker";
+import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 import {
   deriveRows,
@@ -42,14 +43,16 @@ import {
   rowsToAttrs,
 } from "./freeformRows";
 import {
+  bindingDisplayValue,
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
+  compoundLiveWrite,
   computedId,
-  type FieldKind,
   fieldsForTag,
   formatCompound,
   isBoundField,
   nodeHasId,
+  normalizeBinding,
   type PropertyField,
   parseCompound,
   srcBasename,
@@ -107,9 +110,8 @@ export function PropertiesPanel() {
   };
 
   const computed = computedId(path);
-  // 475: Event nodes have NO id (task 471) — they are addressed by `name`/`handler`,
-  // not by a hierarchical id. So hide BOTH the computed read-only id and the editable
-  // local id for an Event; every other tag still shows them.
+  // Tags with no id (GridLayout, the root View) hide BOTH the computed read-only id
+  // and the editable local id; every other tag shows them.
   const hasId = nodeHasId(node.tag);
   // The parent tag (the node just above the selected one in the path) decides
   // whether the selected node OWNS its geometry: a child of a <GridLayout> does
@@ -153,90 +155,123 @@ export function PropertiesPanel() {
         className="min-h-0 overflow-y-auto px-3 pb-3"
         onBlur={() => dispatch({ type: "commitHistory" })}
       >
-       <fieldset
-         disabled={locked}
-         className={cn("m-0 min-w-0 border-0 p-0", locked && "opacity-60")}
-       >
-        {/* <Component> src — the included component's basename. Pinned to the very
+        <fieldset
+          disabled={locked}
+          className={cn("m-0 min-w-0 border-0 p-0", locked && "opacity-60")}
+        >
+          {/* <Component> src — the included component's basename. Pinned to the very
             top and rendered as an obviously NON-editable, locked field: it is set
             once via the tree's component picker (when the <Component> is added) and
             never typed here. */}
-        {node.tag === "Component" && (
-          <FieldRow label="src">
-            <div
-              aria-readonly="true"
-              title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
-              className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                {srcBasename(node.attrs.src) || "—"}
-              </span>
-            </div>
-          </FieldRow>
-        )}
-
-        {/* Computed read-only hierarchical id + editable local id — hidden for Event
-            nodes, which have no id (475). */}
-        {hasId && (
-          <>
-            <FieldRow label="computed id">
-              <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
-                <span
-                  className="flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
-                  title={computed || "no id set"}
-                >
-                  {computed || "—"}
+          {node.tag === "Component" && (
+            <FieldRow label="src">
+              <div
+                aria-readonly="true"
+                title={`${node.attrs.src ?? ""} — set via the component picker (read-only)`}
+                className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-dashed bg-muted/60 px-2 py-1 text-muted-foreground"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                  {srcBasename(node.attrs.src) || "—"}
                 </span>
-                <CopyIdButton value={computed} />
               </div>
             </FieldRow>
+          )}
 
-            <FieldRow label="id">
-              <Input
-                value={node.attrs.id ?? ""}
-                onChange={(e) => setAttr("id", e.currentTarget.value)}
-                placeholder="local id"
-                className="h-7 font-mono text-xs"
-              />
-            </FieldRow>
-          </>
-        )}
+          {/* Computed read-only hierarchical id + editable local id — hidden for tags
+            with no id (GridLayout, the root View). */}
+          {hasId && (
+            <>
+              <FieldRow label="computed id">
+                <div className="flex items-center gap-1 rounded-md border border-dashed bg-muted/40 pr-1 pl-2">
+                  <span
+                    className="min-w-0 flex-1 truncate py-1 font-mono text-muted-foreground text-xs"
+                    title={computed || "no id set"}
+                  >
+                    {computed || "—"}
+                  </span>
+                  <CopyIdButton value={computed} />
+                </div>
+              </FieldRow>
 
-        {/* <Component> data — the key of a data-model OBJECT to seat as the mounted
-            child's root (auto-populated from the child's token shape). A bare model
-            key; clearing it removes the binding. Committed on BLUR (not per
-            keystroke) so a half-typed name never spawns a throwaway model key. */}
-        {node.tag === "Component" && (
-          <FieldRow label="data">
-            <DataKeyField
-              key={node.nodeId}
-              value={node.attrs.data ?? ""}
-              onCommit={(v) => setAttr("data", v)}
-            />
-          </FieldRow>
-        )}
+              <FieldRow label="id">
+                <IdField
+                  value={node.attrs.id ?? ""}
+                  onChange={(value) => setAttr("id", value)}
+                  autoFocus={state.pendingIdFocusNodeId === node.nodeId}
+                  onAutoFocused={() => dispatch({ type: "consumeIdFocus" })}
+                />
+              </FieldRow>
+            </>
+          )}
 
-        {/* The root View has no editable properties here — its id is auto-set on
-            create and its controller is wired via the Controller tab. Instead of a
-            dead-end note, offer the add-child actions so the panel is a starting
-            point rather than an empty surface. */}
-        {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
+          {/* The root View's structural attrs are managed elsewhere (id auto-set on
+            create; controller via the Controller tab); its one schema field
+            (scopeName) renders via the map below. Offer the add-child actions here
+            so the panel is a starting point rather than a near-empty surface. */}
+          {node.tag === "View" && <ViewChildAdder viewNodeId={node.nodeId} />}
 
-        {/* Well-known fields for the tag (position/size suppressed for a grid
-            child — the parent GridLayout owns its geometry). */}
-        {fieldsForTag(node.tag, parentTag).map((field) => (
-          <SchemaField key={field.name} node={node} field={field} onSet={setAttr} />
-        ))}
+          {/* Well-known fields for the tag (position/size suppressed for a grid
+            child — the parent GridLayout owns its geometry). Ungrouped fields
+            render inline; fields tagged with a `group` collapse under a section
+            header below (schema-driven — grouped generically by the group key). */}
+          <SchemaFields node={node} parentTag={parentTag} onSet={setAttr} />
 
-        {/* Freeform override rows (Component overrides + any unrecognized attr).
+          {/* Freeform override rows (Component overrides + any unrecognized attr).
             Keyed by nodeId so switching the selected element re-derives fresh
             local rows for it (a clean mount), rather than carrying the previous
             node's in-progress rows across. Same-node external changes (undo/redo)
             are handled inside via reconcileRows. */}
-        <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
-       </fieldset>
+          <FreeformRows key={node.nodeId} node={node} onReplace={setAttrs} />
+        </fieldset>
       </div>
     </div>
+  );
+}
+
+/**
+ * The editable local-`id` input. Extracted into its own component so it can own a
+ * ref + effect: when `autoFocus` flips true (the node was just CREATED via the
+ * tree/View add-child, which sets {@link import("./editorState").EditorState.pendingIdFocusNodeId}),
+ * it focuses and SELECTS the field so the first keystroke replaces the auto-assigned
+ * id (`Panel1`, …), then calls `onAutoFocused` to consume the one-shot request.
+ * Selecting an existing element by CLICK never sets `autoFocus`, so clicking around
+ * the tree never steals focus into this field. A focus attempt is skipped when the
+ * input is disabled (a locked node's fieldset), which never coincides with a fresh add.
+ */
+function IdField({
+  value,
+  onChange,
+  autoFocus,
+  onAutoFocused,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  autoFocus: boolean;
+  onAutoFocused: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const input = ref.current;
+    if (!input || input.disabled) return;
+    // Defer to the next frame: the add-child menu (a Radix ContextMenu) restores
+    // focus to its trigger row when it closes, which can land AFTER this commit and
+    // steal focus. Focusing on the next frame runs after that, so the id field wins.
+    const raf = requestAnimationFrame(() => {
+      input.focus();
+      input.select(); // pre-select the auto-id so the first keystroke replaces it
+      onAutoFocused();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [autoFocus, onAutoFocused]);
+  return (
+    <Input
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      placeholder="local id"
+      className="h-7 font-mono text-xs"
+    />
   );
 }
 
@@ -339,17 +374,22 @@ function CopyIdButton({ value }: { value: string }) {
 }
 
 /**
- * The `<Component>` `data` key input. Edits are LOCAL until BLUR (or Enter), so a
- * half-typed name like "b"/"bu"/"but" never lands on the node — which would spawn a
- * throwaway data-model object per keystroke. Mounted with a `key={nodeId}` by the
- * caller so selecting a different element gives it a fresh value; an external change
- * to the committed value (undo/redo) re-syncs the draft.
+ * A whole-value BINDING field (`data` / `dataCollection` / `tooltipData`). The input
+ * EDITS the inner model path; the STORED attr is the normalized grammar token
+ * ({@link normalizeBinding}) — a bare key is unresolvable under the strict grammar, so
+ * it must never land on the node. The displayed draft is the inner path of a simple
+ * `{$.x}` form ({@link bindingDisplayValue}) so it reads as "edit the path".
+ *
+ * Edits are LOCAL until BLUR (or Enter): a half-typed path like "b"/"bu"/"but" never
+ * commits — which would otherwise spawn a throwaway data-model object per keystroke.
+ * An external change to the committed value (undo/redo, node switch) re-syncs the
+ * draft to the newly-displayed path.
  */
-function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+function BindingField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(() => bindingDisplayValue(value));
+  useEffect(() => setDraft(bindingDisplayValue(value)), [value]);
   const commit = () => {
-    const next = draft.trim();
+    const next = normalizeBinding(draft);
     if (next !== value) onCommit(next);
   };
   return (
@@ -360,9 +400,112 @@ function DataKeyField({ value, onCommit }: { value: string; onCommit: (next: str
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      placeholder="data model key"
+      placeholder="model path, e.g. creature"
       className="h-7 font-mono text-xs"
     />
+  );
+}
+
+/**
+ * The tag's well-known fields, split into inline (ungrouped) rows and collapsible
+ * grouped sections. The split is SCHEMA-DRIVEN — fields are grouped generically by
+ * their {@link PropertyField.group} key (in first-appearance order), so the panel
+ * never hardcodes "Interaction". Ungrouped fields render exactly as before; each
+ * group renders under a {@link FieldGroup} section header.
+ */
+function SchemaFields({
+  node,
+  parentTag,
+  onSet,
+}: {
+  node: GuiNode;
+  parentTag: GuiTag | undefined;
+  onSet: (name: string, value: string) => void;
+}) {
+  const fields = fieldsForTag(node.tag, parentTag);
+  const ungrouped: PropertyField[] = [];
+  const groupOrder: string[] = [];
+  const grouped = new Map<string, PropertyField[]>();
+  for (const field of fields) {
+    if (!field.group) {
+      ungrouped.push(field);
+      continue;
+    }
+    const existing = grouped.get(field.group);
+    if (existing) {
+      existing.push(field);
+    } else {
+      grouped.set(field.group, [field]);
+      groupOrder.push(field.group);
+    }
+  }
+
+  return (
+    <>
+      {ungrouped.map((field) => (
+        <SchemaField key={field.name} node={node} field={field} onSet={onSet} />
+      ))}
+      {groupOrder.map((group) => (
+        // Keyed by nodeId + group so switching the selected element re-derives the
+        // section's default collapsed/expanded state for the new node (a fresh mount)
+        // rather than carrying the previous node's toggle across.
+        <FieldGroup
+          key={`${node.nodeId}:${group}`}
+          title={group}
+          fields={grouped.get(group) ?? []}
+          node={node}
+          onSet={onSet}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A collapsible section for a group of schema fields (e.g. "Interaction"). The
+ * section is COLLAPSED by default when the node carries NONE of its fields, and
+ * EXPANDED when any is present — so an element that already wires up interaction
+ * opens showing it, while a plain element keeps the section tucked away. Presence
+ * (the attr KEY existing), not a non-empty value, is the test: the structure tree's
+ * "Add handler" writes an EMPTY handler attr then selects the node, and the present
+ * key must open the group so the author lands on the field to fill in. Clearing a
+ * field removes its attr (see {@link withAttr}), so an all-cleared group
+ * re-collapses on its next mount. The initial state is computed once on mount; the
+ * parent keys this by nodeId so a node switch remounts with a freshly-computed default.
+ */
+function FieldGroup({
+  title,
+  fields,
+  node,
+  onSet,
+}: {
+  title: string;
+  fields: PropertyField[];
+  node: GuiNode;
+  onSet: (name: string, value: string) => void;
+}) {
+  const anySet = fields.some((f) => f.name in node.attrs);
+  const [open, setOpen] = useState(anySet);
+
+  return (
+    <div className="mt-3 border-t pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="mb-1 flex w-full items-center gap-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide transition-colors hover:text-foreground"
+      >
+        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+        {title}
+        {!open && anySet && <span className="ml-1 size-1.5 rounded-full bg-sky-500" />}
+      </button>
+      {open && (
+        <div>
+          {fields.map((field) => (
+            <SchemaField key={field.name} node={node} field={field} onSet={onSet} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -379,47 +522,174 @@ function SchemaField({
   const value = node.attrs[field.name] ?? "";
   return (
     <FieldRow label={field.label}>
-      <FieldControl kind={field.kind} name={field.name} value={value} onSet={onSet} />
+      <FieldControl field={field} value={value} onSet={onSet} />
     </FieldRow>
   );
 }
 
 /** The input control for a given field kind. */
 function FieldControl({
-  kind,
-  name,
+  field,
   value,
   onSet,
 }: {
-  kind: FieldKind;
-  name: string;
+  field: PropertyField;
   value: string;
   onSet: (name: string, value: string) => void;
 }) {
+  const { name, kind } = field;
   switch (kind) {
-    case "modelKey":
-      // A bare model key (e.g. GridLayout's dataCollection) — commit on blur/Enter
-      // (not per keystroke) so a half-typed key doesn't spawn a throwaway scaffold
-      // entry per character. Reuses the same control as <Component>'s `data` key.
-      return <DataKeyField value={value} onCommit={(v) => onSet(name, v)} />;
+    case "binding":
+      // A whole-value binding (data / dataCollection / tooltipData) — edits the inner
+      // model path and stores the normalized grammar token, committed on blur/Enter
+      // (not per keystroke) so a half-typed path doesn't spawn a throwaway scaffold
+      // entry per character.
+      return <BindingField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
-      return <CompoundField name={name} value={value} onSet={onSet} />;
+      // `literalOnly` (grid `cellSize`) drops the per-field {token} affordance — grid
+      // structure is stamped at load, so a token can never bind (it is an ERROR lint).
+      return (
+        <CompoundField name={name} value={value} onSet={onSet} literalOnly={field.literalOnly} />
+      );
     case "color":
       return <ColorField name={name} value={value} onSet={onSet} />;
     case "sprite":
       return <SpriteField name={name} value={value} onSet={onSet} />;
     case "boolean":
-      return <BooleanField name={name} value={value} onSet={onSet} />;
+      // `literalOnly` (modal) drops the {token} affordance — the engine reads it
+      // pre-binding, so a token there is a lint, not a binding.
+      return (
+        <BooleanField name={name} value={value} onSet={onSet} literalOnly={field.literalOnly} />
+      );
+    case "handler":
+      return <HandlerField name={name} value={value} onSet={onSet} />;
+    case "componentRef":
+      return <ComponentRefField name={name} value={value} onSet={onSet} />;
     default:
+      // A `literalOnly` text field (grid structure: rows/columns/gutter/cellSize) drops
+      // the `{token}` affordance — the value is stamped at load, so a token can never
+      // bind (it is an ERROR lint). Everything else advertises literal-or-token.
       return (
         <Input
           value={value}
           onChange={(e) => onSet(name, e.currentTarget.value)}
-          placeholder="literal or {token}"
-          className={cn("h-7 text-xs", isBoundField(value) && boundInputClass)}
+          placeholder={field.literalOnly ? "literal only" : "literal or {token}"}
+          className={cn(
+            "h-7 text-xs",
+            !field.literalOnly && isBoundField(value) && boundInputClass,
+          )}
         />
       );
   }
+}
+
+/** Shared styling for a handler input whose typed name isn't a known controller function. */
+const handlerWarnClass = "border-amber-500/60 bg-amber-500/10";
+
+/**
+ * An interaction HANDLER field: a dropdown of the open component's controller
+ * function names that STILL allows free typing (a native `<datalist>`), since a hot
+ * reload may add the function after the handler is wired. There is NO `{token}`
+ * affordance (a handler names which function fires, not how the element looks).
+ *
+ * A typed name that isn't among the controller's exported functions gets a
+ * SOFT-WARNING state (amber input + hint) but is never blocked. The warning is
+ * suppressed when we have no function list to check against — a controller not yet
+ * loaded (its text lazy-loads on first Controller-tab view) or a controller-less
+ * component — so a fresh panel never false-warns.
+ */
+function HandlerField({
+  name,
+  value,
+  onSet,
+}: {
+  name: string;
+  value: string;
+  onSet: (name: string, value: string) => void;
+}) {
+  const { state } = useEditorStore();
+  const source = state.open?.controllerText ?? "";
+  const names = useMemo(() => exportedFunctionNames(source), [source]);
+  const listId = useId();
+  const trimmed = value.trim();
+  // Only warn when we HAVE a list to check against: an empty list means "not loaded"
+  // or "no controller", where an unknown name isn't actually knowable.
+  const unknown = names.length > 0 && trimmed !== "" && !names.includes(trimmed);
+
+  return (
+    <div className="space-y-1">
+      <Input
+        list={listId}
+        value={value}
+        onChange={(e) => onSet(name, e.currentTarget.value)}
+        placeholder="controller function"
+        className={cn("h-7 font-mono text-xs", unknown && handlerWarnClass)}
+      />
+      <datalist id={listId}>
+        {names.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      {unknown && (
+        <p className="text-[10px] text-amber-500">
+          Not a known controller function — it may be added on reload.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A COMPONENT-reference field (the `tooltip` attr): the current component shown as a
+ * button that opens the shared {@link ComponentPicker}, plus a clear affordance. The
+ * picker emits the canonical `.xml`-suffixed ref (`gui.kittypacks-tooltip.xml`) — the
+ * exact form the engine resolves on — which is stored verbatim; the display strips the
+ * extension for readability. Literal-only (structural): no `{token}` affordance.
+ */
+function ComponentRefField({
+  name,
+  value,
+  onSet,
+}: {
+  name: string;
+  value: string;
+  onSet: (name: string, value: string) => void;
+}) {
+  const { state } = useEditorStore();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const current = value.trim();
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        className="flex h-7 min-w-0 flex-1 items-center rounded-md border px-2 text-left text-xs transition-colors hover:bg-muted"
+      >
+        <span
+          className={cn("min-w-0 flex-1 truncate font-mono", !current && "text-muted-foreground")}
+        >
+          {current ? srcBasename(current) : "Choose component…"}
+        </span>
+      </button>
+      {current && (
+        <button
+          type="button"
+          aria-label="Clear tooltip component"
+          onClick={() => onSet(name, "")}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+        >
+          <X className="size-3" />
+        </button>
+      )}
+      <ComponentPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={(src) => onSet(name, src)}
+        excludeName={state.open?.name}
+      />
+    </div>
+  );
 }
 
 /** Shared styling for an input whose value is a `{token}` binding. */
@@ -429,33 +699,68 @@ const boundInputClass = "border-sky-500/60 bg-sky-500/10 font-mono text-sky-300"
  * `position`/`size` as four labeled inputs (scale-x, scale-y, offset-x,
  * offset-y). Each field accepts a literal OR a `{token}`; bound fields are
  * styled distinctly. The serialized attr stays the comma form.
+ *
+ * When `literalOnly` is set (grid `cellSize`, whose structure is stamped at load and
+ * cannot bind), each field drops the `{token}` affordance — no bound styling, and the
+ * placeholder advertises "literal only" — mirroring the literal-only text field.
  */
 function CompoundField({
   name,
   value,
   onSet,
+  literalOnly,
 }: {
   name: string;
   value: string;
   onSet: (name: string, value: string) => void;
+  literalOnly?: boolean;
 }) {
   const fields = parseCompound(value);
-  const setField = (key: keyof CompoundFields, fieldValue: string) => {
-    onSet(name, formatCompound({ ...fields, [key]: fieldValue }));
+  // Transient edit buffer for the CURRENTLY-FOCUSED field ONLY (task 521). While
+  // a field has focus its display comes from `draft` — which may be EMPTY
+  // mid-edit, so clearing a cell no longer snaps a `0` back in and typing `23`
+  // yields `23` rather than `023`. Every NON-focused field reads straight from
+  // `fields` (the value prop), so external writes (undo/redo, node switch,
+  // drag-to-move writing `position` live) always show through. The buffer is
+  // dropped on blur, so it never shields a field the user has left.
+  const [draft, setDraft] = useState<{ key: keyof CompoundFields; text: string } | null>(null);
+
+  const change = (key: keyof CompoundFields, text: string) => {
+    setDraft({ key, text });
+    // A non-empty edit commits live so the preview keeps updating; an emptied
+    // field DEFERS (compoundLiveWrite → null) so the store isn't coerced to 0
+    // mid-edit. The blur flush lands the 0 (four well-formed segments) then.
+    const next = compoundLiveWrite(fields, key, text);
+    if (next != null && next !== value) onSet(name, next);
   };
+
+  // Blur boundary: flush the buffered field through formatCompound (an empty
+  // field coerces to `0` here) and drop the buffer so the field re-reads the
+  // value prop. Only fires for the field that actually holds the buffer.
+  const flush = (key: keyof CompoundFields) => {
+    if (!draft || draft.key !== key) return;
+    const next = formatCompound({ ...fields, [key]: draft.text });
+    if (next !== value) onSet(name, next);
+    setDraft(null);
+  };
+
   return (
     <div className="grid grid-cols-2 gap-1.5">
       {COMPOUND_FIELD_LABELS.map(({ key, label }) => {
-        const fieldValue = fields[key];
+        const fieldValue = draft?.key === key ? draft.text : fields[key];
         return (
           <div key={key} className="flex flex-col gap-0.5">
             <span className="text-[10px] text-muted-foreground/80">{label}</span>
             <Input
               value={fieldValue}
-              onChange={(e) => setField(key, e.currentTarget.value)}
-              placeholder="0 or {token}"
+              onChange={(e) => change(key, e.currentTarget.value)}
+              onBlur={() => flush(key)}
+              placeholder={literalOnly ? "0" : "0 or {token}"}
               aria-label={label}
-              className={cn("h-7 text-xs", isBoundField(fieldValue) && boundInputClass)}
+              className={cn(
+                "h-7 text-xs",
+                !literalOnly && isBoundField(fieldValue) && boundInputClass,
+              )}
             />
           </div>
         );
@@ -464,17 +769,39 @@ function CompoundField({
   );
 }
 
-/** A boolean property (true/false) that also accepts a `{token}`. */
+/**
+ * A boolean property (true/false). By default it ALSO accepts a `{token}` (the
+ * select carries a token option + a free-text input). When `literalOnly` is set
+ * (e.g. `modal`, which the engine reads pre-binding), the token affordance is
+ * dropped entirely — just the true/false/default select, no token input.
+ */
 function BooleanField({
   name,
   value,
   onSet,
+  literalOnly,
 }: {
   name: string;
   value: string;
   onSet: (name: string, value: string) => void;
+  literalOnly?: boolean;
 }) {
   const bound = isBoundField(value);
+
+  if (literalOnly) {
+    return (
+      <select
+        value={value === "true" || value === "false" ? value : ""}
+        onChange={(e) => onSet(name, e.currentTarget.value)}
+        className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+      >
+        <option value="">default</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+
   return (
     <div className="flex items-center gap-1.5">
       <select

@@ -31,20 +31,18 @@
  *    ADDS a child to the node tree via `addChildNode` (a finer, intent-named
  *    tree-mutation action layered on the same dirty discipline as `replaceRoot`;
  *    the immutable append itself lives in the pure `guiTreeEdit` module so it is
- *    unit-tested without the store). Any tree mutation marks dirty. Delete /
- *    reparent are deferred (task 452 is ADD only), so no remove/move action yet.
+ *    unit-tested without the store). Any tree mutation marks dirty. DELETE flows
+ *    through `removeNode`; REPARENT/REORDER (drag-and-drop, task 512) through
+ *    `moveNode` (validated by `canMoveTo`) — both immutable ops in `guiTreeEdit`.
  *    `replaceRoot` remains the wholesale escape hatch for F9b/F7 writebacks.
  *  • F9b (properties) — edits a node's `attrs` via the `setNodeAttrs` action,
  *    which replaces one node's attrs by nodeId and marks dirty (the immutable
  *    replace lives in the pure `guiTreeEdit.setNodeAttrs` so it is unit-tested
  *    off-store). A nodeId that is not found is a no-op (no dirty). F7 (drag)
  *    writes a moved node's `position` through this SAME action.
- *  • F9c (events) — `<Event>` children of `<View>` are ordinary nodes in `root`,
- *    so ADD flows through the same `addChildNode` action as F9a, and REMOVE uses
- *    the `removeNode` action (the immutable detach lives in the pure
- *    `guiTreeEdit.removeNode`). The structure TREE is the only caller of
- *    `removeNode` today — and only for `<Event>` rows — so general tree delete
- *    stays deferred.
+ *  • Tree delete — REMOVE uses the `removeNode` action (the immutable detach lives
+ *    in the pure `guiTreeEdit.removeNode`), driven from the structure tree's per-row
+ *    delete affordance, which removes the element and its whole subtree.
  *  • F10 (controller tab) — `activeTab` toggles View/Controller. The controller
  *    TEXT lives in `open.controllerText` (`null` = not-yet-loaded). Three actions
  *    feed it: `loadControllerText` seats disk contents WITHOUT dirtying (the tab
@@ -69,7 +67,18 @@ import { createContext, type ReactNode, useContext, useMemo, useReducer } from "
 import type { GuiNode } from "../../lib/guiNode";
 import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { nodeHasId } from "./guiProperties";
-import { addChild, findNode, nextAutoId, removeNode, setNodeAttrs } from "./guiTreeEdit";
+import {
+  addChild,
+  canDuplicate,
+  canMoveTo,
+  duplicateNode,
+  findNode,
+  moveNode,
+  nextAutoId,
+  nodePath,
+  removeNode,
+  setNodeAttrs,
+} from "./guiTreeEdit";
 import { remapSelection } from "./liveReload";
 
 /**
@@ -138,6 +147,15 @@ export type EditorState = {
   /** The single selection (a `nodeId` in `open.root`), shared tree↔preview. */
   selectedNodeId: string | null;
   /**
+   * A ONE-SHOT request to focus the editable local-`id` field in the Properties
+   * panel, carrying the `nodeId` whose id field should take focus. Set by
+   * `addChildNode` for a freshly-created id-bearing element (Panel/Text/Component) so
+   * the user can immediately type its id; the Properties panel focuses+selects that
+   * field on render and dispatches `consumeIdFocus` to clear this. `null` the rest of
+   * the time. Ephemeral view state — never dirties, never serialized, not undoable.
+   */
+  pendingIdFocusNodeId: string | null;
+  /**
    * The `nodeId`s the user has LOCKED (task: element lock). A locked element
    * cannot be selected by clicking the preview and its properties are read-only
    * in the Properties panel — it is an editor-only protection, NOT part of the
@@ -190,7 +208,7 @@ export type EditorState = {
  * UNDO/REDO + COALESCING (task 470)
  * ─────────────────────────────────────────────────────────────────────────────
  * VISUAL-tree mutations (`replaceRoot`, `addChildNode`, `setNodeAttrs`,
- * `removeNode`, `addController`) push an undo step. (`setControllerText` does
+ * `removeNode`, `moveNode`, `addController`) push an undo step. (`setControllerText` does
  * NOT — task 472: Monaco owns the controller buffer's undo, so a controller-text
  * edit is dirty-but-not-a-document-step.) Some carry an optional
  * `coalesceKey`: consecutive mutations sharing the SAME key collapse into ONE undo
@@ -215,6 +233,11 @@ export type EditorAction =
   | { type: "close" }
   /** Set the shared selection (tree click / preview click). */
   | { type: "select"; nodeId: string | null }
+  /**
+   * Clear the one-shot {@link EditorState.pendingIdFocusNodeId} after the Properties
+   * panel has focused the id field. Idempotent; carries no payload.
+   */
+  | { type: "consumeIdFocus" }
   /**
    * Toggle the LOCK on the node identified by `nodeId` (task: element lock). A
    * locked element cannot be selected from the preview and its properties are
@@ -269,6 +292,35 @@ export type EditorAction =
    * selection that the removal orphans (the removed node OR a descendant) is cleared.
    */
   | { type: "removeNode"; nodeId: string }
+  /**
+   * Move the node identified by `nodeId` (and its whole subtree) to become a child
+   * of `targetParentId` at `index` — the data half of structure-tree drag-and-drop
+   * (task 512) — marks dirty. VALIDATED via {@link canMoveTo}: an illegal drop
+   * (cycle, root, or a target whose element rules forbid the child) is a clean no-op
+   * (no dirty, no history). `index` follows {@link moveNode}'s current-array
+   * convention (the target's children as they stand before the move; the off-by-one
+   * for a same-parent later move is handled inside `moveNode`). The moved subtree's
+   * `nodeId`s are preserved, so the selection survives without remapping. The
+   * immutable move lives in the pure {@link moveNode} so it is tested off-store; one
+   * discrete move is ONE undo step (no coalescing). Persisted element locks are
+   * re-derived by the `LockPersistence` effect, which fires on the resulting `root`
+   * change (same path `addChildNode`/`removeNode` rely on).
+   */
+  | { type: "moveNode"; nodeId: string; targetParentId: string; index: number }
+  /**
+   * Duplicate the node identified by `nodeId` (and its whole subtree) as the
+   * original's next sibling — marks dirty and SELECTS the clone (mirrors
+   * `addChildNode` selecting the freshly-added node). VALIDATED via
+   * {@link canDuplicate}: an illegal duplication (the root `<View>`, the sole child of
+   * a `<GridLayout>`, a `<GridLayout>` whose parent already caps at one grid, or an
+   * unknown node) is a clean no-op (no dirty, no history). The clone is NEW nodes: the
+   * pure {@link duplicateNode} re-mints every `nodeId` and re-suffixes every authored
+   * `id` to a tree-unique `{id}-copy`, so selection/locks/badges never bleed between
+   * the copy and the original. One discrete duplication is ONE undo step (no
+   * coalescing). The immutable clone lives in the pure {@link duplicateNode} so it is
+   * tested off-store.
+   */
+  | { type: "duplicateNode"; nodeId: string }
   /**
    * Seat the controller's on-disk contents into the working draft WITHOUT marking
    * dirty (F10 lazy-load: the Controller tab read an existing controller via
@@ -349,6 +401,7 @@ export type EditorAction =
 const initialState: EditorState = {
   open: null,
   selectedNodeId: null,
+  pendingIdFocusNodeId: null,
   lockedNodeIds: new Set(),
   hiddenNodeIds: new Set(),
   activeTab: "view",
@@ -438,6 +491,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         open: action.component,
         selectedNodeId: null,
+        pendingIdFocusNodeId: null,
         // Seed locks from persisted structural keys (resolved by the caller against
         // the just-parsed tree); empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
@@ -453,7 +507,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // Clears the document and its history alike.
       return initialState;
     case "select":
-      return { ...state, selectedNodeId: action.nodeId };
+      // A manual selection (tree/preview click) is never an id-focus trigger, so drop
+      // any pending one-shot request rather than let it fire on the newly-picked node.
+      return { ...state, selectedNodeId: action.nodeId, pendingIdFocusNodeId: null };
+    case "consumeIdFocus":
+      return state.pendingIdFocusNodeId === null
+        ? state
+        : { ...state, pendingIdFocusNodeId: null };
     case "toggleLock": {
       // Editor-only view state: flip membership in the locked set immutably (a
       // fresh Set so the reference change drives a re-render). Never dirties and
@@ -493,7 +553,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // Auto-assign a working local id (`Panel1`, `Text2`, …) so every added
       // element is addressable from the controller/bindings the instant it exists
       // — the user renames it in Properties. Only id-bearing tags get one
-      // (`<Event>` is name→handler, the root `<View>` is the component itself), and
+      // (not `<GridLayout>`; the root `<View>` is the component itself), and
       // only when the child doesn't already carry an explicit id. Assigned HERE,
       // not in `makeChildNode`, because picking a free running number needs the
       // whole tree. `id` goes FIRST in attrs so the serialized XML reads naturally.
@@ -518,6 +578,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // immediately — the user sees what they just added (nodeId is unchanged by
         // the auto-id, so this still points at the inserted node).
         selectedNodeId: child.nodeId,
+        // Request focus on the new element's id field so the user can immediately
+        // type/replace its auto-id — only for id-bearing tags (Panel/Text/Component);
+        // a <GridLayout> has no id field to focus. Consumed by the Properties panel.
+        pendingIdFocusNodeId: nodeHasId(child.tag) ? child.nodeId : null,
         dirty: true,
         // A discrete add is its own undo step (no coalescing).
         ...pushHistory(state, undefined),
@@ -558,6 +622,59 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...pushHistory(state, undefined),
       };
     }
+    case "moveNode": {
+      if (!state.open) return state;
+      // Legality gate: an illegal drop (cycle, root, or an element rule the target
+      // forbids) is a clean no-op — keep every rule in canMoveTo so the UI never
+      // duplicates it. Validate BEFORE mutating.
+      if (!canMoveTo(state.open.root, action.nodeId, action.targetParentId)) return state;
+      const nextRoot = moveNode(
+        state.open.root,
+        action.nodeId,
+        action.targetParentId,
+        action.index,
+      );
+      // A move that lands the node exactly where it already sits returns the SAME
+      // reference → no-op (don't dirty or push history on a null move).
+      if (nextRoot === state.open.root) return state;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        // The moved subtree keeps its nodeIds, so the selection stays valid as-is.
+        dirty: true,
+        // A discrete move is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
+      };
+    }
+    case "duplicateNode": {
+      if (!state.open) return state;
+      // Legality gate: an illegal duplication (root, a one-child grid, a one-grid
+      // container, or an unknown node) is a clean no-op — keep every rule in
+      // canDuplicate so the UI never duplicates it. Validate BEFORE mutating.
+      if (!canDuplicate(state.open.root, action.nodeId)) return state;
+      const nextRoot = duplicateNode(state.open.root, action.nodeId);
+      // Belt-and-suspenders: a legality-passing duplication always produces a fresh
+      // root, but guard the same-reference case like every other tree action.
+      if (nextRoot === state.open.root) return state;
+      // The clone is the original's NEXT SIBLING in the new tree. The original keeps
+      // its nodeId (only the clone is re-minted), so locate it and take the next slot
+      // to select the freshly-created copy (mirrors addChildNode selecting the add).
+      const path = nodePath(nextRoot, action.nodeId);
+      const parent = path && path.length >= 2 ? path[path.length - 2] : null;
+      const originalIndex = parent
+        ? parent.children.findIndex((c) => c.nodeId === action.nodeId)
+        : -1;
+      const clone =
+        parent && originalIndex >= 0 ? (parent.children[originalIndex + 1] ?? null) : null;
+      return {
+        ...state,
+        open: { ...state.open, root: nextRoot },
+        selectedNodeId: clone ? clone.nodeId : state.selectedNodeId,
+        dirty: true,
+        // A discrete duplication is its own undo step (no coalescing).
+        ...pushHistory(state, undefined),
+      };
+    }
     case "loadControllerText":
       // Lazy-load of the saved controller: it IS the on-disk state, so seating it
       // must NOT make the component look unsaved (mirrors `setModelText`).
@@ -590,7 +707,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           ...state.open,
           root: nextRoot,
           controllerFileName: action.fileName,
-          // Seed the controller starter template (the `return function(view) … end`
+          // Seed the controller starter template (the `return function(view, data) … end`
           // wrapper the runtime calls) rather than an empty buffer, so the author
           // starts from the right shape. F11's Save writes this to the new `.lua`.
           controllerText: NEW_CONTROLLER_TEMPLATE,
@@ -614,6 +731,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Selection is pre-remapped by the caller (the new tree re-mints nodeIds,
         // so the old id is meaningless); `null` when the selected node is gone.
         selectedNodeId: action.selectedNodeId,
+        // The re-read tree re-mints nodeIds, so any pending id-focus request is stale.
+        pendingIdFocusNodeId: null,
         // The re-read tree re-mints nodeIds, so locks are re-resolved by the caller
         // from persisted structural keys; empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),

@@ -10,12 +10,27 @@ import { toComponentBasename } from "./guiTree";
 
 /**
  * The starter body a freshly-added controller is seeded with. The runtime calls
- * a controller as `controller(view)` and expects it to return its handler table,
- * so we scaffold that shape (an empty table) rather than an empty file — the
- * author fills in the table instead of remembering the wrapper.
+ * a controller as `controller(view, data)` — `data` is optional (Lua has no
+ * optional-param syntax, so `function(view, data)` *is* the optional form; the
+ * runtime may pass one arg or two) — and expects it to return its handler table.
+ * Controllers commonly call `view:setModel(...)` to set/project the model, so we
+ * scaffold that shape rather than an empty file — the author fills in the table
+ * instead of remembering the wrapper.
+ *
+ * The seat is two-phase: the factory seats the model once at construction, and
+ * the returned table may export `onDataChanged(data)` — the runtime calls it when
+ * upstream data changes so the controller can choose whether/how to re-seat. We
+ * scaffold that hook (with a commented `setModel` re-seat hint) so the author
+ * starts from the full lifecycle shape, not just construction.
  */
-export const NEW_CONTROLLER_TEMPLATE = `return function(view)
-    return {}
+export const NEW_CONTROLLER_TEMPLATE = `return function(view, data)
+    view:setModel({ })
+    return {
+        onDataChanged = function(data)
+            -- re-seat the model when upstream data changes
+            -- view:setModel({ })
+        end,
+    }
 end
 `;
 
@@ -38,4 +53,36 @@ export function normalizeControllerFileName(input: string): string {
   const trimmed = input.trim();
   if (trimmed === "") return "";
   return trimmed.endsWith(".lua") ? trimmed : `${trimmed}.lua`;
+}
+
+/**
+ * The controller-function names a controller source EXPORTS — the candidate
+ * handler names the Properties panel's `handler` dropdown offers (#504) and the
+ * handler-exists lint checks (B4). A controller is shaped as
+ * `return function(view) … return { name = function(self, mouse) … end, … } end`,
+ * so its exports are the keys of the returned table literal.
+ *
+ * This is a REGEX-level parse, deliberately not a Lua parser: it matches every
+ * `name = function(…)` assignment in the source and returns the `name`s in
+ * source order, de-duplicated. That captures the returned-table keys (the real
+ * exports) AND any handler assigned to a named local (`local onClick =
+ * function…`) — both are plausible handler targets, and this powers a dropdown +
+ * a warn-only hint, not correctness, so a superset of names is acceptable and
+ * safe. `return function(view)` (the outer wrapper) is NOT matched, since it has
+ * no `name =` before `function`.
+ */
+export function exportedFunctionNames(source: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const re = /(\w+)\s*=\s*function\b/g;
+  let match: RegExpExecArray | null = re.exec(source);
+  while (match !== null) {
+    const name = match[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      names.push(name);
+    }
+    match = re.exec(source);
+  }
+  return names;
 }

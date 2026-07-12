@@ -18,7 +18,7 @@ export type DataModelParse = { ok: true; model: unknown } | { ok: false; error: 
  * - Empty/whitespace-only text is a valid EMPTY model (`{}`) — a fresh panel with
  *   no bindings yet, not an error. Then every `{token}` renders styled-but-literal.
  * - Valid JSON parses to its value (an object is the common case; arrays/scalars
- *   are accepted but have no top-level keys for `flatRootScope` to bind).
+ *   are accepted but have no fields for a `{$.x}` binding to walk into).
  * - Invalid JSON returns the parser's message so the panel can surface it inline
  *   while keeping the LAST good model live (the caller decides retention policy).
  */

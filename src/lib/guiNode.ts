@@ -16,11 +16,20 @@
  *   (modulo insignificant whitespace).
  */
 
-/** The element tags supported in phase 1. */
-export type GuiTag = "View" | "Panel" | "Text" | "Component" | "Event" | "GridLayout";
+/** The element tags the editor models. */
+export type GuiTag = "View" | "Panel" | "Text" | "Component" | "GridLayout";
 
-/** The phase-1 tags, as a runtime set for parse-time validation. */
-const KNOWN_TAGS = new Set<GuiTag>(["View", "Panel", "Text", "Component", "Event", "GridLayout"]);
+/** The modeled tags, as a runtime set for parse-time validation. */
+const KNOWN_TAGS = new Set<GuiTag>(["View", "Panel", "Text", "Component", "GridLayout"]);
+
+/**
+ * Tags the parser ENCOUNTERS but deliberately IGNORES — dropped along with their
+ * whole subtree at parse time, as if they were never in the XML. `<Event>` handling
+ * moved entirely into the Lua controller (contract update 2026-07-11): the editor no
+ * longer authors, reads, or preserves event registrations, so an `<Event>` in a
+ * component's XML is skipped on load and is absent from the re-serialized file.
+ */
+const IGNORED_TAGS = new Set<string>(["Event"]);
 
 /** The tags a {@link GuiTag GridLayout} may wrap as its single child. */
 const GRID_CHILD_TAGS = new Set<GuiTag>(["Panel", "Text", "Component"]);
@@ -187,12 +196,47 @@ function tokenize(xml: string): Token[] {
 }
 
 /**
+ * Auto-migrate legacy attribute names at parse time.
+ *
+ * The editor historically wrote `textColor` on `<Text>` — but that was a typo:
+ * the shipped C++ engine reads `color` for every widget (`GUILoader.cpp:713`),
+ * so an authored `textColor` is silently dropped in-game. We rewrite it to
+ * `color` here (preserving its authored position) so a loaded component upgrades
+ * on its next save, and emit a WARN-ONLY lint so any straggler in the live gui
+ * tree — which isn't visible from this repo — is surfaced rather than dropped
+ * silently. If a node somehow carries both, the authored `color` wins and the
+ * legacy `textColor` is discarded.
+ */
+function normalizeLegacyAttrs(tag: string, attrs: Record<string, string>): Record<string, string> {
+  if (!("textColor" in attrs)) return attrs;
+
+  const idPart = attrs.id ? ` id="${attrs.id}"` : "";
+  console.warn(
+    `[xgui] <${tag}${idPart}> uses legacy "textColor"; the engine reads "color". ` +
+      'Migrating to "color" — save the component to persist the fix.',
+  );
+
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "textColor") {
+      // Slot `color` into `textColor`'s position — unless an authored `color`
+      // already exists, in which case keep that and drop the legacy alias.
+      if (!("color" in attrs)) next.color = value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
  * Parse XML text into a GuiNode tree.
  *
  * Mints a fresh session-only `nodeId` per node and stores every attribute as a
- * raw verbatim string. Enforces the phase-1 structural rules:
+ * raw verbatim string. Enforces the structural rules:
  * - exactly one top-level element, which MUST be `<View>`;
- * - `<Event>` may appear only as an immediate child of `<View>`;
+ * - `<Event>` elements (and their subtrees) are IGNORED wherever they appear —
+ *   skipped at parse time so they never enter the tree (see {@link IGNORED_TAGS});
  * - `<Component>` may not have children;
  * - `<GridLayout>` is a non-visual control element that repeats a single child:
  *   it may appear ONLY as a child of `<Panel>` or `<View>` (so it can never nest
@@ -208,6 +252,28 @@ export function parseGui(xml: string): GuiNode {
     throw new GuiParseError("Empty document — expected a <View> root element");
 
   let pos = 0;
+
+  /**
+   * Consume an IGNORED element (e.g. `<Event>`) and its entire subtree from the token
+   * stream WITHOUT emitting a node — the element is treated as if it weren't in the
+   * XML. Balances open/close depth (a self-closing open needs no matching close), so a
+   * nested body is skipped wholesale.
+   */
+  function skipIgnoredElement(): void {
+    const open = tokens[pos];
+    pos += 1; // consume the opening token
+    if (open.kind !== "open" || open.selfClosing) return;
+    let depth = 1;
+    while (pos < tokens.length && depth > 0) {
+      const t = tokens[pos];
+      pos += 1;
+      if (t.kind === "open") {
+        if (!t.selfClosing) depth += 1;
+      } else {
+        depth -= 1;
+      }
+    }
+  }
 
   function parseElement(parentTag: GuiTag | null): GuiNode {
     const token = tokens[pos];
@@ -225,9 +291,6 @@ export function parseGui(xml: string): GuiNode {
     if (tag === "View" && parentTag !== null) {
       throw new GuiParseError("<View> may only appear as the top-level element");
     }
-    if (tag === "Event" && parentTag !== "View") {
-      throw new GuiParseError("<Event> may only appear as an immediate child of <View>");
-    }
     if (tag === "GridLayout") {
       // A GridLayout fills its container, so it lives ONLY under a Panel or View.
       // This also forbids nesting a GridLayout inside another GridLayout (a
@@ -241,7 +304,7 @@ export function parseGui(xml: string): GuiNode {
     const node: GuiNode = {
       nodeId: mintNodeId(),
       tag,
-      attrs: token.attrs,
+      attrs: normalizeLegacyAttrs(tag, token.attrs),
       children: [],
     };
 
@@ -258,6 +321,10 @@ export function parseGui(xml: string): GuiNode {
           pos += 1;
           return node;
         }
+        if (next.kind === "open" && IGNORED_TAGS.has(next.tag)) {
+          skipIgnoredElement();
+          continue;
+        }
         throw new GuiParseError("<Component> cannot have children");
       }
       throw new GuiParseError(`Unclosed <${tag}>`);
@@ -271,6 +338,11 @@ export function parseGui(xml: string): GuiNode {
         }
         pos += 1;
         return node;
+      }
+      if (next.kind === "open" && IGNORED_TAGS.has(next.tag)) {
+        // Ignored elements (e.g. <Event>) are dropped wholesale — never a child.
+        skipIgnoredElement();
+        continue;
       }
       const child = parseElement(tag);
       node.children.push(child);

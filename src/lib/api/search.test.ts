@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { ApiItem } from "./gameApi";
-import { filterApiTree, formatSignature, hasSignature, isDrillable, itemMatches } from "./search";
+import {
+  buildTypeIndex,
+  filterApiTree,
+  formatSignature,
+  hasSignature,
+  isDrillable,
+  isPrimitiveType,
+  itemMatches,
+  resolveTypeRef,
+} from "./search";
 
 const tree: ApiItem[] = [
   {
@@ -136,5 +145,78 @@ describe("hasSignature / isDrillable", () => {
   it("reports drillable only for items with members", () => {
     expect(isDrillable(tree[0])).toBe(true);
     expect(isDrillable(tree[1])).toBe(false);
+  });
+});
+
+describe("isPrimitiveType", () => {
+  it("recognizes the closed primitive set", () => {
+    for (const p of [
+      "string",
+      "int",
+      "double",
+      "bool",
+      "table",
+      "any",
+      "void",
+      "number",
+      "function",
+    ]) {
+      expect(isPrimitiveType(p)).toBe(true);
+    }
+  });
+
+  it("is case-insensitive and tolerates surrounding whitespace", () => {
+    expect(isPrimitiveType("Bool")).toBe(true);
+    expect(isPrimitiveType("  int  ")).toBe(true);
+  });
+
+  it("does not treat a modeled type name as a primitive", () => {
+    expect(isPrimitiveType("Creature")).toBe(false);
+    expect(isPrimitiveType("BattleState")).toBe(false);
+  });
+});
+
+describe("buildTypeIndex / resolveTypeRef", () => {
+  const index = buildTypeIndex(tree);
+
+  it("indexes top-level items by name", () => {
+    expect(index.get("Creature")).toBe(tree[0]);
+    expect(index.get("GetBattleState")).toBe(tree[1]);
+    expect(index.size).toBe(3);
+  });
+
+  it("does not index nested members", () => {
+    // `applyEffect` is a Creature member, not a top-level type.
+    expect(index.get("applyEffect")).toBeUndefined();
+  });
+
+  it("resolves a known type name to its item", () => {
+    expect(resolveTypeRef("Creature", index)).toBe(tree[0]);
+  });
+
+  it("strips a trailing [] before resolving array types", () => {
+    expect(resolveTypeRef("Creature[]", index)).toBe(tree[0]);
+  });
+
+  it("returns null for an unknown type name", () => {
+    expect(resolveTypeRef("Inventory", index)).toBeNull();
+    expect(resolveTypeRef("Nope[]", index)).toBeNull();
+  });
+
+  it("returns null for a primitive (never indexed)", () => {
+    expect(resolveTypeRef("string", index)).toBeNull();
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(resolveTypeRef("  Creature  ", index)).toBe(tree[0]);
+  });
+
+  it("keeps only the first occurrence of a duplicated top-level name", () => {
+    const dupes: ApiItem[] = [
+      { name: "Dup", type: "object", documentation: "first" },
+      { name: "Dup", type: "object", documentation: "second" },
+    ];
+    const idx = buildTypeIndex(dupes);
+    expect(idx.get("Dup")?.documentation).toBe("first");
   });
 });

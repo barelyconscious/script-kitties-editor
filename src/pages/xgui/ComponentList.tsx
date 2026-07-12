@@ -33,12 +33,7 @@ import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
 import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
-import {
-  flattenTree,
-  type GuiComponentRef,
-  type GuiFolder,
-  type GuiTreeRow,
-} from "./guiTree";
+import { flattenTree, type GuiComponentRef, type GuiFolder, type GuiTreeRow } from "./guiTree";
 import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
 import { NewFolderDialog } from "./NewFolderDialog";
@@ -130,11 +125,17 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
           return;
         }
         const component = buildOpenComponent(ref, xml);
+        // Eagerly load the controller text at open time (not lazily on first view
+        // of the Controller tab), so the Properties handler dropdown (#504) and the
+        // interaction lints (#506 handler-exists) have it immediately. Best-effort:
+        // a failed or null read leaves controllerText null and the Controller tab's
+        // lazy path re-reads on view — so this is a pure enrichment, never a gate.
+        const seated = await withEagerController(component);
         // Restore any locks persisted for this component (resolved from stable
         // structural keys against the just-parsed tree), so locking survives
         // reloads/restarts.
-        const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
-        dispatch({ type: "open", component, lockedNodeIds });
+        const lockedNodeIds = nodeIdsForKeys(seated.root, getPersistedLocks(seated.path));
+        dispatch({ type: "open", component: seated, lockedNodeIds });
       } catch (err) {
         const message =
           err instanceof GuiParseError
@@ -443,6 +444,28 @@ function ComponentRow({
       </button>
     </li>
   );
+}
+
+/**
+ * Enrich a freshly-built {@link buildOpenComponent} with its controller text read
+ * eagerly from disk (via `get_script`), so the handler dropdown (#504) and the
+ * interaction lints (#506) have it the instant the component opens rather than
+ * waiting for the Controller tab's lazy fetch. A controller-less component, a failed
+ * read, or a `null` return (controller referenced but not yet on disk) is left with
+ * `controllerText: null` — the Controller tab's lazy path is the fallback, so this
+ * never blocks or breaks the open.
+ */
+async function withEagerController(
+  component: ReturnType<typeof buildOpenComponent>,
+): Promise<ReturnType<typeof buildOpenComponent>> {
+  const fileName = component.controllerFileName;
+  if (fileName == null) return component;
+  try {
+    const text = await invoke<string | null>("get_script", { name: fileName });
+    return text != null ? { ...component, controllerText: text } : component;
+  } catch {
+    return component; // lazy re-read in ControllerTab is the fallback
+  }
 }
 
 /** Depth-first search for a component by basename across the whole tree. */

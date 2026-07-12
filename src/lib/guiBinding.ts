@@ -28,12 +28,27 @@
  * a binding" affordance. This module's job is to REPORT whether a value resolved;
  * the styling lives in the renderer.
  *
- * SCOPE: resolution is against a single FLAT model. There is one scope — bare
- * tokens resolve against the one model object (see {@link flatRootScope}); there
- * is no scope stack, no item/root distinction, no nesting. Every resolve entry
- * point takes a {@link ResolveScope} — an opaque lookup of token → value — rather
- * than a bare object, so the resolution rules stay independent of how the lookup
- * is sourced.
+ * SCOPE: resolution follows the XGUI binding grammar (three scopes, each with a
+ * dotted field-access and a whole-object form):
+ *
+ *   - **View / local** — `$.` prefix. `{$.creature.sprite}` walks the component's
+ *     model by dotted path; `{$.}` is the whole model. Valid anywhere (see
+ *     {@link viewScope}).
+ *   - **Grid item** — bare (no prefix). `{sprite}` reads the CURRENT GridLayout
+ *     item; `{.}` is the whole item. Valid ONLY inside a GridLayout child — a bare
+ *     token anywhere else is STRICT-unresolved (engine parity: bare demotes to
+ *     grid-only). Inside a grid child the item and View frames are BOTH live at
+ *     once, so `{sprite}` hits the item AND `{$.x}` still reaches the View model
+ *     (see {@link gridItemScope}).
+ *   - **Named** — `$name.` prefix. `{$app.theme}` / `{$app.}` reach an ancestor
+ *     frame published under `name`. Recognized but DEFERRED (zero shipped usage,
+ *     no ancestor to resolve against in an isolated preview) — always unresolved,
+ *     never a crash.
+ *
+ * Every resolve entry point takes a {@link ResolveScope} — an opaque lookup of
+ * token → value — rather than a bare object, so the resolution rules stay
+ * independent of how the lookup is sourced (View frame, grid item, or a composite
+ * of the two).
  *
  * This module is PURE (no React, no DOM, no palette fetching). Palette fetching
  * is the caller's job (it passes a resolved palette map in); see `guiPalette.ts`
@@ -44,12 +59,14 @@
  */
 
 /**
- * A resolution scope: the lookup a `{token}` resolves against — a single flat
- * model (see {@link flatRootScope}). The resolver only ever calls `lookup(token)`,
- * so the rules here stay independent of how the lookup is sourced.
+ * A resolution scope: the lookup a `{token}` resolves against — a View frame (see
+ * {@link viewScope}), a composite grid-item frame ({@link gridItemScope}), or an
+ * empty-cell frame ({@link emptyItemScope}). The resolver only ever calls
+ * `lookup(token)`, so the rules here stay independent of how the lookup is sourced.
  *
- * `lookup` returns the bound value for a token name (the text BETWEEN the braces,
- * e.g. `"health"` for `{health}`), or `undefined` when the token is unbound. The
+ * `lookup` returns the bound value for a token body (the text BETWEEN the braces,
+ * e.g. `"$.creature.name"` for `{$.creature.name}`), or `undefined` when the token
+ * is unbound. The scope interprets the binding grammar (`$.`/bare/`.`/`$name.`); the
  * returned value is stringified by the resolver for interpolation/whole-value use.
  */
 export type ResolveScope = {
@@ -61,27 +78,107 @@ export type Palette = Record<string, string>;
 
 /** Own-property check that works regardless of the TS lib target (`Object.hasOwn` is es2022). */
 function hasOwn(obj: object, key: string): boolean {
+  // biome-ignore lint/suspicious/noPrototypeBuiltins: Object.hasOwn needs es2022 lib; the build's tsc target is lower.
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 /**
- * Build a {@link ResolveScope} over a single flat data model.
+ * The binding grammar parsed from the text BETWEEN a token's braces: which frame it
+ * names (`view`/`item`/`named`) and the dotted path into that frame (an empty path
+ * is the whole-object form).
  *
- * A bare token `{name}` reads `model.name` (own-property only). There is no nested
- * path walking, no item/root scoping — one model, one lookup. A token naming a
- * missing key returns `undefined` (→ unresolved). The model is whatever the Data
- * Model panel's JSON parses to; a non-object model (array/scalar/null) simply has
- * no top-level keys to bind.
+ * Exported so the model scaffold (`guiModelScaffold.ts`) classifies tokens through
+ * the SAME grammar the resolver binds against — one grammar, one classifier.
  */
-export function flatRootScope(model: unknown): ResolveScope {
-  const obj =
-    model !== null && typeof model === "object" && !Array.isArray(model)
-      ? (model as Record<string, unknown>)
-      : {};
+export type ScopeRef =
+  | { frame: "view"; path: string[] }
+  | { frame: "item"; path: string[] }
+  | { frame: "named"; name: string; path: string[] };
+
+/**
+ * Parse a token body into a {@link ScopeRef}. Pure string grammar — no model access:
+ *
+ *   `$.`              → view, whole   (path `[]`)
+ *   `$.creature.name` → view, path `["creature","name"]`
+ *   `$app.theme`      → named "app", path `["theme"]`
+ *   `$app.`           → named "app", whole (path `[]`)
+ *   `.`               → item, whole   (path `[]`)
+ *   `sprite`          → item, path `["sprite"]`
+ *
+ * `$.` (view) is distinguished from `$name.` (named) by the character after `$`: a
+ * dot means the anonymous View frame, anything else starts a scope name.
+ */
+export function parseScopeRef(token: string): ScopeRef {
+  const t = token.trim();
+  if (t.startsWith("$.")) return { frame: "view", path: splitPath(t.slice(2)) };
+  if (t.startsWith("$")) {
+    const rest = t.slice(1);
+    const dot = rest.indexOf(".");
+    if (dot === -1) return { frame: "named", name: rest, path: [] };
+    return { frame: "named", name: rest.slice(0, dot), path: splitPath(rest.slice(dot + 1)) };
+  }
+  if (t === ".") return { frame: "item", path: [] };
+  return { frame: "item", path: splitPath(t) };
+}
+
+/** Split a dotted path body into keys; `""` (the whole-object form) → `[]`. */
+function splitPath(body: string): string[] {
+  return body === "" ? [] : body.split(".");
+}
+
+/**
+ * Walk `root` by a dotted path (own-properties only; array indices work). An empty
+ * path yields `root` itself (the whole-object form). A missing key or a non-object
+ * value mid-walk yields `undefined` (→ unresolved).
+ */
+function walkPath(root: unknown, path: string[]): unknown {
+  let cur = root;
+  for (const key of path) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    if (!hasOwn(cur as object, key)) return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+/**
+ * Build a {@link ResolveScope} for a `<View>` frame — the component's own data
+ * model. This is the default scope for every component and for anything OUTSIDE a
+ * GridLayout child.
+ *
+ *   - `{$.a.b}` → `model.a.b` (dotted walk); `{$.}` → the whole model.
+ *   - bare `{x}` / `{.}` → UNRESOLVED. STRICT engine-parity: a bare token only
+ *     resolves inside a grid item (see {@link gridItemScope}); at the View level it
+ *     is a miss (the bare-at-root lint lives in a separate task).
+ *   - `{$name.x}` → UNRESOLVED (named scopes are recognized but deferred — there is
+ *     no ancestor to resolve against in an isolated preview).
+ */
+export function viewScope(model: unknown): ResolveScope {
   return {
     lookup(token: string): unknown {
-      // Direct own-property hit only — no path walking, no prototype lookups.
-      return hasOwn(obj, token) ? obj[token] : undefined;
+      const ref = parseScopeRef(token);
+      return ref.frame === "view" ? walkPath(model, ref.path) : undefined;
+    },
+  };
+}
+
+/**
+ * Build a COMPOSITE {@link ResolveScope} for a GridLayout child: the current grid
+ * `item` frame layered OVER the enclosing `view` frame. Both frames are live at
+ * once — the crux of the grid grammar:
+ *
+ *   - bare `{x}` / `{.}` → the grid ITEM (`item.x` / the whole item);
+ *   - `{$.x}` / `{$.}` and `{$name.x}` → DELEGATE to the enclosing View frame. The
+ *     item does NOT shadow `$.`, so a grid child can still read the component model.
+ *
+ * `view` is the enclosing {@link viewScope} (delegating to it — rather than
+ * re-reading a raw model — keeps the two-frame layering explicit and composable).
+ */
+export function gridItemScope(item: unknown, view: ResolveScope): ResolveScope {
+  return {
+    lookup(token: string): unknown {
+      const ref = parseScopeRef(token);
+      return ref.frame === "item" ? walkPath(item, ref.path) : view.lookup(token);
     },
   };
 }
@@ -99,10 +196,12 @@ export function flatRootScope(model: unknown): ResolveScope {
  * with no load, `backgroundColor="{c}"` → "" → no fill). Non-token literal attrs
  * (e.g. a slot's `backgroundColor="50,50,50,255"`) are untouched and still paint.
  *
- * Contrast with `flatRootScope(null)`, whose `lookup` returns `undefined` for every
- * token — that marks each token UNRESOLVED, which is exactly the waiting affordance
- * an empty cell must NOT show. See design/gridLayout_element_design_prompt.md
- * (caveat 5): missing cells render template chrome with tokens resolving to "".
+ * Contrast with a live `viewScope`/`gridItemScope`, whose `lookup` returns
+ * `undefined` for an unbound token — that marks each token UNRESOLVED, which is
+ * exactly the waiting affordance an empty cell must NOT show. Every token form
+ * (`{sprite}`, `{$.x}`, `{.}`) collapses to "" here. See
+ * design/gridLayout_element_design_prompt.md (caveat 5): missing cells render
+ * template chrome with tokens resolving to "".
  */
 export function emptyItemScope(): ResolveScope {
   return {
@@ -131,6 +230,23 @@ export function isWholeToken(raw: string): boolean {
 export function hasToken(raw: string): boolean {
   EMBEDDED_TOKEN.lastIndex = 0;
   return EMBEDDED_TOKEN.test(raw);
+}
+
+/**
+ * Resolve a whole-value `{token}` to its BOUND VALUE (unstringified) — for the
+ * object-valued consumers that need the raw bound object/array rather than a
+ * rendered string: a `<Component data="{$.x}">` base model and a
+ * `<GridLayout dataCollection="{$.items}">` collection.
+ *
+ * Returns the bound value, or `undefined` when `raw` is not a single whole `{token}`
+ * or the token is unbound. Unlike {@link resolveStringProp} it does NOT stringify,
+ * so an object/array binding survives intact. The token body obeys the full binding
+ * grammar, so `data="{$.creature}"`, `data="{.}"` (whole grid item), and
+ * `dataCollection="{$.creatures}"` all resolve through the passed scope.
+ */
+export function resolveWholeTokenValue(raw: string, scope: ResolveScope): unknown {
+  const whole = WHOLE_TOKEN.exec(raw.trim());
+  return whole ? scope.lookup(whole[1]) : undefined;
 }
 
 /**
@@ -218,7 +334,7 @@ export function resolveTypedProp(raw: string, scope: ResolveScope): Resolved {
 }
 
 /**
- * Resolve a COLOR property (`backgroundColor`, `borderColor`, `textColor`) to an
+ * Resolve a COLOR property (`backgroundColor`, `borderColor`, `color`) to an
  * `r,g,b,a` code string, applying the full three-step rule:
  *
  *   1. `{token}` → bind from the model (whole-value). The bound value is taken as
@@ -339,7 +455,7 @@ export function resolveCompoundProp(raw: string, scope: ResolveScope): Resolved 
  * The set of attribute names that are COLOR-typed — resolved via the palette
  * three-step rule rather than as plain typed values.
  */
-const COLOR_PROPS = new Set(["backgroundColor", "borderColor", "textColor"]);
+const COLOR_PROPS = new Set(["backgroundColor", "borderColor", "color"]);
 
 /** The set of attribute names that are STRING-typed — interpolation, not whole-value. */
 const STRING_PROPS = new Set(["text", "texture"]);

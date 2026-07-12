@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flatRootScope } from "./guiBinding";
+import { viewScope } from "./guiBinding";
 import { parseGui } from "./guiNode";
 import {
   assignZOrder,
@@ -37,7 +37,7 @@ describe("makeBoxKey", () => {
 });
 
 describe("resolveLayer", () => {
-  const root = flatRootScope({ hi: 10, notNumber: "abc" });
+  const root = viewScope({ hi: 10, notNumber: "abc" });
 
   it("defaults to 0 when there is no layer attribute", () => {
     const node = { nodeId: "n", tag: "Panel" as const, attrs: {}, children: [] };
@@ -50,7 +50,7 @@ describe("resolveLayer", () => {
   });
 
   it("resolves a bound {token} layer against the model (layer is bindable)", () => {
-    const node = { nodeId: "n", tag: "Panel" as const, attrs: { layer: "{hi}" }, children: [] };
+    const node = { nodeId: "n", tag: "Panel" as const, attrs: { layer: "{$.hi}" }, children: [] };
     expect(resolveLayer(node, root)).toBe(10);
   });
 
@@ -58,7 +58,7 @@ describe("resolveLayer", () => {
     const node = {
       nodeId: "n",
       tag: "Panel" as const,
-      attrs: { layer: "{missing}" },
+      attrs: { layer: "{$.missing}" },
       children: [],
     };
     expect(resolveLayer(node, root)).toBe(DEFAULT_LAYER);
@@ -68,7 +68,7 @@ describe("resolveLayer", () => {
     const node = {
       nodeId: "n",
       tag: "Panel" as const,
-      attrs: { layer: "{notNumber}" },
+      attrs: { layer: "{$.notNumber}" },
       children: [],
     };
     expect(resolveLayer(node, root)).toBe(DEFAULT_LAYER);
@@ -76,7 +76,7 @@ describe("resolveLayer", () => {
 });
 
 describe("flattenBoxes — document order + sibling-group structure", () => {
-  it("walks visual boxes in pre-order (document order) and skips the View + Event", () => {
+  it("walks visual boxes in pre-order (document order); the View is the stage and <Event> is dropped at parse", () => {
     const { root, nodeId } = parse(`
       <View>
         <Event name="OnX" handler="h"/>
@@ -89,7 +89,7 @@ describe("flattenBoxes — document order + sibling-group structure", () => {
     `);
     const boxes = flattenBoxes(root);
     const aKey = makeBoxKey("", nodeId("a"));
-    // View is the stage (not a box); Event is non-visual. a, a1, a2, b in order.
+    // View is the stage (not a box); the <Event> was ignored at parse. a, a1, a2, b in order.
     expect(boxes.map((box) => box.boxKey)).toEqual([
       aKey,
       makeBoxKey(aKey, nodeId("a1")),
@@ -298,7 +298,7 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
     const { root, nodeId } = parse(`
       <View>
         <Panel id="low"  layer="0"            position="0,0,0,0"   size="0,0,200,200"/>
-        <Panel id="high" layer="{topLayer}"   position="0,0,50,50" size="0,0,200,200"/>
+        <Panel id="high" layer="{$.topLayer}"   position="0,0,50,50" size="0,0,200,200"/>
       </View>
     `);
     const map = computeZOrder(root, { topLayer: 9 });
@@ -311,7 +311,7 @@ describe("nested z-order — the intuitive model (replaces global-flat)", () => 
   it("an unresolved bound layer falls back to the default (does not win)", () => {
     const { root, nodeId } = parse(`
       <View>
-        <Panel id="early" layer="{missing}" position="0,0,0,0"  size="0,0,200,200"/>
+        <Panel id="early" layer="{$.missing}" position="0,0,0,0"  size="0,0,200,200"/>
         <Panel id="late"  layer="0"         position="0,0,50,50" size="0,0,200,200"/>
       </View>
     `);

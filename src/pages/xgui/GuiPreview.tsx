@@ -36,22 +36,25 @@
  * @see design/xgui_ta.md — "F5a/F5b — nested z-order model"
  */
 
-import { type CSSProperties, memo, useMemo, useRef } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSprite } from "../../components/Sprite";
 import {
   colorCodeToCss,
   emptyItemScope,
-  flatRootScope,
+  gridItemScope,
   type Palette,
   type ResolvedAttrs,
   type ResolveScope,
   resolveAttrs,
+  resolveWholeTokenValue,
+  viewScope,
 } from "../../lib/guiBinding";
 import { type ComponentEntry, useComponent } from "../../lib/guiComponentCache";
 import {
   mountDecision,
   type PlaceholderReason,
   resolveChildRoot,
+  srcBasename,
 } from "../../lib/guiComponentMount";
 import {
   computeBoxGeometry,
@@ -62,23 +65,71 @@ import {
   textureToLoad,
   type ViewTransform,
 } from "../../lib/guiGeometry";
-import { cellGeometry, parseGridDimension, parseGutter } from "../../lib/guiGridGeometry";
+import {
+  cellGeometryFixed,
+  DEFAULT_CELL_SIZE,
+  parseGridDimension,
+  parseGutter,
+} from "../../lib/guiGridGeometry";
 import { stampGrid } from "../../lib/guiGridStamp";
 import type { GuiNode } from "../../lib/guiNode";
 import { isNodeSelected, NODE_ID_ATTR } from "../../lib/guiSelection";
+import {
+  pickHoverTarget,
+  type StageRect,
+  screenRectToStageRect,
+} from "../../lib/guiTooltipPlacement";
 import { type BoxKey, computeZOrder, makeBoxKey, type ZOrderMap } from "../../lib/guiZOrder";
 import { cn } from "../../lib/utils";
+import {
+  createTooltipRegistry,
+  type TooltipRegistry,
+  TooltipRegistryProvider,
+  useTooltipProvider,
+} from "./guiTooltipRegistry";
 
 /** The DOM attribute marking a `<Component>` mount's missing/recursive placeholder. */
 export const PLACEHOLDER_ATTR = "data-gui-placeholder";
 
-/** A box-producing element tag. `View` is the stage; `Event` is non-visual. */
+/** A box-producing element tag. `View` is the stage; `GridLayout` is non-visual. */
 function isVisualTag(tag: GuiNode["tag"]): boolean {
   return tag === "Panel" || tag === "Text" || tag === "Component";
 }
 
-/** Default text color when `textColor` is absent (design default). */
+/** Default text color when `color` is absent (design default). */
 const DEFAULT_TEXT_COLOR = "185,178,165,255";
+
+/**
+ * The engine renders all GUI text with vgaoem.fon (VGA OEM / DOS raster, CP437).
+ * We mirror that in the preview with Web437 "IBM VGA 9x16" (a pixel-accurate open
+ * reproduction; see src/assets/fonts/), falling back to a generic monospace if
+ * the webfont hasn't loaded. Scoped to Text boxes only.
+ */
+const PREVIEW_TEXT_FONT = '"Web437 IBM VGA", monospace';
+
+/**
+ * Match the game's on-screen text proportions. Calibrated from a side-by-side
+ * screenshot of the same component (game vs preview), normalized to the shared
+ * panel width so the two windows' zoom cancels out. The engine renders vgaoem.fon
+ * with glyph cells that are ~1.8x WIDER (relative to the layout) than the base
+ * 9x16 proportions, while the glyph HEIGHT nearly matches. So we bump the size a
+ * touch and stretch each glyph horizontally.
+ *
+ * HEIGHT_SCALE multiplies the authored `fontSize` (uniform size). WIDTH_STRETCH is
+ * an additional horizontal-only scale applied on top (see the text wrapper in the
+ * box render). Net width ≈ HEIGHT_SCALE * WIDTH_STRETCH; net height ≈ HEIGHT_SCALE.
+ * Tune these two if the preview drifts from the game.
+ */
+const PREVIEW_FONT_HEIGHT_SCALE = 1.1;
+const PREVIEW_FONT_WIDTH_STRETCH = 1.65;
+
+/** transform-origin for the horizontal text stretch, so it grows away from the
+ *  text's anchor edge and stays put under its `textAlign`. */
+function stretchOrigin(align: CSSProperties["textAlign"]): string {
+  if (align === "center") return "center";
+  if (align === "right" || align === "end") return "right center";
+  return "left center";
+}
 
 /** Map a resolved `textAlign` value to its CSS `text-align`. */
 function cssTextAlign(value: string | undefined): CSSProperties["textAlign"] {
@@ -107,9 +158,10 @@ type GuiBoxProps = {
   node: GuiNode;
   selectedNodeId: string | null;
   /**
-   * The flat scope this box renders in. Bare tokens resolve against the single
-   * model object (see {@link flatRootScope}). The stage passes the root model's
-   * scope; a mounted `<Component>` builds a fresh scope from its overrides.
+   * The scope this box renders in. `{$.x}` bindings resolve against the View frame
+   * (see {@link viewScope}); a GridLayout child renders against a
+   * {@link gridItemScope} composed over it. The stage passes the root View scope; a
+   * mounted `<Component>` builds a fresh View scope from its `data=`/overrides.
    */
   scope: ResolveScope;
   palette: Palette;
@@ -241,6 +293,15 @@ const GuiBox = memo(function GuiBox({
   const textureName = textureToLoad(attrs.texture, !unresolved.has("texture"));
   const textureUrl = useSprite(textureName);
 
+  // Tooltip simulation (task 515): a box that authors a non-empty `tooltip=` registers
+  // itself as a hover provider (its live screen rect + tooltip ref + scope-resolved
+  // `tooltipData`) so the preview can show its card — this is the ONLY way a
+  // pointer-events-none grid cell can drive a tooltip. A no-op for boxes without a
+  // tooltip. Called unconditionally (before the `visible` early return) per hooks rules;
+  // a hidden box's ref stays null, so its snapshot rect is null and it never shows.
+  const boxRef = useRef<HTMLDivElement>(null);
+  useTooltipProvider(boxKey, node, boxRef, scope);
+
   // `visible="false"` (literal or bound) hides the box; any other value shows it.
   if (attrs.visible?.trim().toLowerCase() === "false") return null;
 
@@ -265,7 +326,7 @@ const GuiBox = memo(function GuiBox({
   // intentional per-box stacking context supersedes the old "no z-index on
   // wrappers" rule: nesting the contexts is exactly the desired grouping.)
   const zIndex = zOrder.get(boxKey);
-  const textColor = isText ? colorCodeToCss(attrs.textColor ?? DEFAULT_TEXT_COLOR) : undefined;
+  const textColor = isText ? colorCodeToCss(attrs.color ?? DEFAULT_TEXT_COLOR) : undefined;
   const fontSize = isText ? Number(attrs.fontSize) : Number.NaN;
 
   // Highlight via outline + box-shadow ONLY (drawn in-flow, no extra DOM). Avoid
@@ -287,7 +348,16 @@ const GuiBox = memo(function GuiBox({
       ? `${borderSize && Number.isFinite(Number(borderSize)) ? Number(borderSize) : 1}px solid ${borderColor}`
       : undefined,
     color: textColor,
-    fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
+    fontFamily: isText ? PREVIEW_TEXT_FONT : undefined,
+    // HEIGHT_SCALE brings the authored size up to the game's rendered size; the
+    // extra horizontal stretch lives on the inner text wrapper below.
+    fontSize:
+      isText && Number.isFinite(fontSize) ? `${fontSize * PREVIEW_FONT_HEIGHT_SCALE}px` : undefined,
+    // The engine draws each glyph flush to the element's top (DrawText renders at
+    // the box origin). Collapse the inherited leading (the app base is 1.5, which
+    // otherwise centers the glyph in a tall line box and drops it below where the
+    // game paints it) so preview text top-aligns like the runtime.
+    lineHeight: isText ? 1 : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
     // Nested z-order: every box applies its sibling-rank z-index (a container's
@@ -306,6 +376,7 @@ const GuiBox = memo(function GuiBox({
 
   return (
     <div
+      ref={boxRef}
       {...(suppressNodeId ? {} : { [NODE_ID_ATTR]: node.nodeId })}
       data-gui-tag={node.tag}
       data-gui-waiting={waiting ? "" : undefined}
@@ -320,7 +391,31 @@ const GuiBox = memo(function GuiBox({
       )}
       style={style}
     >
-      {isText ? boxText(resolved) : null}
+      {isText ? (
+        // The game draws vgaoem.fon with much wider glyph cells than the base
+        // 9x16 font. An inline-block wrapper lets us stretch ONLY the glyphs
+        // horizontally (transform is visual-only, so the box geometry, selection
+        // rect and hit-testing are untouched); the origin follows textAlign so
+        // the text grows away from its anchor edge instead of drifting.
+        //
+        // Because scaleX is visual-only, wrapping is computed on the UNSTRETCHED
+        // text — so we pre-shrink the wrapper to (100% / stretch). The browser
+        // then wraps at that narrower width, and the scaleX blows each line back
+        // out to exactly fill the box, keeping wrapped text inside the bounds.
+        <span
+          style={{
+            display: "inline-block",
+            width: `${100 / PREVIEW_FONT_WIDTH_STRETCH}%`,
+            // Top-align to the box's line box so the collapsed leading isn't
+            // reintroduced as a baseline offset above the glyphs.
+            verticalAlign: "top",
+            transform: `scaleX(${PREVIEW_FONT_WIDTH_STRETCH})`,
+            transformOrigin: stretchOrigin(cssTextAlign(attrs.textAlign)),
+          }}
+        >
+          {boxText(resolved)}
+        </span>
+      ) : null}
       {node.tag === "Component" ? (
         // F6b: a <Component> mounts its src child (or a placeholder) IN PLACE of
         // ordinary children. The child is mounted in a FRESH root scope built from
@@ -377,7 +472,8 @@ type ComponentMountProps = {
    * GRID CELL only: the grid item to seat as the mounted child's FULL fresh root,
    * bypassing `data=`/override resolution (locked decision). `undefined` → ordinary
    * mount (F6a child-root from data=/overrides). A present `{ item }` (even a `null`
-   * item) makes the child resolve against `flatRootScope(item)`.
+   * item) makes the child resolve against `viewScope(item)` (the item is the child
+   * View's own model, so its `{$.x}` bindings read it).
    */
   rootOverride?: { item: unknown };
 };
@@ -396,8 +492,8 @@ type ComponentMountProps = {
  *   2. {@link useComponent} fetches+parses the child. While loading, render nothing
  *      (no placeholder flash). On `missing` (absent / broken / unparseable) render
  *      the shared placeholder. On `ok`, mount the child subtree.
- *   3. The child mounts in a FRESH scope built from the parent-pre-resolved
- *      overrides (F6a): `flatRootScope(resolveChildRoot(...))`. The parent scope
+ *   3. The child mounts in a FRESH View scope built from the parent-pre-resolved
+ *      `data=`/overrides (F6a): `viewScope(resolveChildRoot(...))`. The parent scope
  *      does NOT cross the boundary — the child sees ONLY its props.
  *
  * The mounted child gets its OWN z-order map (its boxes' `layer`s order them among
@@ -434,11 +530,11 @@ function ComponentMount({
   );
   // A null grid item (an empty cell) uses emptyItemScope() so the mounted child's
   // {token}s resolve to "" with no waiting affordance — matching the non-Component
-  // cell path (caveat 5). flatRootScope(null) would MISS every token and paint the
-  // amber waiting state. Everything else resolves against the item as a flat root.
+  // cell path (caveat 5). viewScope(null) would MISS every token and paint the
+  // amber waiting state. Everything else seats the item as the child's fresh View
+  // frame, so the child's own `{$.x}` bindings read it.
   const childScope = useMemo(
-    () =>
-      rootOverride && rootOverride.item === null ? emptyItemScope() : flatRootScope(childRoot),
+    () => (rootOverride && rootOverride.item === null ? emptyItemScope() : viewScope(childRoot)),
     [rootOverride, childRoot],
   );
   // The child mounts as its own little stage: its boxes are positioned/ordered within
@@ -494,15 +590,16 @@ function ComponentMount({
   );
 }
 
-/** The attribute naming a GridLayout's iterable collection (a bare ROOT model key). */
+/** The attribute naming a GridLayout's iterable collection (a whole `{token}`, e.g. `{$.creatures}`). */
 const DATA_COLLECTION_ATTR = "dataCollection";
 
 type GridLayoutExpansionProps = {
   /** The `<GridLayout>` node — its single child is the cell TEMPLATE. */
   node: GuiNode;
   /**
-   * The flat scope the grid resolves `dataCollection` against. Grids cannot nest and
-   * nothing else pushes scope, so this is effectively the ROOT model scope.
+   * The scope the grid resolves `dataCollection` against — the enclosing View frame.
+   * Each cell renders against a {@link gridItemScope} composed OVER this scope, so a
+   * cell's bare `{field}` reads the item while `{$.x}` still reaches this View frame.
    */
   scope: ResolveScope;
   palette: Palette;
@@ -520,12 +617,15 @@ type GridLayoutExpansionProps = {
  *
  *   - `rows`/`columns` parse via {@link parseGridDimension} (default 1; an explicit
  *     `0` warns and renders nothing — no slots);
- *   - `dataCollection` resolves as a BARE ROOT KEY against the flat scope;
+ *   - `dataCollection` resolves as a whole `{token}` (e.g. `{$.creatures}`) against
+ *     the enclosing View scope;
  *   - {@link stampGrid} produces EXACTLY rows×columns descriptors (excess collection
  *     entries dropped; missing → `null` item);
  *   - each cell renders the template node with geometry from {@link cellGeometry}
- *     (the template's OWN position/size are ignored), against a flat scope built from
- *     the cell's item (a `null` item → empty scope, so every `{token}` resolves to "");
+ *     (the template's OWN position/size are ignored), against a {@link gridItemScope}
+ *     composing the cell's item OVER the View frame — so bare `{field}` reads the item
+ *     and `{$.x}` still reaches the model (a `null` item → empty scope, so every
+ *     `{token}` resolves to "");
  *   - cells carry NO `data-node-id` and live under a `pointer-events-none` wrapper, so
  *     a click/drag falls through to the GridLayout's parent box (cells are never
  *     individually selectable — locked decision Q4);
@@ -563,11 +663,20 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
   const columns = colsDim.value;
   const gutter = parseGutter(node.attrs.gutter);
 
-  // `dataCollection` is a bare ROOT key (no `{}`) — look it up directly in the flat
-  // scope (mirrors the `data=` resolution for nested components). A miss / non-array
-  // value yields all-`null` cells (the grid still draws its template chrome).
-  const collectionKey = (node.attrs[DATA_COLLECTION_ATTR] ?? "").trim();
-  const collection = collectionKey === "" ? undefined : scope.lookup(collectionKey);
+  // `dataCollection` is a whole `{token}` (e.g. `{$.creatures}`) — resolve it as a
+  // bound value in the enclosing View scope (mirrors the `data=` resolution for
+  // nested components). A miss / non-array value yields all-`null` cells (the grid
+  // still draws its template chrome).
+  const collection = resolveWholeTokenValue(node.attrs[DATA_COLLECTION_ATTR] ?? "", scope);
+
+  // Cell size is the grid's `cellSize` — a LITERAL full UDim2 `"relX,relY,absX,absY"`
+  // read RAW (grid structure is stamped at load and cannot bind; a `{token}` here is an
+  // ERROR lint, and its fields fall back to 0 via parseUDim2 downstream). Absent/blank →
+  // the engine's default `1,1,0,0` (each cell fills the parent box); the runtime does NOT
+  // area-divide the parent (engine ground truth — see design/gridlayout_cell_geometry.md).
+  const cellSizeAttr = node.attrs.cellSize;
+  const cellSize =
+    cellSizeAttr !== undefined && cellSizeAttr.trim() !== "" ? cellSizeAttr : DEFAULT_CELL_SIZE;
 
   const stamps = stampGrid(collection, rows, columns);
   const isComponentTemplate = template.tag === "Component";
@@ -578,13 +687,14 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
     // fall through to the parent box — cells are not individually selectable.
     <div className="pointer-events-none absolute inset-0">
       {stamps.map((stamp) => {
-        const geometry = cellGeometry(stamp.index, rows, columns, gutter.x, gutter.y);
-        // Each cell binds the item as a FRESH flat scope. A `null` item (an empty
-        // cell) uses emptyItemScope() so every {token} resolves to "" with
-        // resolved: true — the template chrome renders literally with NO waiting
-        // affordance (caveat 5). flatRootScope(null) would instead MISS every token
-        // and paint the amber waiting state, which an empty cell must not show.
-        const cellScope = stamp.item === null ? emptyItemScope() : flatRootScope(stamp.item);
+        const geometry = cellGeometryFixed(stamp.index, columns, cellSize, gutter.x, gutter.y);
+        // Each cell binds the item as a composite scope OVER the View frame, so a
+        // bare `{field}` reads the item while `{$.x}` still reaches the model. A
+        // `null` item (an empty cell) uses emptyItemScope() so every {token} resolves
+        // to "" with resolved: true — the template chrome renders literally with NO
+        // waiting affordance (caveat 5). gridItemScope(null, …) would instead MISS a
+        // bare token and paint the amber waiting state, which an empty cell must not show.
+        const cellScope = stamp.item === null ? emptyItemScope() : gridItemScope(stamp.item, scope);
         return (
           <GuiBox
             // Distinct per-cell React key (the template node id repeats across cells).
@@ -609,6 +719,97 @@ const GridLayoutExpansion = memo(function GridLayoutExpansion({
     </div>
   );
 });
+
+/** The tooltip overlay's z-index — above every ranked box (whose z-indices are small). */
+const TOOLTIP_Z = 2_147_483_000;
+
+type TooltipCardProps = {
+  /** The tooltip component ref (`tooltip=` value, e.g. `gui.card.xml`). */
+  src: string;
+  /** The provider's scope-resolved `tooltipData` — the card's fresh root model. */
+  data: unknown;
+  /** The provider's rect in stage-logical coords — the card's render frame verbatim. */
+  anchor: StageRect;
+  palette: Palette;
+};
+
+/**
+ * The tooltip card overlay (tasks 515/516). Rendered INSIDE the stage's coordinate
+ * space (so it scales with zoom like the runtime card will), `pointer-events-none` (so
+ * it can never steal hover from its provider — structurally no flicker loop), and above
+ * everything (a large z-index in the stage's root stacking context).
+ *
+ * ANCHORING (task 516, engine ground truth — worlds-cpp GUILoader.cpp:370): the engine
+ * parents the loaded tooltip subtree to the PROVIDER element, so the tooltip's geometry
+ * resolves against the HOVERED ELEMENT'S RECT and its placement is authored entirely by
+ * the tooltip component. So the overlay's frame is the provider's stage rect VERBATIM
+ * (its `x`/`y`/`width`/`height`), and the mounted tooltip tree renders inside it exactly
+ * as if it were the provider's own box — a child at `position="1,1,0,0"` lands at the
+ * provider's bottom-right corner. There is NO editor-side placement (no gap / flip /
+ * clamp / default card size); the design-doc stage-7 placement policy is FUTURE engine
+ * work, deliberately not simulated (the old `placeTooltip`/`tooltipSizeFromRoot` helpers
+ * were removed with it).
+ *
+ * It resolves `src` through the SAME {@link useComponent} cache and renders the
+ * component tree via the SAME child-render path a nested `<Component>` uses
+ * ({@link renderChildren}), seated in a fresh View frame from the resolved `data`
+ * (a `null` datum → {@link emptyItemScope}, matching the empty-grid-cell rule). A
+ * missing/blank ref reuses the shared {@link ComponentPlaceholder}.
+ */
+function TooltipCard({ src, data, anchor, palette }: TooltipCardProps) {
+  const basename = srcBasename(src);
+  const entry = useComponent(basename || null);
+  const root = entry.status === "ok" ? entry.root : null;
+  // The card's fresh root model: the resolved data seated as a View frame. A `null`
+  // datum uses emptyItemScope so tokens collapse to "" (no waiting flash), mirroring
+  // the empty-grid-cell path (caveat 5).
+  const scope = useMemo(() => (data === null ? emptyItemScope() : viewScope(data)), [data]);
+  // The card's own nested z-order map (its boxes ranked among their siblings).
+  const zOrder = useMemo(() => (root ? computeZOrder(root, data) : EMPTY_ZORDER), [root, data]);
+  // Seed the cycle guard with the card's own basename so a self-including <Component>
+  // inside the card is caught as recursive.
+  const ancestry = useMemo<ReadonlySet<string>>(
+    () => (basename ? new Set([basename]) : EMPTY_ANCESTRY),
+    [basename],
+  );
+
+  // In flight — render nothing (no placeholder flash), same posture as ComponentMount.
+  if (entry.status === "loading") return null;
+
+  // The overlay frame IS the provider's stage rect (position AND size) — the tooltip
+  // subtree renders inside it exactly as if it were the provider's own box.
+  const wrapperStyle: CSSProperties = {
+    position: "absolute",
+    left: `${anchor.x}px`,
+    top: `${anchor.y}px`,
+    width: `${anchor.width}px`,
+    height: `${anchor.height}px`,
+    pointerEvents: "none",
+    zIndex: TOOLTIP_Z,
+  };
+
+  // Blank/unresolvable ref → the shared missing placeholder, at the card's box.
+  if (basename === "" || entry.status !== "ok") {
+    return (
+      <div style={wrapperStyle}>
+        <ComponentPlaceholder reason="missing" src={src} />
+      </div>
+    );
+  }
+
+  // ok: mount the tooltip tree. The inner wrapper is inset-0 so the card's child boxes
+  // position against the card box (exactly the ComponentMount child-mount shape).
+  return (
+    <div style={wrapperStyle}>
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ position: "absolute", zIndex: 0 }}
+      >
+        {renderChildren(entry.root.children, null, scope, palette, "", zOrder, ancestry)}
+      </div>
+    </div>
+  );
+}
 
 export type GuiPreviewProps = {
   /** The parsed component tree to render. Its root is expected to be `<View>`. */
@@ -729,10 +930,11 @@ function nodeIdAtPoint(
  * {@link nodeIdAtPoint} (locked boxes are click-through) — the one piece that needs
  * a browser — and the resulting node id is handed to `onSelect`.
  *
- * A flat {@link ResolveScope} is built from `model` once (see
- * {@link flatRootScope}) and threaded down to every box; each box resolves its
- * bare tokens against that single model. A mounted `<Component>` builds its own
- * fresh scope from its overrides at the boundary.
+ * A {@link ResolveScope} for the `<View>` frame is built from `model` once (see
+ * {@link viewScope}) and threaded down to every box; each box resolves its `{$.x}`
+ * bindings against that model. A GridLayout child layers a {@link gridItemScope}
+ * over it (bare `{field}` → item); a mounted `<Component>` builds its own fresh View
+ * scope from its `data=`/overrides at the boundary.
  */
 export function GuiPreview({
   root,
@@ -748,11 +950,37 @@ export function GuiPreview({
   interacting = false,
 }: GuiPreviewProps) {
   const { scale, panX, panY } = view;
-  // A single flat scope for the whole tree: every box resolves its bare tokens
-  // against this one model object. Memoized on `model` so a pan/zoom/selection
+  // Tooltip simulation (task 515). The per-preview provider registry is ref-owned so a
+  // box registering/unregistering never re-renders; it is handed to every box via
+  // context. Created lazily once (a fresh registry per preview instance).
+  const registryRef = useRef<TooltipRegistry | null>(null);
+  if (registryRef.current === null) registryRef.current = createTooltipRegistry();
+  const registry = registryRef.current;
+  // The stage element, for converting a provider's screen rect into stage-logical space.
+  const stageRef = useRef<HTMLDivElement>(null);
+  // The tooltip currently shown (anchor in stage-logical coords), or null. This is the
+  // ONLY state a hover flips — `content` is memoized separately, so showing/hiding a
+  // tooltip never re-renders the box tree.
+  const [tooltip, setTooltip] = useState<{ src: string; data: unknown; anchor: StageRect } | null>(
+    null,
+  );
+  // The provider key currently shown — used to skip redundant setState while the pointer
+  // moves within the SAME provider (the anchor is provider-bounds, not cursor, so it's
+  // stable). A ref so comparing it doesn't itself re-render.
+  const hoverKeyRef = useRef<string | null>(null);
+  // Task 519 — Alt-to-peek. The last pointer position in SCREEN (client) coords, stored on
+  // every stage pointermove, so an Alt keydown can re-evaluate the hover from where the
+  // cursor already rests (no mouse jiggle needed). Null until the pointer first enters.
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Whether Alt/Option is currently held. Tracked from BOTH entry points — `e.altKey` on
+  // every pointermove (self-correcting) and the window Alt keydown/keyup listeners — and
+  // reset on blur/visibility loss so an Alt+Tab away can't wedge the peek on.
+  const altHeldRef = useRef(false);
+  // A single View-frame scope for the whole tree: every box resolves its `{$.x}`
+  // bindings against this one model object. Memoized on `model` so a pan/zoom/selection
   // re-render (which leaves the model untouched) reuses the same scope object —
   // keeping it referentially stable so the content memo below can rely on it.
-  const scope = useMemo(() => flatRootScope(model), [model]);
+  const scope = useMemo(() => viewScope(model), [model]);
   // Nested z-order: compute the `boxKey → z-index` map (each box ranked among its
   // siblings by resolved `layer`, ties → document order) up front, then hand it
   // down so each box can apply its rank. The flatten mirrors this render's tree, so
@@ -818,7 +1046,90 @@ export function GuiPreview({
   // handler — the only render is the store writeback the host performs from `onDragMove`.
   const drag = useRef<{ nodeId: string; startX: number; startY: number } | null>(null);
 
+  // Tooltip hover controller (task 515). Hide the shown card (if any) and forget the
+  // shown provider. A no-op setState guard keeps this cheap to call on every move.
+  const clearTooltip = () => {
+    if (hoverKeyRef.current !== null) {
+      hoverKeyRef.current = null;
+      setTooltip(null);
+    }
+  };
+
+  // The Alt-to-peek hover evaluator (task 519). ONE function drives both entry points —
+  // a stage pointermove AND a window Alt keydown/keyup (which re-evaluates from the last
+  // stored pointer, so pressing Alt while already resting on a provider shows the card
+  // with no mouse jiggle). It rect-tests the pointer (SCREEN coords — getBoundingClientRect
+  // is screen-space, so zoom/pan is free) against the registered providers, gating the
+  // result on `altHeld` via the pure {@link pickHoverTarget}: no Alt → no target → hide.
+  // Suppressed while an element drag is active. The anchor is the hit provider's rect
+  // converted ONCE into stage-logical space, so the pure placement helper works in a
+  // single coordinate space.
+  const evaluateTooltip = (pointer: { x: number; y: number } | null, altHeld: boolean) => {
+    if (drag.current) {
+      clearTooltip();
+      return;
+    }
+    const hit = pickHoverTarget(registry.snapshot(), pointer, altHeld);
+    if (!hit) {
+      clearTooltip();
+      return;
+    }
+    if (hit.key === hoverKeyRef.current) return; // same provider — stable anchor
+    const stageEl = stageRef.current;
+    if (!stageEl) return;
+    const anchor = screenRectToStageRect(hit.rect, stageEl.getBoundingClientRect(), scale);
+    hoverKeyRef.current = hit.key;
+    setTooltip({ src: hit.src, data: hit.data, anchor });
+  };
+  // The window Alt listeners are subscribed ONCE (mount), but `evaluateTooltip` closes over
+  // the live `scale`. Route them through a ref to the latest evaluator so an Alt press
+  // always uses current view state without re-subscribing the listeners on every zoom.
+  const evaluateRef = useRef(evaluateTooltip);
+  evaluateRef.current = evaluateTooltip;
+
+  // Task 519 — window-level Alt peek + robustness. Alt keydown/keyup re-evaluate the hover
+  // from the last stored pointer (peek appears/disappears without moving the mouse), and
+  // blur/visibilitychange force the held state off so an Alt+Tab (or Cmd-Tab with Option
+  // down) can never leave the tooltip wedged on while the cursor sits idle. Mount-once:
+  // the handlers read refs + the evaluator ref, so no dependency churn.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Only the Alt transition matters; ignore auto-repeat and other keys held with Alt.
+      if (e.altKey && !altHeldRef.current) {
+        altHeldRef.current = true;
+        evaluateRef.current(lastPointerRef.current, true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      // The Alt keyup reports `altKey === false`; a non-Alt keyup while Alt is still down
+      // keeps it true and is ignored, so the peek only drops when Alt itself releases.
+      if (!e.altKey && altHeldRef.current) {
+        altHeldRef.current = false;
+        evaluateRef.current(lastPointerRef.current, false);
+      }
+    };
+    const clearHeld = () => {
+      altHeldRef.current = false;
+      evaluateRef.current(lastPointerRef.current, false);
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearHeld();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", clearHeld);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", clearHeld);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Any press hides a shown tooltip (engine parity: press dismisses the card).
+    clearTooltip();
     // View-pan gesture (space+left / middle-mouse): the host's viewport handler owns
     // it. Yield — don't start an element drag, don't change selection. For a
     // PRIMARY-button pan (space+left) the browser will synthesize a trailing `click`,
@@ -861,6 +1172,13 @@ export function GuiPreview({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Tooltip peek runs on every stage move (grid cells are pointer-events-none, so their
+    // moves bubble here). Store the pointer so a later Alt keydown can re-evaluate from
+    // here, sync the held state from `e.altKey` (self-correcting after any missed keyup),
+    // and gate the peek on it. It self-suppresses while a drag is active.
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    altHeldRef.current = event.altKey;
+    evaluateTooltip(lastPointerRef.current, event.altKey);
     const active = drag.current;
     if (!active || !onDragMove) return;
     // Screen-pixel delta ÷ scale = logical-pixel delta. The stage is rendered with
@@ -892,54 +1210,70 @@ export function GuiPreview({
   };
 
   return (
-    // The stage is the preview canvas: selection is by click (and later
-    // drag/F7). Keyboard-driven selection is the tree panel's job (F9), so the
-    // canvas intentionally has no key handler and is not a button/role.
-    // biome-ignore lint/a11y/noStaticElementInteractions: preview canvas selected by click; keyboard selection lives in the tree panel (F9)
-    // biome-ignore lint/a11y/useKeyWithClickEvents: preview canvas selected by click; keyboard selection lives in the tree panel (F9)
-    <div
-      data-gui-stage=""
-      onClick={handleClick}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      className="relative overflow-visible text-[#b9b2a5]"
-      style={{
-        position: "relative",
-        width: `${STAGE_WIDTH}px`,
-        height: `${STAGE_HEIGHT}px`,
-        // Solid stage (479). The 1280×768 stage is a flat, opaque artboard color —
-        // the blueprint graph-paper grid now lives BEHIND the stage, on the clipping
-        // viewport (see GuiPreviewHost), so the solid stage reads as an artboard
-        // sitting on a blueprint canvas. Rendered GUI boxes sit on top of this flat
-        // fill and stay legible. (Task 478 painted the grid ON the stage; 479 flips
-        // it back to a solid fill and moves the grid to the viewport backdrop.)
-        backgroundColor: "#1b1b1f",
-        // View transform (473): a single `translate(panX, panY) scale(scale)` on the
-        // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
-        // The transform belongs ONLY on the stage — a transform on an intermediate
-        // box would warp that box's child geometry and break the drag-delta math.
-        // `top left` origin makes the pan (in viewport screen px) place the stage's
-        // top-left exactly at (panX, panY) within the clipping viewport — fit-and-
-        // center bakes the centering into pan.
-        transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
-        transformOrigin: "top left",
-        // PERF: while a pan gesture is in flight, promote the stage to its own
-        // compositor layer so each frame just re-composites a cached bitmap rather
-        // than REPAINTING the entire nested box tree (every box + texture). Dropped
-        // when idle so static/zoomed content rasterizes sharp (a pan never scales, so
-        // the promotion costs no sharpness during the gesture). See `interacting`.
-        willChange: interacting ? "transform" : undefined,
-        // The stage forms the root stacking context for the whole tree (`position:
-        // relative` + a numeric `z-index`). Its direct children are ranked among
-        // themselves by `layer` within it; each of those children in turn forms its
-        // own context for its subtree (the nested z-order model).
-        zIndex: 0,
-      }}
-    >
-      {content}
-    </div>
+    // The registry context reaches every box below (incl. pointer-events-none grid
+    // cells and mounted <Component> children) so they can register as tooltip providers.
+    <TooltipRegistryProvider value={registry}>
+      {/* The stage is the preview canvas: selection is by click (and later
+        drag/F7). Keyboard-driven selection is the tree panel's job (F9), so the
+        canvas intentionally has no key handler and is not a button/role. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: preview canvas selected by click; keyboard selection lives in the tree panel (F9) */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: preview canvas selected by click; keyboard selection lives in the tree panel (F9) */}
+      <div
+        ref={stageRef}
+        data-gui-stage=""
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={clearTooltip}
+        className="relative overflow-visible text-[#b9b2a5]"
+        style={{
+          position: "relative",
+          width: `${STAGE_WIDTH}px`,
+          height: `${STAGE_HEIGHT}px`,
+          // Solid stage (479). The 1280×768 stage is a flat, opaque artboard color —
+          // the blueprint graph-paper grid now lives BEHIND the stage, on the clipping
+          // viewport (see GuiPreviewHost), so the solid stage reads as an artboard
+          // sitting on a blueprint canvas. Rendered GUI boxes sit on top of this flat
+          // fill and stay legible. (Task 478 painted the grid ON the stage; 479 flips
+          // it back to a solid fill and moves the grid to the viewport backdrop.)
+          backgroundColor: "#1b1b1f",
+          // View transform (473): a single `translate(panX, panY) scale(scale)` on the
+          // ROOT stage renders the 1280×768 logical canvas at the user's zoom and pan.
+          // The transform belongs ONLY on the stage — a transform on an intermediate
+          // box would warp that box's child geometry and break the drag-delta math.
+          // `top left` origin makes the pan (in viewport screen px) place the stage's
+          // top-left exactly at (panX, panY) within the clipping viewport — fit-and-
+          // center bakes the centering into pan.
+          transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
+          transformOrigin: "top left",
+          // PERF: while a pan gesture is in flight, promote the stage to its own
+          // compositor layer so each frame just re-composites a cached bitmap rather
+          // than REPAINTING the entire nested box tree (every box + texture). Dropped
+          // when idle so static/zoomed content rasterizes sharp (a pan never scales, so
+          // the promotion costs no sharpness during the gesture). See `interacting`.
+          willChange: interacting ? "transform" : undefined,
+          // The stage forms the root stacking context for the whole tree (`position:
+          // relative` + a numeric `z-index`). Its direct children are ranked among
+          // themselves by `layer` within it; each of those children in turn forms its
+          // own context for its subtree (the nested z-order model).
+          zIndex: 0,
+        }}
+      >
+        {content}
+        {/* The tooltip overlay: inside the stage transform (scales with zoom),
+          pointer-events-none, on top. Only renders while a provider is hovered. */}
+        {tooltip ? (
+          <TooltipCard
+            src={tooltip.src}
+            data={tooltip.data}
+            anchor={tooltip.anchor}
+            palette={palette}
+          />
+        ) : null}
+      </div>
+    </TooltipRegistryProvider>
   );
 }
 

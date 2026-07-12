@@ -34,6 +34,9 @@ import {
   toComponentBasename,
 } from "./guiTree";
 
+/** The body every new component is created with — an empty `<View>` to build up from. */
+const BLANK_XML = "<View>\n</View>\n";
+
 export type NewComponentDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,11 +51,6 @@ export type NewComponentDialogProps = {
   /** Called after a successful create with the new component's basename + folder. */
   onCreated: (created: { name: string; folderRel: string }) => void;
 };
-
-/** The minimal valid body a brand-new component is created with. */
-function defaultViewXml(): string {
-  return "<View>\n</View>\n";
-}
 
 /**
  * The New-component dialog, scoped to a fixed destination folder. Name → derived
@@ -114,7 +112,7 @@ export function NewComponentDialog({
       await invoke("create_component", {
         folderRel,
         name: basename,
-        xml: defaultViewXml(),
+        xml: BLANK_XML,
         controller: null,
       });
     } catch (err) {
@@ -122,6 +120,12 @@ export function NewComponentDialog({
       setSubmitError(err instanceof Error ? err.message : String(err));
       return;
     }
+    // Clear the name BEFORE closing: `onCreated` refreshes the tree to include the
+    // just-created component, and the dialog stays mounted through Radix's close
+    // animation — leaving the name populated would re-fire the collision check
+    // against the now-present component and flash an "already exists" error as it
+    // animates out. An empty name makes `nameError` null, so nothing flashes.
+    setName("");
     onOpenChange(false);
     onCreated({ name: basename, folderRel });
   }
@@ -160,6 +164,13 @@ export function NewComponentDialog({
                 onChange={(e) => {
                   const value = e.currentTarget.value;
                   setName(value);
+                }}
+                onKeyDown={(e) => {
+                  // Enter submits from the name field (guarded by canSubmit inside).
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreate();
+                  }
                 }}
                 placeholder="name"
                 aria-invalid={!!nameError}

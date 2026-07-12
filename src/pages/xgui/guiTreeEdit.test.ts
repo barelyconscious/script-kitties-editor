@@ -5,11 +5,14 @@ import {
   addChild,
   allowedChildTags,
   canAddChild,
+  canDuplicate,
+  canMoveTo,
   componentPickItems,
-  EVENT_PLACEHOLDER_LABEL,
+  duplicateNode,
   filterPickItems,
   findNode,
   makeChildNode,
+  moveNode,
   nextAutoId,
   nodeLabel,
   nodePath,
@@ -21,6 +24,13 @@ import {
 
 function node(nodeId: string, tag: GuiTag, children: GuiNode[] = []): GuiNode {
   return { nodeId, tag, attrs: {}, children };
+}
+
+/** Child nodeIds under the node addressed by `parentId`, for terse assertions. */
+function childIds(root: GuiNode, parentId: string): string[] {
+  const parent = findNode(root, parentId);
+  if (!parent) throw new Error(`no node ${parentId}`);
+  return parent.children.map((c) => c.nodeId);
 }
 
 /** A node with explicit attrs, for label/attr-sensitive tests. */
@@ -87,20 +97,18 @@ describe("nextAutoId — running auto-id for newly-added elements", () => {
 });
 
 describe("allowedChildTags / canAddChild — element rules (children-aware)", () => {
-  it("an empty View accepts Panel, Text, Component, GridLayout, and Event", () => {
+  it("an empty View accepts Panel, Text, Component, and GridLayout", () => {
     expect(allowedChildTags(node("v", "View"))).toEqual([
       "Panel",
       "Text",
       "Component",
       "GridLayout",
-      "Event",
     ]);
   });
 
-  it("an empty Panel accepts boxes plus a GridLayout, but NOT Event (Event is View-only)", () => {
+  it("an empty Panel accepts boxes plus a GridLayout", () => {
     const panel = node("p", "Panel");
     expect(allowedChildTags(panel)).toEqual(["Panel", "Text", "Component", "GridLayout"]);
-    expect(canAddChild(panel, "Event")).toBe(false);
   });
 
   it("Text is a leaf — no children (nesting under a Text is a runtime parse error)", () => {
@@ -110,7 +118,6 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(text, "Text")).toBe(false);
     expect(canAddChild(text, "Component")).toBe(false);
     expect(canAddChild(text, "GridLayout")).toBe(false);
-    expect(canAddChild(text, "Event")).toBe(false);
   });
 
   it("Component cannot have children", () => {
@@ -118,20 +125,10 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(node("c", "Component"), "Panel")).toBe(false);
   });
 
-  it("Event is a leaf — no children", () => {
-    expect(allowedChildTags(node("e", "Event"))).toEqual([]);
-  });
-
   it("View is never offered as a child of anything (top-level only)", () => {
-    for (const tag of ["View", "Panel", "Text", "Component", "Event", "GridLayout"] as GuiTag[]) {
+    for (const tag of ["View", "Panel", "Text", "Component", "GridLayout"] as GuiTag[]) {
       expect(allowedChildTags(node("x", tag))).not.toContain("View");
     }
-  });
-
-  it("Event is allowed only under View", () => {
-    expect(canAddChild(node("v", "View"), "Event")).toBe(true);
-    expect(canAddChild(node("p", "Panel"), "Event")).toBe(false);
-    expect(canAddChild(node("c", "Component"), "Event")).toBe(false);
   });
 
   it("a Panel/View that ALREADY contains a GridLayout no longer offers GridLayout", () => {
@@ -140,7 +137,7 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
     expect(canAddChild(panelWithGrid, "GridLayout")).toBe(false);
 
     const viewWithGrid = node("v", "View", [node("g", "GridLayout")]);
-    expect(allowedChildTags(viewWithGrid)).toEqual(["Panel", "Text", "Component", "Event"]);
+    expect(allowedChildTags(viewWithGrid)).toEqual(["Panel", "Text", "Component"]);
     expect(canAddChild(viewWithGrid, "GridLayout")).toBe(false);
   });
 
@@ -160,60 +157,33 @@ describe("allowedChildTags / canAddChild — element rules (children-aware)", ()
 });
 
 describe("nodeLabel — tree row labeling", () => {
-  it("labels an <Event> by its name attribute (events have no id)", () => {
-    const ev = nodeWith("Event", { name: "Battle:OnCreatureDied", handler: "onDied" });
-    expect(nodeLabel(ev)).toEqual({ tag: "Event", secondary: "Battle:OnCreatureDied" });
-  });
-
-  it("uses the placeholder when an <Event> name is empty or whitespace", () => {
-    expect(nodeLabel(nodeWith("Event", { name: "", handler: "" })).secondary).toBe(
-      EVENT_PLACEHOLDER_LABEL,
-    );
-    expect(nodeLabel(nodeWith("Event", { name: "   " })).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
-    // A missing name attr (not just empty) also falls back to the placeholder.
-    expect(nodeLabel(nodeWith("Event", {})).secondary).toBe(EVENT_PLACEHOLDER_LABEL);
-  });
-
-  it("ignores an <Event> id even if one is somehow present (events label by name)", () => {
-    const ev = nodeWith("Event", { id: "evt1", name: "Tick" });
-    expect(nodeLabel(ev).secondary).toBe("Tick");
-  });
-
-  it("labels non-Event tags by their trimmed id", () => {
+  it("labels a tag by its trimmed id", () => {
     expect(nodeLabel(nodeWith("Panel", { id: "  stats " })).secondary).toBe("stats");
     expect(nodeLabel(nodeWith("View", { id: "view" }))).toEqual({ tag: "View", secondary: "view" });
   });
 
-  it("gives a non-Event node with no id a null secondary label", () => {
+  it("gives a node with no id a null secondary label", () => {
     expect(nodeLabel(nodeWith("Panel", {})).secondary).toBeNull();
     expect(nodeLabel(nodeWith("Text", { id: "  " })).secondary).toBeNull();
   });
 });
 
 describe("treeNodePrimaryLabel — id-as-identity tree label", () => {
-  it("labels a non-Event node by its trimmed id (replacing the tag name)", () => {
+  it("labels a node by its trimmed id (replacing the tag name)", () => {
     expect(treeNodePrimaryLabel(nodeWith("Panel", { id: " Panel1 " }))).toEqual({
       text: "Panel1",
       placeholder: false,
     });
   });
 
-  it("falls back to the bare tag name when a non-Event node has no id", () => {
-    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({ text: "Panel", placeholder: false });
+  it("falls back to the bare tag name when a node has no id", () => {
+    expect(treeNodePrimaryLabel(nodeWith("Panel", {}))).toEqual({
+      text: "Panel",
+      placeholder: false,
+    });
     expect(treeNodePrimaryLabel(nodeWith("Text", { id: "  " }))).toEqual({
       text: "Text",
       placeholder: false,
-    });
-  });
-
-  it("labels an <Event> by its name, flagging the placeholder when blank", () => {
-    expect(treeNodePrimaryLabel(nodeWith("Event", { name: "Tick" }))).toEqual({
-      text: "Tick",
-      placeholder: false,
-    });
-    expect(treeNodePrimaryLabel(nodeWith("Event", {}))).toEqual({
-      text: EVENT_PLACEHOLDER_LABEL,
-      placeholder: true,
     });
   });
 });
@@ -229,7 +199,8 @@ describe("makeChildNode", () => {
     const n = makeChildNode("Panel");
     expect(n.tag).toBe("Panel");
     expect(n.attrs.position).toBe("0,0,0,0");
-    expect(n.attrs.size).toBeDefined();
+    // Fills its parent by default (100% relative, no pixel offset).
+    expect(n.attrs.size).toBe("1,1,0,0");
     expect(n.children).toEqual([]);
   });
 
@@ -245,11 +216,6 @@ describe("makeChildNode", () => {
 
   it("Component defaults src to empty when none supplied", () => {
     expect(makeChildNode("Component").attrs.src).toBe("");
-  });
-
-  it("Event gets empty name/handler for the Events slice to fill", () => {
-    const n = makeChildNode("Event");
-    expect(n.attrs).toEqual({ name: "", handler: "" });
   });
 
   it("does NOT auto-set the local id attribute (user chooses it in Properties)", () => {
@@ -394,12 +360,12 @@ describe("setNodeAttrs — immutable attr replace", () => {
   });
 });
 
-describe("removeNode — immutable detach (F9c Event delete)", () => {
+describe("removeNode — immutable detach (tree delete)", () => {
   it("removes a matching child, preserving sibling order", () => {
     const root = node("root", "View", [
-      node("e1", "Event"),
-      node("e2", "Event"),
-      node("e3", "Event"),
+      node("e1", "Panel"),
+      node("e2", "Panel"),
+      node("e3", "Panel"),
     ]);
     const next = removeNode(root, "e2");
     expect(next.children.map((c) => c.nodeId)).toEqual(["e1", "e3"]);
@@ -560,5 +526,351 @@ describe("componentPickItems / filterPickItems", () => {
   it("returns the full list for an empty query", () => {
     const items = componentPickItems(tree);
     expect(filterPickItems(items, "  ")).toEqual(items);
+  });
+});
+
+describe("moveNode — immutable re-parent / reorder", () => {
+  // A flat View with four Panel siblings, for reorder-within-parent cases.
+  const flat = (): GuiNode =>
+    node("root", "View", [
+      node("a", "Panel"),
+      node("b", "Panel"),
+      node("c", "Panel"),
+      node("d", "Panel"),
+    ]);
+
+  it("reorders EARLIER within a parent (index in the current array)", () => {
+    // Move d (idx 3) to index 1 → before b.
+    const next = moveNode(flat(), "d", "root", 1);
+    expect(childIds(next, "root")).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("reorders LATER within a parent, handling the remove-then-insert shift", () => {
+    // Move a (idx 0) to index 2 (current-array slot of c) → a lands before c.
+    const next = moveNode(flat(), "a", "root", 2);
+    expect(childIds(next, "root")).toEqual(["b", "a", "c", "d"]);
+  });
+
+  it("appends within a parent when index is the current length (later move)", () => {
+    // Move b (idx 1) to index 4 (== length) → append.
+    const next = moveNode(flat(), "b", "root", 4);
+    expect(childIds(next, "root")).toEqual(["a", "c", "d", "b"]);
+  });
+
+  it("clamps an over-large index to append", () => {
+    const next = moveNode(flat(), "a", "root", 99);
+    expect(childIds(next, "root")).toEqual(["b", "c", "d", "a"]);
+  });
+
+  it("is a NO-OP (same root reference) when the node would land on its own slot", () => {
+    const root = flat();
+    // Move b (idx 1) to index 1 (before itself) and to index 2 (before c) — both
+    // leave b exactly where it is.
+    expect(moveNode(root, "b", "root", 1)).toBe(root);
+    expect(moveNode(root, "b", "root", 2)).toBe(root);
+  });
+
+  it("re-parents a node ACROSS parents at the requested index", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("x", "Text"), node("y", "Text")]),
+      node("p2", "Panel", [node("z", "Text")]),
+    ]);
+    // Move x out of p1 and into p2 at index 0 → before z.
+    const next = moveNode(root, "x", "p2", 0);
+    expect(childIds(next, "p1")).toEqual(["y"]);
+    expect(childIds(next, "p2")).toEqual(["x", "z"]);
+  });
+
+  it("moves the WHOLE subtree and preserves its node objects (nodeIds survive)", () => {
+    const grandchild = node("gc", "Text");
+    const movingSubtree = node("p1", "Panel", [grandchild]);
+    const root = node("root", "View", [movingSubtree, node("p2", "Panel")]);
+    const next = moveNode(root, "p1", "p2", 0);
+    const moved = findNode(next, "p1");
+    // Same object identity for the moved subtree AND its descendant.
+    expect(moved).toBe(movingSubtree);
+    expect(moved?.children[0]).toBe(grandchild);
+    expect(childIds(next, "p2")).toEqual(["p1"]);
+  });
+
+  it("re-parents a node UP to an ancestor (target unaffected by the removal)", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("inner", "Panel", [node("t", "Text")])]),
+    ]);
+    // Move t up two levels to become a child of root at index 0.
+    const next = moveNode(root, "t", "root", 0);
+    expect(childIds(next, "root")).toEqual(["t", "p1"]);
+    expect(childIds(next, "inner")).toEqual([]);
+  });
+
+  it("does not mutate the original tree", () => {
+    const root = flat();
+    moveNode(root, "a", "root", 3);
+    expect(childIds(root, "root")).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("is a no-op for the root, an unknown node, an unknown target, or a cycle", () => {
+    const root = node("root", "View", [node("p", "Panel", [node("t", "Text")])]);
+    expect(moveNode(root, "root", "p", 0)).toBe(root); // root immovable
+    expect(moveNode(root, "ghost", "p", 0)).toBe(root); // unknown node
+    expect(moveNode(root, "t", "ghost", 0)).toBe(root); // unknown target
+    expect(moveNode(root, "p", "p", 0)).toBe(root); // self-target
+    expect(moveNode(root, "p", "t", 0)).toBe(root); // into own descendant
+  });
+});
+
+describe("canMoveTo — drop-legality predicate", () => {
+  it("rejects moving the root", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canMoveTo(root, "root", "p")).toBe(false);
+  });
+
+  it("rejects a self-target and a deep-descendant target (cycle)", () => {
+    const root = node("root", "View", [
+      node("p", "Panel", [node("inner", "Panel", [node("t", "Text")])]),
+    ]);
+    expect(canMoveTo(root, "p", "p")).toBe(false); // into itself
+    expect(canMoveTo(root, "p", "inner")).toBe(false); // into a child
+    expect(canMoveTo(root, "p", "t")).toBe(false); // into a deep descendant
+  });
+
+  it("allows an ordinary re-parent into a Panel", () => {
+    const root = node("root", "View", [
+      node("p1", "Panel", [node("t", "Text")]),
+      node("p2", "Panel"),
+    ]);
+    expect(canMoveTo(root, "t", "p2")).toBe(true);
+  });
+
+  it("allows reordering a GridLayout within its OWN parent (self-exclusion)", () => {
+    // The View already holds this grid; a same-parent reorder must not fail the
+    // one-grid-per-container rule against the grid ITSELF.
+    const root = node("root", "View", [node("g", "GridLayout"), node("p", "Panel")]);
+    expect(canMoveTo(root, "g", "root")).toBe(true);
+  });
+
+  it("rejects moving a GridLayout into a container that ALREADY has a different grid", () => {
+    const root = node("root", "View", [
+      node("g1", "GridLayout"),
+      node("p", "Panel", [node("g2", "GridLayout")]),
+    ]);
+    // p already has g2, so g1 cannot join it (one grid per container).
+    expect(canMoveTo(root, "g1", "p")).toBe(false);
+  });
+
+  it("allows moving a Panel into an EMPTY grid but not an OCCUPIED one", () => {
+    const root = node("root", "View", [
+      node("panelA", "Panel"),
+      node("empty", "GridLayout"),
+      node("full", "GridLayout", [node("kid", "Panel")]),
+    ]);
+    expect(canMoveTo(root, "panelA", "empty")).toBe(true);
+    expect(canMoveTo(root, "panelA", "full")).toBe(false);
+  });
+
+  it("rejects any child under a leaf (Text / Component)", () => {
+    const root = node("root", "View", [
+      node("t", "Text"),
+      node("c", "Component"),
+      node("p", "Panel"),
+    ]);
+    expect(canMoveTo(root, "p", "t")).toBe(false);
+    expect(canMoveTo(root, "p", "c")).toBe(false);
+  });
+
+  it("rejects an unknown node or an unknown target", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canMoveTo(root, "ghost", "root")).toBe(false);
+    expect(canMoveTo(root, "p", "ghost")).toBe(false);
+  });
+});
+
+describe("duplicateNode — clone a subtree as the next sibling", () => {
+  /** A node with an authored `id` (or none when `id` is null), for id-suffix tests. */
+  function idNode(
+    nodeId: string,
+    tag: GuiTag,
+    id: string | null,
+    children: GuiNode[] = [],
+  ): GuiNode {
+    return { nodeId, tag, attrs: id ? { id } : {}, children };
+  }
+
+  /** Every nodeId in a subtree, root-first, for disjointness assertions. */
+  function collectNodeIds(n: GuiNode): string[] {
+    return [n.nodeId, ...n.children.flatMap(collectNodeIds)];
+  }
+
+  it("inserts the clone as the original's NEXT sibling (index + 1)", () => {
+    const root = node("root", "View", [node("a", "Panel"), node("b", "Panel"), node("c", "Panel")]);
+    const ids = childIds(duplicateNode(root, "b"), "root");
+    // a, b, <clone of b>, c — the clone sits right after b.
+    expect(ids).toHaveLength(4);
+    expect(ids[0]).toBe("a");
+    expect(ids[1]).toBe("b");
+    expect(ids[3]).toBe("c");
+    expect(ids[2]).not.toBe("b"); // a fresh node, not the original
+  });
+
+  it("appends the clone when the original is the LAST child", () => {
+    const root = node("root", "View", [node("a", "Panel"), node("b", "Panel")]);
+    const ids = childIds(duplicateNode(root, "b"), "root");
+    expect(ids.slice(0, 2)).toEqual(["a", "b"]);
+    expect(ids).toHaveLength(3); // clone appended
+  });
+
+  it("clones the WHOLE subtree (the clone mirrors the original's shape)", () => {
+    const root = node("root", "View", [
+      node("p", "Panel", [node("t1", "Text"), node("t2", "Text")]),
+    ]);
+    const clone = duplicateNode(root, "p").children[1];
+    expect(clone.tag).toBe("Panel");
+    expect(clone.children.map((c) => c.tag)).toEqual(["Text", "Text"]);
+  });
+
+  it("is a no-op (SAME reference) for the root and an unknown node", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    expect(duplicateNode(root, "root")).toBe(root);
+    expect(duplicateNode(root, "missing")).toBe(root);
+  });
+
+  it("reuses untouched subtrees — including the ORIGINAL — by reference", () => {
+    const sib = node("sib", "Panel", [node("deep", "Text")]);
+    const original = node("orig", "Panel", [node("inner", "Text")]);
+    const root = node("root", "View", [original, sib]);
+    const next = duplicateNode(root, "orig");
+    // Children are now [orig, clone, sib]; the original and the sibling are untouched.
+    expect(next.children[0]).toBe(original);
+    expect(next.children[2]).toBe(sib);
+    // The clone is a fresh object.
+    expect(next.children[1]).not.toBe(original);
+  });
+
+  it("does not mutate the original tree", () => {
+    const root = node("root", "View", [node("a", "Panel")]);
+    duplicateNode(root, "a");
+    expect(childIds(root, "root")).toEqual(["a"]);
+  });
+
+  it("re-mints a FRESH nodeId at every level of the clone (disjoint from the source)", () => {
+    const root = node("root", "View", [
+      node("p", "Panel", [node("t1", "Text"), node("t2", "Text", [node("t3", "Text")])]),
+    ]);
+    const next = duplicateNode(root, "p");
+    const source = next.children[0]; // the untouched original
+    const clone = next.children[1];
+    const srcIds = collectNodeIds(source);
+    const cloneIds = collectNodeIds(clone);
+    // Same shape → same node count.
+    expect(cloneIds).toHaveLength(srcIds.length);
+    // Every clone nodeId is fresh — none overlaps the source.
+    expect(cloneIds.some((id) => srcIds.includes(id))).toBe(false);
+    // And the clone's own nodeIds are internally unique.
+    expect(new Set(cloneIds).size).toBe(cloneIds.length);
+  });
+
+  it("re-suffixes every id-bearing node's authored id to {id}-copy", () => {
+    const root = idNode("root", "View", "view", [
+      idNode("p", "Panel", "Panel1", [idNode("t", "Text", "Text2")]),
+    ]);
+    const clone = duplicateNode(root, "p").children[1];
+    expect(clone.attrs.id).toBe("Panel1-copy");
+    expect(clone.children[0].attrs.id).toBe("Text2-copy");
+  });
+
+  it("disambiguates -copy-2, -copy-3 on collision with the EXISTING tree", () => {
+    const root = idNode("root", "View", "view", [
+      idNode("p", "Panel", "Panel1"),
+      idNode("pc", "Panel", "Panel1-copy"),
+    ]);
+    // Panel1-copy already exists → the clone of Panel1 becomes Panel1-copy-2.
+    const next = duplicateNode(root, "p");
+    expect(next.children[1].attrs.id).toBe("Panel1-copy-2");
+
+    // Add Panel1-copy-2 too, and the next duplication climbs to -copy-3.
+    const root2 = idNode("root", "View", "view", [
+      idNode("p", "Panel", "Panel1"),
+      idNode("pc", "Panel", "Panel1-copy"),
+      idNode("pc2", "Panel", "Panel1-copy-2"),
+    ]);
+    expect(duplicateNode(root2, "p").children[1].attrs.id).toBe("Panel1-copy-3");
+  });
+
+  it("keeps clone ids unique against OTHER newly-minted clone ids", () => {
+    // Two descendants share the base id "Dup" — cloning the wrapper, the first
+    // becomes Dup-copy and the second must consult the ids minted so far and land on
+    // Dup-copy-2 rather than colliding.
+    const root = idNode("root", "View", "view", [
+      idNode("wrap", "Panel", "wrap", [idNode("a", "Panel", "Dup"), idNode("b", "Panel", "Dup")]),
+    ]);
+    const clone = duplicateNode(root, "wrap").children[1];
+    expect(clone.children.map((c) => c.attrs.id)).toEqual(["Dup-copy", "Dup-copy-2"]);
+  });
+
+  it("leaves id-less nodes (GridLayout) unchanged while suffixing their id-bearing kids", () => {
+    const root = idNode("root", "View", "view", [
+      idNode("p", "Panel", "Panel1", [
+        {
+          nodeId: "g",
+          tag: "GridLayout",
+          attrs: { rows: "1", columns: "1" },
+          children: [idNode("cell", "Panel", "Cell1")],
+        },
+      ]),
+    ]);
+    const clone = duplicateNode(root, "p").children[1];
+    const grid = clone.children[0];
+    expect(grid.tag).toBe("GridLayout");
+    // No id was injected onto the id-less GridLayout.
+    expect(grid.attrs).toEqual({ rows: "1", columns: "1" });
+    // But its id-bearing child was suffixed.
+    expect(grid.children[0].attrs.id).toBe("Cell1-copy");
+  });
+
+  it("duplicates an id-less node, copying its attrs verbatim and minting a fresh nodeId", () => {
+    const panel: GuiNode = {
+      nodeId: "e",
+      tag: "Panel",
+      attrs: { position: "0,0,0,0", size: "1,1,0,0" },
+      children: [],
+    };
+    const root = node("root", "View", [panel]);
+    const clone = duplicateNode(root, "e").children[1];
+    expect(clone.tag).toBe("Panel");
+    expect(clone.attrs).toEqual({ position: "0,0,0,0", size: "1,1,0,0" }); // no id added
+    expect(clone.nodeId).not.toBe("e");
+  });
+});
+
+describe("canDuplicate — duplicate-legality predicate", () => {
+  it("rejects the root <View> (no parent to hold a sibling)", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canDuplicate(root, "root")).toBe(false);
+  });
+
+  it("rejects an unknown node", () => {
+    const root = node("root", "View", [node("p", "Panel")]);
+    expect(canDuplicate(root, "missing")).toBe(false);
+  });
+
+  it("allows an ordinary Panel/Text under a View or Panel", () => {
+    const root = node("root", "View", [node("p", "Panel", [node("t", "Text")])]);
+    expect(canDuplicate(root, "p")).toBe(true);
+    expect(canDuplicate(root, "t")).toBe(true);
+  });
+
+  it("rejects the sole child of a GridLayout (a grid holds exactly one child)", () => {
+    const root = node("root", "View", [node("g", "GridLayout", [node("cell", "Panel")])]);
+    expect(canDuplicate(root, "cell")).toBe(false);
+  });
+
+  it("rejects a GridLayout whose parent already caps at one grid (no self-exclusion)", () => {
+    // Duplicating g would add a SECOND grid under the View — unlike a move, the
+    // original stays, so the clone is genuinely an illegal extra grid.
+    const viewGrid = node("root", "View", [node("g", "GridLayout"), node("p", "Panel")]);
+    expect(canDuplicate(viewGrid, "g")).toBe(false);
+
+    const panelGrid = node("root", "View", [node("p", "Panel", [node("g", "GridLayout")])]);
+    expect(canDuplicate(panelGrid, "g")).toBe(false);
   });
 });

@@ -21,6 +21,9 @@ export type LiveReloadState = {
   openName: string | null;
   /** gui-relative path of the open component's `.xml`, e.g. "widgets/bag.xml". */
   openPath: string | null;
+  /** Filename of the open component's controller `.lua` (basename, e.g.
+   *  "bag_controller.lua"), or `null` when the component has no controller. */
+  openControllerFileName: string | null;
   /** Whether the open component has unsaved edits. */
   dirty: boolean;
 };
@@ -52,9 +55,9 @@ export type LiveReloadDecision = "refresh-only" | "reload-open" | "notice-dirty"
  * conservative on the side of never disturbing the open document on ambiguity.
  *
  * Matching is by the open component's `.xml` path. A controller `.lua` edit for
- * the open component is intentionally a list-refresh-only event here: the
- * controller buffer is lazy-loaded and separately dirty-tracked, so silently
- * swapping it underneath an open editor is out of scope for this reconciliation.
+ * the open component is handled separately by {@link changedPathIsOpenController}
+ * (matched by basename) and reconciled through the SAME clean→reload /
+ * dirty→notice path — see {@link classifyOpenChange}.
  */
 export function changedPathIsOpenComponent(
   state: Pick<LiveReloadState, "openPath">,
@@ -66,39 +69,111 @@ export function changedPathIsOpenComponent(
 }
 
 /**
+ * Does this `gui-changed` payload refer to the open component's controller `.lua`?
+ *
+ * Matched by BASENAME (the last `/`-segment of the changed path) against the open
+ * component's `controllerFileName`, which is itself a basename — controllers are
+ * read via `get_script(controllerFileName)`, and component basenames are unique
+ * tree-wide, so basename equality is the correct identity. A `null` changed path
+ * or a `null` `openControllerFileName` is never a match (same conservative posture
+ * as {@link changedPathIsOpenComponent}: never disturb the open document on a
+ * signal we can't attribute).
+ */
+export function changedPathIsOpenController(
+  state: Pick<LiveReloadState, "openControllerFileName">,
+  changedPath: string | null,
+): boolean {
+  if (changedPath == null) return false;
+  if (state.openControllerFileName == null) return false;
+  const base = changedPath.slice(changedPath.lastIndexOf("/") + 1);
+  return base === state.openControllerFileName;
+}
+
+/**
+ * Which file of the open document a `gui-changed` payload refers to.
+ *
+ * `"xml"` — the open component's `.xml` (matched by exact path).
+ * `"controller"` — the open component's controller `.lua` (matched by basename).
+ * `"other"` — nothing open, or the change isn't either of the open doc's files.
+ *
+ * Both `"xml"` and `"controller"` reconcile through the identical clean→reload /
+ * dirty→notice path; the distinction only tells the reconciler WHICH file to
+ * re-read for its echo check.
+ */
+export type OpenChangeKind = "xml" | "controller" | "other";
+
+export function classifyOpenChange(
+  state: LiveReloadState,
+  changedPath: string | null,
+): OpenChangeKind {
+  if (state.openName == null) return "other";
+  if (changedPathIsOpenComponent(state, changedPath)) return "xml";
+  if (changedPathIsOpenController(state, changedPath)) return "controller";
+  return "other";
+}
+
+/**
+ * Normalize a `gui-changed` payload path to the bare STEM the child-mount cache is
+ * keyed by (what `srcBasename` produces for a `<Component src>`): the last
+ * `/`-segment with a trailing `.xml` stripped (case-insensitive). Pure + testable.
+ *
+ *  - `"widgets/bag_slot.xml"` → `"bag_slot"` (matches the mount cache key).
+ *  - `"bag_controller.lua"`   → `"bag_controller.lua"` (no `.xml` to strip) — a stem
+ *    that matches no XML mount entry, so a targeted invalidation is a harmless no-op.
+ *  - `null` → `null` (the caller falls back to a clear-all — we can't attribute a
+ *    coarse "something changed" signal to one file).
+ */
+export function changedPathStem(changedPath: string | null): string | null {
+  if (changedPath == null) return null;
+  const segment = changedPath.slice(changedPath.lastIndexOf("/") + 1);
+  return segment.replace(/\.xml$/i, "");
+}
+
+/**
  * The side effects that run on EVERY `gui-changed` event, regardless of the
  * decision branch (refresh-only / reload-open / notice-dirty):
  *
  *  - `refreshList` — re-fetch the component LIST so external add/delete/rename
  *    always surfaces.
- *  - `invalidateMounts` — clear the frontend child-mount cache (F6b's
- *    guiComponentCache) so components that mount the changed one via
+ *  - `invalidateMounts` — drop the frontend child-mount cache (F6b's
+ *    guiComponentCache) for the CHANGED child so components that mount it via
  *    `<Component src>` re-fetch the fresh child, whether opened later or already
- *    mounted in the open preview.
+ *    mounted in the open preview. Only the changed stem is dropped (TARGETED), so
+ *    other embedded children keep their cache and never flash on an unrelated save;
+ *    a `null` payload we can't attribute falls back to a clear-all.
  *
  * Both are unconditional and order-independent. Kept here, off-React, so the
- * "always fire both, no matter the branch" contract is unit-tested without
- * rendering — the same pure-core posture as {@link decideLiveReload}.
+ * "always fire both, no matter the branch" contract — and the path normalization —
+ * are unit-tested without rendering, the same pure-core posture as
+ * {@link decideLiveReload}.
  */
-export function onGuiChangedAlways(refreshList: () => void, invalidateMounts: () => void): void {
+export function onGuiChangedAlways(
+  refreshList: () => void,
+  invalidateMounts: (basename?: string | null) => void,
+  changedPath: string | null,
+): void {
   refreshList();
-  invalidateMounts();
+  invalidateMounts(changedPathStem(changedPath));
 }
 
 /**
  * Decide how to reconcile a `gui-changed` event against the open document.
  *
- * - Nothing open, or the change isn't the open component → `"refresh-only"`.
- * - The open component changed and it's CLEAN → `"reload-open"` (safe live swap).
- * - The open component changed and it's DIRTY → `"notice-dirty"` (never stomp;
+ * - Nothing open, or the change isn't the open doc's `.xml` OR controller `.lua`
+ *   → `"refresh-only"`.
+ * - The open doc's file changed and it's CLEAN → `"reload-open"` (safe live swap).
+ * - The open doc's file changed and it's DIRTY → `"notice-dirty"` (never stomp;
  *   ask the user, defaulting to keeping their draft — mirrors warn-on-switch).
+ *
+ * A controller `.lua` edit is treated identically to an `.xml` edit (all-or-
+ * nothing): the reload discards `controllerText`, which the ControllerTab then
+ * lazily re-reads from disk; the dirty notice guards it the same way.
  */
 export function decideLiveReload(
   state: LiveReloadState,
   changedPath: string | null,
 ): LiveReloadDecision {
-  if (state.openName == null) return "refresh-only";
-  if (!changedPathIsOpenComponent(state, changedPath)) return "refresh-only";
+  if (classifyOpenChange(state, changedPath) === "other") return "refresh-only";
   return state.dirty ? "notice-dirty" : "reload-open";
 }
 

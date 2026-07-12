@@ -15,7 +15,8 @@
  *      and hands the child concrete values. The override boundary is a VALUE
  *      boundary, not a token boundary. {@link resolveOverrides} does that
  *      pre-resolution; the renderer seats the result as a fresh
- *      `flatRootScope(...)`.
+ *      `viewScope(...)` (the child is itself a `<View>`, so its own `{$.x}`
+ *      bindings read the seated root).
  *
  *   2. The CYCLE GUARD (ancestor-set). Nested mount is recursive: A→B→A would
  *      infinite-loop. {@link mountDecision} carries the SET of `src` basenames on
@@ -36,7 +37,7 @@
  *   "(3) `<Component src>` resolution … Missing/recursive placeholders".
  */
 
-import { type ResolveScope, resolveStringProp } from "./guiBinding";
+import { type ResolveScope, resolveStringProp, resolveWholeTokenValue } from "./guiBinding";
 import type { GuiNode } from "./guiNode";
 
 /** The attribute naming the child component file (a bare basename, e.g. `bag_slot.xml`). */
@@ -44,11 +45,14 @@ export const SRC_ATTR = "src";
 
 /**
  * The attribute naming a DATA OBJECT in the PARENT's model to seat as the mounted
- * child's whole fresh ROOT (e.g. `<Component src="button" data="buttonProps"/>`).
- * A bare model key (v1) resolved in the parent's current scope; the looked-up
- * object becomes the child's root, and any explicit override attributes on the same
- * `<Component>` layer ON TOP of it (see {@link resolveChildRoot}). Structural, so it
- * is excluded from the flat overrides — it selects the base, it is not itself a prop.
+ * child's whole fresh ROOT (e.g. `<Component src="button.xml" data="{$.buttonData}"/>`).
+ * A whole-value `{token}` (the binding grammar) resolved in the parent's current
+ * scope; the looked-up object becomes the child's root, and any explicit override
+ * attributes on the same `<Component>` layer ON TOP of it (see
+ * {@link resolveChildRoot}). `data="{$.}"` (the whole parent frame) is the
+ * transparency mechanism, and `data="{.}"` inside a grid seats the whole current
+ * item. Structural, so it is excluded from the flat overrides — it selects the base,
+ * it is not itself a prop.
  */
 export const DATA_ATTR = "data";
 
@@ -154,20 +158,22 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Resolve the `data="key"` BASE object for a `<Component>`: look the bare key up in
- * the PARENT's scope and return a SHALLOW COPY of the found object.
+ * Resolve the `data="{$.expr}"` BASE object for a `<Component>`: resolve the whole
+ * `{token}` in the PARENT's scope (the binding grammar) and return a SHALLOW COPY of
+ * the found object.
  *
- * Returns an empty object when there is no `data` attr, or the named key is absent /
- * resolves to a non-object — a miss leaves the child's `{token}`s unresolved (a
- * VISIBLE miss inside the child) rather than silently inheriting parent data, the
- * same boundary posture {@link resolveOverrides} takes for a missing override. The
- * copy is shallow because the override layer ({@link resolveChildRoot}) only sets
- * top-level fields; nested objects are shared read-only with the parent model.
+ * Returns an empty object when there is no `data` attr, it is not a whole `{token}`,
+ * or the token resolves to a non-object — a miss leaves the child's `{token}`s
+ * unresolved (a VISIBLE miss inside the child) rather than silently inheriting parent
+ * data, the same boundary posture {@link resolveOverrides} takes for a missing
+ * override. The copy is shallow because the override layer ({@link resolveChildRoot})
+ * only sets top-level fields; nested objects are shared read-only with the parent
+ * model.
  */
 function resolveDataBase(component: GuiNode, parentScope: ResolveScope): Record<string, unknown> {
   const raw = component.attrs[DATA_ATTR];
   if (raw === undefined || raw.trim() === "") return {};
-  const found = parentScope.lookup(raw.trim());
+  const found = resolveWholeTokenValue(raw, parentScope);
   return isPlainObject(found) ? { ...found } : {};
 }
 
@@ -181,7 +187,7 @@ function resolveDataBase(component: GuiNode, parentScope: ResolveScope): Record<
  * The child still resolves its `{token}`s as a FRESH MODEL — no parent fall-through.
  * `data` selects WHICH parent object seeds that model; overrides patch individual
  * fields on it. The result is seated by the renderer as
- * `flatRootScope(resolveChildRoot(...))`.
+ * `viewScope(resolveChildRoot(...))`.
  */
 export function resolveChildRoot(
   component: GuiNode,

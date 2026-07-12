@@ -11,8 +11,10 @@ import { type GuiNode, parseGui, serializeGui } from "../../lib/guiNode";
 import type { OpenComponent } from "./editorState";
 import {
   buildSaveArgs,
+  isOwnControllerSaveEcho,
   isOwnSaveEcho,
   recordSavedComponentXml,
+  recordSavedController,
   saveOpenComponent,
 } from "./saveComponent";
 
@@ -117,6 +119,49 @@ describe("saveOpenComponent", () => {
     expect(isOwnSaveEcho("widgets/echo_test.xml", serializeGui(open.root))).toBe(true);
     expect(isOwnSaveEcho("widgets/echo_test.xml", "<View/>")).toBe(false);
     expect(isOwnSaveEcho("widgets/never_saved.xml", serializeGui(open.root))).toBe(false);
+  });
+});
+
+describe("recordSavedController / isOwnControllerSaveEcho", () => {
+  it("records the controller text and matches it back as our own echo", () => {
+    recordSavedController("widgets/bag.xml", "function refresh() end");
+    expect(isOwnControllerSaveEcho("widgets/bag.xml", "function refresh() end")).toBe(true);
+    // Different content (a genuine external edit) is not suppressed.
+    expect(isOwnControllerSaveEcho("widgets/bag.xml", "function refresh() print(1) end")).toBe(
+      false,
+    );
+    // Unknown path never matches.
+    expect(isOwnControllerSaveEcho("widgets/other.xml", "function refresh() end")).toBe(false);
+  });
+
+  it("clears the record when saving with no controller (null) so it no longer echoes", () => {
+    recordSavedController("widgets/clear.xml", "x = 1");
+    expect(isOwnControllerSaveEcho("widgets/clear.xml", "x = 1")).toBe(true);
+    // A subsequent save that writes NO controller must drop the stale record — a
+    // later external controller edit at this path is then a genuine change.
+    recordSavedController("widgets/clear.xml", null);
+    expect(isOwnControllerSaveEcho("widgets/clear.xml", "x = 1")).toBe(false);
+  });
+
+  it("saveOpenComponent records the controller text for echo suppression", async () => {
+    const open = openComponent({
+      path: "widgets/ctrl_echo.xml",
+      controllerFileName: "bag_controller.lua",
+      controllerText: "y = 2",
+    });
+    await saveOpenComponent(open);
+    expect(isOwnControllerSaveEcho("widgets/ctrl_echo.xml", "y = 2")).toBe(true);
+  });
+
+  it("saveOpenComponent with no controller clears any prior controller echo record", async () => {
+    recordSavedController("widgets/no_ctrl.xml", "stale = 1");
+    const open = openComponent({
+      path: "widgets/no_ctrl.xml",
+      controllerFileName: null,
+      controllerText: null,
+    });
+    await saveOpenComponent(open);
+    expect(isOwnControllerSaveEcho("widgets/no_ctrl.xml", "stale = 1")).toBe(false);
   });
 });
 

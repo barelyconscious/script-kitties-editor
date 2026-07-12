@@ -6,7 +6,8 @@
  * This first runnable slice wires:
  *  • LEFT — the {@link ComponentList} (folder tree + create flow + open flow).
  *  • CENTER-LEFT — the structure column: the F9a tree over the F9b properties
- *    panel. Events are ordinary tree nodes, so there is no separate events slice.
+ *    panel. Event handling lives entirely in the Lua controller, so there is no
+ *    events slice and no `<Event>` element in the tree.
  *  • MAIN — when a component is open, the existing F3 {@link GuiPreviewHost}
  *    (preview + Data Model panel) renders it, fed from the shared store. A
  *    clearly-marked SEAM marks where the View/Controller tab bar (F10) lands.
@@ -98,9 +99,8 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
           )}
 
           {/* Structure column: the tree (F9a) over properties (F9b), stacked
-            top-to-bottom. Events are ordinary <Event> tree nodes now — added,
-            labeled, edited (in Properties), and removed through these two slices —
-            so the dedicated events panel is gone. */}
+            top-to-bottom. Events are handled entirely in the Lua controller, so the
+            editor authors no `<Event>` elements and there is no events panel. */}
           <StructureColumn />
 
           {/* MAIN content — the preview (+ Data Model) for the open component. */}
@@ -134,9 +134,8 @@ function LockPersistence() {
 /**
  * The structure column — TWO slices: the TREE slice (top, {@link StructureTree})
  * and the PROPERTIES slice (bottom, {@link PropertiesPanel}) reflecting the current
- * selection. `<Event>` registrations are ordinary tree nodes (labeled by name,
- * added/removed via the tree, edited via Properties), so there is no longer a
- * dedicated events slice.
+ * selection. Event handling lives entirely in the Lua controller, so the editor
+ * authors no `<Event>` elements and there is no dedicated events slice.
  *
  * Each slice scrolls independently within its own region so a deep tree and a long
  * property list don't fight for the column's height.

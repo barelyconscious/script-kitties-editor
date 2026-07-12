@@ -65,8 +65,8 @@ describe("applyModelEdit — one source feeds panel + preview", () => {
 });
 
 describe("seedDataModel — restore persisted base, then scaffold on top (tasks 482 + 484)", () => {
-  // The component references {health} and {mana} in its tree.
-  const root = parseGui('<View><Text text="{health}" texture="{mana}"/></View>');
+  // The component references {$.health} and {$.mana} in its tree (View scope).
+  const root = parseGui('<View><Text text="{$.health}" texture="{$.mana}"/></View>');
 
   it("with NO persisted model, scaffolds fresh from the component's modelText", () => {
     // No persisted base, empty modelText → the scaffold fills it from the tree.

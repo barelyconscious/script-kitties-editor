@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GuiNode } from "../../lib/guiNode";
 import { NEW_CONTROLLER_TEMPLATE } from "./controllerScript";
 import { type EditorState, editorReducer, type OpenComponent } from "./editorState";
+import { lockedKeysFor, nodeIdsForKeys } from "./elementLockStore";
 
 function node(tag: GuiNode["tag"] = "View"): GuiNode {
   return { nodeId: "n1", tag, attrs: {}, children: [] };
@@ -22,6 +23,7 @@ function openDoc(overrides: Partial<OpenComponent> = {}): OpenComponent {
 const CLEAN: EditorState = {
   open: null,
   selectedNodeId: null,
+  pendingIdFocusNodeId: null,
   lockedNodeIds: new Set(),
   hiddenNodeIds: new Set(),
   activeTab: "view",
@@ -197,13 +199,13 @@ describe("editorReducer", () => {
     expect(s2.open?.root.children[1]?.attrs.id).toBe("Text2");
   });
 
-  it("addChildNode does NOT auto-id an <Event> (events are name→handler)", () => {
+  it("addChildNode does NOT auto-id a <GridLayout> (non-visual control element)", () => {
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
     const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
     const next = editorReducer(s0, {
       type: "addChildNode",
       parentNodeId: "root",
-      child: { nodeId: "e", tag: "Event", attrs: { name: "", handler: "" }, children: [] },
+      child: { nodeId: "g", tag: "GridLayout", attrs: { rows: "1", columns: "1" }, children: [] },
     });
     expect(next.open?.root.children[0]?.attrs.id).toBeUndefined();
   });
@@ -217,6 +219,47 @@ describe("editorReducer", () => {
       child: { nodeId: "p", tag: "Panel", attrs: { id: "healthBar" }, children: [] },
     });
     expect(next.open?.root.children[0]?.attrs.id).toBe("healthBar");
+  });
+
+  it("addChildNode requests id-field focus for an id-bearing child (Panel/Text/Component)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    for (const tag of ["Panel", "Text", "Component"] as const) {
+      const next = editorReducer(s0, {
+        type: "addChildNode",
+        parentNodeId: "root",
+        child: { nodeId: `n-${tag}`, tag, attrs: {}, children: [] },
+      });
+      expect(next.pendingIdFocusNodeId).toBe(`n-${tag}`);
+    }
+  });
+
+  it("addChildNode does NOT request id-field focus for a <GridLayout> (no id field)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: { id: "view" }, children: [] };
+    const s0: EditorState = { ...CLEAN, open: openDoc({ root }) };
+    const next = editorReducer(s0, {
+      type: "addChildNode",
+      parentNodeId: "root",
+      child: { nodeId: "g", tag: "GridLayout", attrs: { rows: "1", columns: "1" }, children: [] },
+    });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+  });
+
+  it("consumeIdFocus clears a pending id-focus request (and no-ops when already null)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), pendingIdFocusNodeId: "p" };
+    const next = editorReducer(state, { type: "consumeIdFocus" });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+    // Already null → same reference (no needless re-render).
+    expect(editorReducer(next, { type: "consumeIdFocus" })).toBe(next);
+  });
+
+  it("select clears a pending id-focus request (a click is never a focus trigger)", () => {
+    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [] };
+    const state: EditorState = { ...CLEAN, open: openDoc({ root }), pendingIdFocusNodeId: "p" };
+    const next = editorReducer(state, { type: "select", nodeId: "root" });
+    expect(next.pendingIdFocusNodeId).toBeNull();
+    expect(next.selectedNodeId).toBe("root");
   });
 
   it("addChildNode is a no-op (no dirty, no selection move) when the parent is missing", () => {
@@ -261,8 +304,8 @@ describe("editorReducer", () => {
   });
 
   it("removeNode detaches the node and marks dirty", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
-    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -271,7 +314,7 @@ describe("editorReducer", () => {
   });
 
   it("removeNode clears the selection when the removed node was selected", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e1" };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -279,8 +322,8 @@ describe("editorReducer", () => {
   });
 
   it("removeNode preserves an unrelated selection", () => {
-    const e1: GuiNode = { nodeId: "e1", tag: "Event", attrs: {}, children: [] };
-    const e2: GuiNode = { nodeId: "e2", tag: "Event", attrs: {}, children: [] };
+    const e1: GuiNode = { nodeId: "e1", tag: "Panel", attrs: {}, children: [] };
+    const e2: GuiNode = { nodeId: "e2", tag: "Panel", attrs: {}, children: [] };
     const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [e1, e2] };
     const state: EditorState = { ...CLEAN, open: openDoc({ root }), selectedNodeId: "e2" };
     const next = editorReducer(state, { type: "removeNode", nodeId: "e1" });
@@ -331,26 +374,210 @@ describe("editorReducer", () => {
     expect(editorReducer(CLEAN, { type: "removeNode", nodeId: "x" })).toBe(CLEAN);
   });
 
-  it("stores an Event's name/handler verbatim (no validation/normalization)", () => {
-    // The events panel is intentionally thin: whatever the user types is stored as
-    // an <Event> node's attrs, untouched — even a namespaced/colon-bearing name and
-    // a handler that may not exist anywhere.
-    const event: GuiNode = {
-      nodeId: "e1",
-      tag: "Event",
-      attrs: { name: "", handler: "" },
-      children: [],
-    };
-    const root: GuiNode = { nodeId: "root", tag: "View", attrs: {}, children: [event] };
-    const state: EditorState = { ...CLEAN, open: openDoc({ root }) };
-    const next = editorReducer(state, {
-      type: "setNodeAttrs",
-      nodeId: "e1",
-      attrs: { name: "Battle:OnCreatureDied", handler: "doesNotExistYet" },
+  describe("moveNode (task 512)", () => {
+    // View → Panel(p1: t1,t2) + Panel(p2: t3), for reorder + re-parent cases.
+    function tree(): GuiNode {
+      return {
+        nodeId: "root",
+        tag: "View",
+        attrs: {},
+        children: [
+          {
+            nodeId: "p1",
+            tag: "Panel",
+            attrs: { id: "p1" },
+            children: [
+              { nodeId: "t1", tag: "Text", attrs: {}, children: [] },
+              { nodeId: "t2", tag: "Text", attrs: {}, children: [] },
+            ],
+          },
+          {
+            nodeId: "p2",
+            tag: "Panel",
+            attrs: { id: "p2" },
+            children: [{ nodeId: "t3", tag: "Text", attrs: {}, children: [] }],
+          },
+        ],
+      };
+    }
+    const opened = (): EditorState =>
+      editorReducer(CLEAN, { type: "open", component: openDoc({ root: tree() }) });
+
+    it("re-parents a node, marks dirty, and commits ONE undo step", () => {
+      const s = editorReducer(opened(), {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      expect(s.open?.root.children[0].children.map((c) => c.nodeId)).toEqual(["t2"]);
+      expect(s.open?.root.children[1].children.map((c) => c.nodeId)).toEqual(["t1", "t3"]);
+      expect(s.dirty).toBe(true);
+      expect(s.past).toHaveLength(1);
     });
-    expect(next.open?.root.children[0].attrs).toEqual({
-      name: "Battle:OnCreatureDied",
-      handler: "doesNotExistYet",
+
+    it("undoing a move restores the tree in one step", () => {
+      const moved = editorReducer(opened(), {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      const undone = editorReducer(moved, { type: "undo" });
+      expect(undone.open?.root.children[0].children.map((c) => c.nodeId)).toEqual(["t1", "t2"]);
+      expect(undone.open?.root.children[1].children.map((c) => c.nodeId)).toEqual(["t3"]);
+    });
+
+    it("preserves the selection (moved subtree keeps its nodeId)", () => {
+      const s = editorReducer(
+        { ...opened(), selectedNodeId: "t1" },
+        { type: "moveNode", nodeId: "t1", targetParentId: "p2", index: 0 },
+      );
+      expect(s.selectedNodeId).toBe("t1");
+    });
+
+    it("is a clean no-op on an ILLEGAL move (cycle) — no dirty, no history", () => {
+      const s0 = opened();
+      // Dropping p1 into its own child t1 is a cycle → canMoveTo rejects it.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p1",
+        targetParentId: "t1",
+        index: 0,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a clean no-op when the target's element rules forbid the child", () => {
+      const s0 = opened();
+      // A <Text> is a leaf — nothing may move under it.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p2",
+        targetParentId: "t1",
+        index: 0,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a no-op (same state) when the node would land on its own slot", () => {
+      const s0 = opened();
+      // Move p1 (idx 0) to index 1 (before p2) — p1 is already right before p2.
+      const s1 = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "p1",
+        targetParentId: "root",
+        index: 1,
+      });
+      expect(s1).toBe(s0);
+    });
+
+    it("is a no-op when nothing is open", () => {
+      expect(
+        editorReducer(CLEAN, { type: "moveNode", nodeId: "t1", targetParentId: "p2", index: 0 }),
+      ).toBe(CLEAN);
+    });
+
+    it("re-derives persisted lock keys onto the moved node's NEW index-path", () => {
+      // Lock t1, then re-parent it. The persisted-key derivation (lockedKeysFor,
+      // which the LockPersistence effect calls on every root change) must resolve to
+      // t1's NEW structural position — proving a save+reload restores the lock onto
+      // the right node rather than a stale index-path.
+      const s0 = editorReducer(opened(), { type: "toggleLock", nodeId: "t1" });
+      const moved = editorReducer(s0, {
+        type: "moveNode",
+        nodeId: "t1",
+        targetParentId: "p2",
+        index: 0,
+      });
+      if (!moved.open) throw new Error("expected an open component after the move");
+      // t1 now lives at root→child1(p2)→child0 → index-path "1.0".
+      const keys = lockedKeysFor(moved.open.root, moved.lockedNodeIds);
+      expect(keys).toEqual(["1.0"]);
+      // And that key resolves back to t1 against the moved tree.
+      expect(nodeIdsForKeys(moved.open.root, keys)).toEqual(new Set(["t1"]));
+    });
+  });
+
+  describe("duplicateNode (task 520)", () => {
+    // View → Panel(p1: t1) + Panel(p2), with authored ids for the -copy assertions.
+    function tree(): GuiNode {
+      return {
+        nodeId: "root",
+        tag: "View",
+        attrs: { id: "view" },
+        children: [
+          {
+            nodeId: "p1",
+            tag: "Panel",
+            attrs: { id: "Panel1" },
+            children: [{ nodeId: "t1", tag: "Text", attrs: { id: "Text2" }, children: [] }],
+          },
+          { nodeId: "p2", tag: "Panel", attrs: { id: "Panel3" }, children: [] },
+        ],
+      };
+    }
+    const opened = (): EditorState =>
+      editorReducer(CLEAN, { type: "open", component: openDoc({ root: tree() }) });
+
+    it("inserts the clone as the next sibling, selects it, dirties, and commits ONE undo step", () => {
+      const s = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const ids = s.open?.root.children.map((c) => c.nodeId) ?? [];
+      // [p1, <clone>, p2]
+      expect(ids).toHaveLength(3);
+      expect(ids[0]).toBe("p1");
+      expect(ids[2]).toBe("p2");
+      const cloneId = ids[1];
+      expect(cloneId).not.toBe("p1");
+      // The clone (not the original) is selected.
+      expect(s.selectedNodeId).toBe(cloneId);
+      expect(s.dirty).toBe(true);
+      expect(s.past).toHaveLength(1);
+    });
+
+    it("re-suffixes the clone's authored ids to {id}-copy at every level", () => {
+      const s = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const clone = s.open?.root.children[1];
+      expect(clone?.attrs.id).toBe("Panel1-copy");
+      expect(clone?.children[0].attrs.id).toBe("Text2-copy");
+    });
+
+    it("undoing a duplication restores the tree in one step", () => {
+      const dup = editorReducer(opened(), { type: "duplicateNode", nodeId: "p1" });
+      const undone = editorReducer(dup, { type: "undo" });
+      expect(undone.open?.root.children.map((c) => c.nodeId)).toEqual(["p1", "p2"]);
+    });
+
+    it("is a clean no-op (no dirty, no history) for the root <View>", () => {
+      const s0 = opened();
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "root" })).toBe(s0);
+    });
+
+    it("is a clean no-op when the node is missing", () => {
+      const s0 = opened();
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "ghost" })).toBe(s0);
+    });
+
+    it("is a clean no-op on an ILLEGAL duplication (sole child of a GridLayout)", () => {
+      const root: GuiNode = {
+        nodeId: "root",
+        tag: "View",
+        attrs: {},
+        children: [
+          {
+            nodeId: "g",
+            tag: "GridLayout",
+            attrs: {},
+            children: [{ nodeId: "cell", tag: "Panel", attrs: { id: "Cell1" }, children: [] }],
+          },
+        ],
+      };
+      const s0 = editorReducer(CLEAN, { type: "open", component: openDoc({ root }) });
+      expect(editorReducer(s0, { type: "duplicateNode", nodeId: "cell" })).toBe(s0);
+    });
+
+    it("is a no-op when nothing is open", () => {
+      expect(editorReducer(CLEAN, { type: "duplicateNode", nodeId: "p1" })).toBe(CLEAN);
     });
   });
 

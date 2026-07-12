@@ -18,7 +18,7 @@ The GUI editor lives as a new tool in the navrail (the icon signifies this is fo
 
 What a new session should know up front:
 
-- **Three columns** ship as designed: component list (collapsible folder tree) · structure column (tree + properties) · main content. The main content carries a segmented **View / Controller / XML** toggle (the **XML tab is a read-only live view** of the serialized tree, not an editing surface) plus an **always-visible, collapsible Data Model panel** on its right (Monaco JSON). There is **no dedicated events panel** — events are ordinary `<Event>` nodes in the structure tree (see §2 / Structure column).
+- **Three columns** ship as designed: component list (collapsible folder tree) · structure column (tree + properties) · main content. The main content carries a segmented **View / Controller / XML** toggle (the **XML tab is a read-only live view** of the serialized tree, not an editing surface) plus an **always-visible, collapsible Data Model panel** on its right (Monaco JSON). There is **no dedicated events panel** — event registration lives in the Lua controller, not in XML, so the editor authors no `<Event>` elements (see the note under "XML Elements").
 - **`layer` ships as a NESTED per-sibling z-order**, not the global-flat/leaves-only model the design originally pinned. An element's `layer` orders it among its siblings and lifts its whole subtree as a group. The global-flat model and its F5a/F5b contract are retained below under **SUPERSEDED** banners as history. The shipped model lives in `src/lib/guiZOrder.ts`.
 - **Disk vs. manifest:** components are **read by on-disk gui-tree path** (the filesystem is the gate, not the manifest). **Both create AND save register the component (and its controller) in `assets.json`** when absent — "register-on-save", not just register-on-create — so existing real components get catalogued the first time they're saved, immediately, without waiting on a rescan. New entries are inserted in **alphabetical position** (not appended). The full-tree **rescan** (`update_asset_manifest`) now globs `.xml` alongside `.lua`/`.png`/`.json`, so it catalogues gui components and keeps register-on-saved `.xml` entries instead of dropping them; it also **writes the whole manifest in alphabetical key order**, so a newly-scanned file sorts into place rather than landing at the bottom.
 - **Data Model panel auto-scaffolds** from the layout's `{token}`s: each discovered token defaults to **its own name as a string**, new tokens merge **additively** (existing keys/values are never overwritten or removed), and the per-component model **persists in `localStorage` under the key `xgui.dataModels`** (a `componentPath → modelText` map) so it survives switching components and restarts.
@@ -35,8 +35,15 @@ XML is used to describe the visual layout of the component. The following elemen
 <Panel> - a flexible UI element that can be positioned, textured, and sized
 <Text> - a flexible UI element identical to a Panel except more explicitly a Text field
 <Component> - signifies this element is defined in another source file
-<Event> - registers an event listener. Events may only be present as an immediate child of `<View>`
 ```
+
+> **Events are NOT XML elements (contract update 2026-07-11).** Event registration
+> moved entirely into the Lua controller. The editor no longer authors, reads, or
+> preserves any `<Event>` element — the parser IGNORES an `<Event>` in a component's
+> XML (dropping it and its subtree on load, so it is absent from the re-serialized
+> file), there is no affordance to add one, and there is no Events panel. The
+> `<Event>` docs below are retained only to describe what the runtime once read from
+> XML; they no longer describe the editor.
 
 In phase 2, we would consider the following additional elements. Phase 1's implementation must support these seamlessly:
 ```xml
@@ -82,11 +89,11 @@ Properties:
 - `visible` - optional, signifies the starting visibility state of the element. default is true
 - other properties can be defined on the component which will translate to overrides in the component
 
-**<Event>**
-- `name` - required, the name of the event eg `Battle:OnCreatureDied`
-- `handler` - required, lua function name defined in the controller
+**<Event>** *(historical — no longer an XML element; see the note under "XML Elements". Event registration lives in the Lua controller now. Retained only to record the old XML shape.)*
+- `name` - the name of the event eg `Battle:OnCreatureDied`
+- `handler` - lua function name defined in the controller
 
-**Editor's role with events (intentionally thin):** events are a global bus at *runtime* — anyone can emit, anyone can subscribe — but the **editor does not model any of that.** From the editor's perspective an event (and likewise an element handler such as `onMouseClicked`) is just a **name → function-name mapping** that it stores as written. The editor does no validation that the handler exists, no tracking of who emits or subscribes to a name, and no payload awareness. The bus semantics are owned by the user and the controller script.
+**Editor's role with events (intentionally thin):** events are a global bus at *runtime* — anyone can emit, anyone can subscribe — but the **editor does not model any of that.** Event *registration* is no longer expressed in XML at all — it is done in the controller Lua, which the editor does not populate. The editor still treats an element handler such as `onMouseClicked` as a **name → function-name mapping** that it stores as written (no validation that the handler exists, no payload awareness). The bus semantics are owned by the user and the controller script.
 
 ### Data binding (`{token}` on properties)
 
@@ -100,7 +107,7 @@ The rule for what can bind is **presentation vs. structure**: *if a property cha
 - `id` — the element's identity and reference path (`view.stats.health`); referenced by the controller and the computed-id system, so it cannot be data-driven.
 - `src` (on `<Component>`) — defines which subtree mounts. (Binding it = swapping the whole child tree; a heavier feature, not in scope.)
 - `controller` (on `<View>`) — a file reference.
-- event handler names (`onMouseClicked`, `<Event handler=…>`, `<Event name=…>`) — these point at code, not data.
+- element handler names (`onMouseClicked`, `onFocus`, …) — these point at code, not data. (Standalone event registration is no longer an XML concern — it lives in the controller Lua.)
 
 **Compound properties bind per-field.** `position` and `size` are four values each (`relX,relY,absX,absY`); each field is independently a literal *or* a token. This is what makes data-driven sizing possible, e.g. a health bar: `size="{healthRatio},1,0,0"` binds scale-x and fixes the rest.
 
@@ -480,10 +487,11 @@ Consequences the editor MUST enforce (this is the new obligation the subfolder r
 
 A single column immediately right of the component list, split into **three vertically-stacked panels**:
 
-- **Tree** (top) — the element hierarchy of the selected component. Right-click any element to add a child; if the child is a `<Component>`, a **component picker** (a searchable list of the gui-folder components) lets the user choose the source file. Adding a child automatically updates the XML and the preview. A newly-added id-bearing element (`<Panel>`/`<Text>`/`<Component>`) is given an **auto-id** — `Panel1`, `Text2`, … from a single running counter shared across tags — so it's addressable immediately; the user renames it in Properties. `<Event>` (name→handler) and the root `<View>` get none. Any id-bearing element that ends up *without* an id (an imported component, or an id the user cleared) is **flagged with a warning marker in the tree** — it can't be referenced from the controller or bindings until it has one.
+- **Tree** (top) — the element hierarchy of the selected component. Right-click any element to add a child; if the child is a `<Component>`, a **component picker** (a searchable list of the gui-folder components) lets the user choose the source file. Adding a child automatically updates the XML and the preview. A newly-added id-bearing element (`<Panel>`/`<Text>`/`<Component>`) is given an **auto-id** — `Panel1`, `Text2`, … from a single running counter shared across tags — so it's addressable immediately; the user renames it in Properties. `<GridLayout>` and the root `<View>` get none. Any id-bearing element that ends up *without* an id (an imported component, or an id the user cleared) is **flagged with a warning marker in the tree** — it can't be referenced from the controller or bindings until it has one.
 - **Properties** (middle) — reflects the properties of the currently selected element. A computed read-only `id` field sits at the top, derived from the parent hierarchy (e.g. `view.stats.statText`). The editable `id` below it is the element's own local id (pre-filled with the auto-id for a freshly-added element). For `<Component>` elements this is also where `src`, the `data` data-object key (the nested-component binding), and any freeform override properties are set. `texture` uses the sprite selector UI component.
   - **`position` and `size` each render as four labeled inputs** — scale-x, scale-y, offset-x, offset-y — not a single `"relX,relY,absX,absY"` comma-string. (The serialized XML still uses the comma form.) Each field accepts a literal number *or* a `{token}` binding (see Data binding), so a field showing `{healthRatio}` is bound and one showing `0.5` is literal.
-- **Events** (bottom) — lists of `<Event>` registrations (event name + handler function name), added/removed here. Events apply to the `<View>` (top-level) component.
+
+There is **no Events panel** — event registration lives in the Lua controller, not in XML, so the editor neither lists nor authors events (see the note under "XML Elements").
 
 #### 3. Selection model
 
@@ -492,7 +500,7 @@ There is **one selection state** for the active component, settable two ways, ke
 - Click an element **in the tree** → it becomes selected, and it highlights in the preview.
 - Click an element **in the preview** → it becomes selected, and it highlights in the tree.
 
-The Properties and (where relevant) Events panels always reflect the current selection.
+The Properties panel always reflects the current selection.
 
 #### 4. Main content — tabbed (View / Controller)
 
@@ -536,7 +544,7 @@ Each node carries a **stable editor-assigned node id** (call it `nodeId`) minted
 ```ts
 type GuiNode = {
   nodeId: string;            // editor-internal, stable for the node's lifetime; NOT serialized
-  tag: "View" | "Panel" | "Text" | "Component" | "Event";
+  tag: "View" | "Panel" | "Text" | "Component" | "GridLayout";
   attrs: Record<string, string>;   // raw authored attribute strings (literal OR "{token}"), verbatim
   children: GuiNode[];
 };
@@ -698,6 +706,10 @@ These are *not* on the deferred list but surfaced while resolving the three abov
 
 ```xml
   <View controller="bag_controller.lua">
+    <!-- These <Event> lines are legacy: event registration now lives in the Lua
+         controller. The editor IGNORES any <Event> element on load (it never enters
+         the tree and is dropped from the re-serialized XML). Shown here only to
+         illustrate the historical shape. -->
     <Event name="OnItemSold" handler="refresh"/>
     <Event name="OnItemBought" handler="refresh"/>
 

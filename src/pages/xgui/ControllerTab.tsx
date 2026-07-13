@@ -31,7 +31,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { FilePlus2, FileWarning, Loader2 } from "lucide-react";
+import { Code2, FilePlus2, FileWarning, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { Button } from "@/components/ui/button";
@@ -160,6 +160,7 @@ function ControllerBody() {
         <span className="truncate font-mono text-sm" title={fileName}>
           {fileName}
         </span>
+        <OpenInVsCodeButton fileName={fileName} />
       </div>
       <div className="min-h-0 flex-1">
         <ScriptEditor
@@ -171,6 +172,41 @@ function ControllerBody() {
           onChange={(value) => dispatch({ type: "setControllerText", text: value })}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Open in VS Code" — launches the controller's `.lua` file in VS Code via the
+ * `open_script_in_vscode` command (which resolves the logical name to its on-disk
+ * path). Only meaningful once the controller exists on disk; a just-added,
+ * not-yet-saved controller isn't registered in the manifest, so the command
+ * errors — surfaced inline (with its own title) rather than thrown away.
+ */
+function OpenInVsCodeButton({ fileName }: { fileName: string }) {
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="ml-auto flex shrink-0 items-center gap-2">
+      {error != null && (
+        <span className="max-w-xs truncate text-amber-500 text-xs" title={error}>
+          {error}
+        </span>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setError(null);
+          invoke("open_script_in_vscode", { name: fileName }).catch((err) => {
+            setError(errorMessage(err));
+          });
+        }}
+      >
+        <Code2 aria-hidden />
+        Open in VS Code
+      </Button>
     </div>
   );
 }

@@ -76,8 +76,9 @@ pub struct Dal {
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
     pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
-    // The GUI color palette (name -> "r,g,b,a"), from Data/gui_palette.json. A
-    // single coarse cache unit under key `()`, like the per-domain caches above.
+    // The GUI color palette (name -> "r,g,b,a"), from Data/palette.json (stored on
+    // disk as the engine's [{name,r,g,b,a}] array; dal::palette translates). A single
+    // coarse cache unit under key `()`, like the per-domain caches above.
     pub(crate) palette: Cache<(), Arc<Palette>>,
     // The game's assets.json manifest (logical name -> on-disk path).
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
@@ -298,7 +299,7 @@ fn build_watcher(
         }),
         // The GUI palette lives under the already-watched Data/, so no new watch
         // is needed — just an exact-path invalidator like the domain files above.
-        (data_dir.join("gui_palette.json"), {
+        (data_dir.join("palette.json"), {
             let c = palette.clone();
             Box::new(move || c.invalidate(&()))
         }),

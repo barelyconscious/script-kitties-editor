@@ -2,7 +2,7 @@
  * guiPaletteEdit — pure editing logic for the Registry's GUI color palette.
  *
  * The palette persists as a flat, ORDER-PRESERVING `name → "r,g,b,a"` map in game
- * data (`Data/gui_palette.json`, via `get_palette`/`save_palette`). For editing we
+ * data (`Data/palette.json`, via `get_palette`/`save_palette`). For editing we
  * lift that map into an ordered array of {@link PaletteRow} so that rows survive
  * transient empty/duplicate names while the user types (the map can't hold those),
  * and so key ORDER is the row order the user sees — converting back on save emits

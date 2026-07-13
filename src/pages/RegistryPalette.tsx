@@ -31,7 +31,7 @@ const CHECKERBOARD: React.CSSProperties = {
 
 /**
  * The GUI color palette region of the Registry tab. UNLIKE the enum sections, it
- * reads/writes `Data/gui_palette.json` (game data the runtime reads) via the
+ * reads/writes `Data/palette.json` (game data the runtime reads) via the
  * `get_palette`/`save_palette` commands — NOT `editor.registry.json`. It therefore
  * owns its OWN draft + dirty flag + Save/Reset, co-located in this region's header,
  * fully independent of the enum Save. After a save it invalidates the module-level
@@ -129,7 +129,7 @@ export default function RegistryPalette() {
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-base">GUI color palette</h2>
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] text-muted-foreground">
-              Data/gui_palette.json
+              Data/palette.json
             </code>
           </div>
           <p className="max-w-prose text-muted-foreground text-sm">

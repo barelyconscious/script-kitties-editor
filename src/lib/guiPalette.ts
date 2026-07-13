@@ -2,7 +2,8 @@
  * guiPalette — module-cached access to the GUI color palette for the XGUI preview.
  *
  * The palette is a flat `name → "r,g,b,a"` map persisted to game data
- * (`Data/gui_palette.json`) and read via the `get_palette` Tauri command. The
+ * (`Data/palette.json`, stored on disk as the engine's `[{name,r,g,b,a}]` array —
+ * the DAL translates) and read via the `get_palette` Tauri command. The
  * preview resolves palette names through it so colors render true; recoloring an
  * entry in the Registry must update every GUI that references it by name.
  *

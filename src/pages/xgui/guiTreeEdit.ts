@@ -105,6 +105,15 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
 }
 
 /**
+ * The palette color name a freshly-added `<Text>` is seeded with — the project's
+ * standard text color, defined in `Data/palette.json`. Referenced by name (not a
+ * literal `r,g,b,a` code) so a new label follows the palette and re-themes when the
+ * palette is recolored; if the entry is ever renamed/removed, the field simply lints
+ * as a dangling palette name rather than baking in a stale code.
+ */
+export const DEFAULT_TEXT_COLOR_NAME = "TextDefault";
+
+/**
  * Mint a fresh {@link GuiNode} for a newly-added element, with the minimal
  * sensible default attributes so it is visible/selectable in the preview the
  * instant it is added (the Properties slice F9b edits the rest):
@@ -113,7 +122,10 @@ export function canAddChild(parent: GuiNode, childTag: GuiTag): boolean {
  *    (100% relative, no pixel offset), the sensible default for a container box.
  *  - `<Text>` gets a small fixed default `position`/`size` so the new label is a
  *    visible, clickable target rather than a zero/full-bleed surprise, plus
- *    placeholder `text` so it paints something.
+ *    placeholder `text` so it paints something and `color="TextDefault"` (see
+ *    {@link DEFAULT_TEXT_COLOR_NAME}) so it lands on the project's standard text
+ *    palette color out of the box instead of the renderer's fallback grey. The
+ *    color is presentational (not geometry), so it is set even under a GridLayout.
  *  - `<Component>` carries the chosen `src` basename (the picker supplies it) plus
  *    the same default geometry; it has NO children by rule.
  *  - `<GridLayout>` gets `rows="1"`/`columns="1"` (the documented defaults);
@@ -141,9 +153,11 @@ export function makeChildNode(tag: GuiTag, src?: string, parentTag?: GuiTag): Gu
       node.attrs = underGrid ? {} : { position: "0,0,0,0", size: "1,1,0,0" };
       break;
     case "Text":
+      // `color` is presentational, so it is seeded in BOTH cases; only the geometry
+      // is grid-dependent.
       node.attrs = underGrid
-        ? { text: "Text" }
-        : { position: "0,0,0,0", size: "0,0,100,32", text: "Text" };
+        ? { text: "Text", color: DEFAULT_TEXT_COLOR_NAME }
+        : { position: "0,0,0,0", size: "0,0,100,32", text: "Text", color: DEFAULT_TEXT_COLOR_NAME };
       break;
     case "Component":
       node.attrs = underGrid

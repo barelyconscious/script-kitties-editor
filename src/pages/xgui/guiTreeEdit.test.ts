@@ -8,6 +8,7 @@ import {
   canDuplicate,
   canMoveTo,
   componentPickItems,
+  DEFAULT_TEXT_COLOR_NAME,
   duplicateNode,
   filterPickItems,
   findNode,
@@ -208,6 +209,10 @@ describe("makeChildNode", () => {
     expect(makeChildNode("Text").attrs.text).toBe("Text");
   });
 
+  it("Text is seeded with the default palette text color", () => {
+    expect(makeChildNode("Text").attrs.color).toBe(DEFAULT_TEXT_COLOR_NAME);
+  });
+
   it("Component carries the chosen src basename and stays childless", () => {
     const n = makeChildNode("Component", "bag_slot");
     expect(n.attrs.src).toBe("bag_slot");
@@ -241,7 +246,8 @@ describe("makeChildNode", () => {
     const text = makeChildNode("Text", undefined, "GridLayout");
     expect(text.attrs.position).toBeUndefined();
     expect(text.attrs.size).toBeUndefined();
-    expect(text.attrs).toEqual({ text: "Text" });
+    // Geometry is dropped under a grid, but the presentational color still seeds.
+    expect(text.attrs).toEqual({ text: "Text", color: DEFAULT_TEXT_COLOR_NAME });
 
     const comp = makeChildNode("Component", "bag_slot", "GridLayout");
     expect(comp.attrs.position).toBeUndefined();

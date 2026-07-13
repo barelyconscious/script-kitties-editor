@@ -42,6 +42,7 @@ import { DiskChangeNotice } from "./xgui/DiskChangeNotice";
 import { applyModelEdit, seedDataModel } from "./xgui/dataModelState";
 import { getPersistedModel, setPersistedModel } from "./xgui/dataModelStore";
 import { lockedKeysFor, setPersistedLocks } from "./xgui/elementLockStore";
+import { hiddenKeysFor, setPersistedHidden } from "./xgui/elementVisibilityStore";
 import {
   EditorStateProvider,
   type EditorTab,
@@ -84,7 +85,7 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
   return (
     <EditorStateProvider>
       <GuiTreeStoreProvider>
-        <LockPersistence />
+        <ViewStatePersistence />
         <div className="flex h-full min-h-0">
           <ComponentList
             collapsed={componentListCollapsed}
@@ -112,22 +113,26 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
 }
 
 /**
- * Persists the open component's locked elements to localStorage whenever the lock
- * set OR the tree changes (element-lock persistence). Locks are stored as STABLE
- * structural keys (see {@link import("./xgui/elementLockStore")}), so re-deriving them
- * from the current tree on every edit keeps the persisted paths fresh as structure
- * shifts. Seeding back on open/reload happens at those call sites; this only writes.
- * Renders nothing — it is a side-effect bridge mounted inside the store provider.
+ * Persists the open component's per-element VIEW state — locked elements and hidden
+ * elements — to localStorage whenever either set OR the tree changes (element-lock /
+ * visibility persistence). Both are stored as STABLE structural keys (see
+ * {@link import("./xgui/elementLockStore")} / {@link import("./xgui/elementVisibilityStore")}),
+ * so re-deriving them from the current tree on every edit keeps the persisted paths
+ * fresh as structure shifts. Seeding back on open/reload happens at those call sites;
+ * this only writes. Renders nothing — it is a side-effect bridge mounted inside the
+ * store provider.
  */
-function LockPersistence() {
+function ViewStatePersistence() {
   const { state } = useEditorStore();
   const path = state.open?.path;
   const root = state.open?.root;
   const locked = state.lockedNodeIds;
+  const hidden = state.hiddenNodeIds;
   useEffect(() => {
     if (!path || !root) return;
     setPersistedLocks(path, lockedKeysFor(root, locked));
-  }, [path, root, locked]);
+    setPersistedHidden(path, hiddenKeysFor(root, hidden));
+  }, [path, root, locked, hidden]);
   return null;
 }
 

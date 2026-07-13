@@ -91,6 +91,13 @@ export function lockedKeysFor(root: GuiNode, lockedNodeIds: ReadonlySet<string>)
 }
 
 /**
+ * Neutral alias for {@link lockedKeysFor} — the mapping is purely structural (a set
+ * of nodeIds → their index-path keys), so the visibility (hidden) store reuses it
+ * without borrowing the lock-specific name.
+ */
+export { lockedKeysFor as structuralKeysForNodeIds };
+
+/**
  * Resolve persisted structural keys back to the CURRENT tree's nodeIds. Keys that
  * don't address a node anymore (structure changed since they were saved) are
  * dropped, so a stale persisted lock simply doesn't apply rather than erroring.
@@ -125,17 +132,17 @@ function resolveStorage(storage?: LockStorage): LockStorage | null {
 }
 
 /**
- * Read and parse the whole `path → lockedKeys` map. Returns an empty map when the
- * store is absent, empty, unreadable, malformed, or not a plain object — never
- * throws. Each entry is validated to be an array of strings; a malformed value is
- * dropped defensively so one bad entry can't poison the rest.
+ * Read and parse the whole `path → keys` map stored under `storageKey`. Returns an
+ * empty map when the store is absent, empty, unreadable, malformed, or not a plain
+ * object — never throws. Each entry is validated to be an array of strings; a
+ * malformed value is dropped defensively so one bad entry can't poison the rest.
  */
-function readMap(storage?: LockStorage): Record<string, string[]> {
+function readMap(storageKey: string, storage?: LockStorage): Record<string, string[]> {
   const store = resolveStorage(storage);
   if (!store) return {};
   let raw: string | null;
   try {
-    raw = store.getItem(ELEMENT_LOCKS_KEY);
+    raw = store.getItem(storageKey);
   } catch {
     return {};
   }
@@ -159,27 +166,49 @@ function readMap(storage?: LockStorage): Record<string, string[]> {
 }
 
 /**
+ * The persisted structural keys stored under `storageKey` for one component path, or
+ * `[]` when none is stored (or the store is unreadable). The generic primitive both
+ * the lock and visibility (hidden) stores build on — they differ only by their key.
+ */
+export function getPersistedKeys(storageKey: string, path: string, storage?: LockStorage): string[] {
+  return readMap(storageKey, storage)[path] ?? [];
+}
+
+/**
+ * Persist one component's structural keys under `storageKey → path`, preserving every
+ * other path's entry. An EMPTY list removes the entry entirely (nothing set → no
+ * row). A write failure (quota, disabled storage) is swallowed — persistence is
+ * best-effort. The generic primitive the lock and visibility stores share.
+ */
+export function setPersistedKeys(
+  storageKey: string,
+  path: string,
+  keys: readonly string[],
+  storage?: LockStorage,
+): void {
+  const store = resolveStorage(storage);
+  if (!store) return;
+  const map = readMap(storageKey, store);
+  if (keys.length === 0) delete map[path];
+  else map[path] = [...keys];
+  try {
+    store.setItem(storageKey, JSON.stringify(map));
+  } catch {
+    // Best-effort: a full/disabled store just means this edit isn't persisted.
+  }
+}
+
+/**
  * The persisted locked structural keys for one component path, or `[]` when none is
  * stored (or the store is unreadable).
  */
 export function getPersistedLocks(path: string, storage?: LockStorage): string[] {
-  return readMap(storage)[path] ?? [];
+  return getPersistedKeys(ELEMENT_LOCKS_KEY, path, storage);
 }
 
 /**
- * Persist one component's locked keys under its path, preserving every other path's
- * entry. An EMPTY list removes the entry entirely (nothing locked → no row). A write
- * failure (quota, disabled storage) is swallowed — persistence is best-effort.
+ * Persist one component's locked keys under its path (see {@link setPersistedKeys}).
  */
 export function setPersistedLocks(path: string, keys: readonly string[], storage?: LockStorage): void {
-  const store = resolveStorage(storage);
-  if (!store) return;
-  const map = readMap(store);
-  if (keys.length === 0) delete map[path];
-  else map[path] = [...keys];
-  try {
-    store.setItem(ELEMENT_LOCKS_KEY, JSON.stringify(map));
-  } catch {
-    // Best-effort: a full/disabled store just means this edit isn't persisted.
-  }
+  setPersistedKeys(ELEMENT_LOCKS_KEY, path, keys, storage);
 }

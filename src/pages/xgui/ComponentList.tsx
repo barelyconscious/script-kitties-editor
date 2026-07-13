@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
 import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
+import { getPersistedHidden } from "./elementVisibilityStore";
 import { flattenTree, type GuiComponentRef, type GuiFolder, type GuiTreeRow } from "./guiTree";
 import { useGuiTreeStore } from "./guiTreeStore";
 import { NewComponentDialog } from "./NewComponentDialog";
@@ -131,11 +132,12 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
         // a failed or null read leaves controllerText null and the Controller tab's
         // lazy path re-reads on view — so this is a pure enrichment, never a gate.
         const seated = await withEagerController(component);
-        // Restore any locks persisted for this component (resolved from stable
-        // structural keys against the just-parsed tree), so locking survives
+        // Restore any locks/hides persisted for this component (resolved from stable
+        // structural keys against the just-parsed tree), so both survive
         // reloads/restarts.
         const lockedNodeIds = nodeIdsForKeys(seated.root, getPersistedLocks(seated.path));
-        dispatch({ type: "open", component: seated, lockedNodeIds });
+        const hiddenNodeIds = nodeIdsForKeys(seated.root, getPersistedHidden(seated.path));
+        dispatch({ type: "open", component: seated, lockedNodeIds, hiddenNodeIds });
       } catch (err) {
         const message =
           err instanceof GuiParseError

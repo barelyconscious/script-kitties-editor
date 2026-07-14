@@ -249,13 +249,6 @@ function PaletteRowEditor({
         value={row.name}
         onChange={(e) => onChange({ name: e.currentTarget.value })}
       />
-      <Input
-        aria-label={`Color code ${index + 1}`}
-        className="min-w-0 flex-1 font-mono text-xs"
-        placeholder="r,g,b,a"
-        value={row.code}
-        onChange={(e) => onChange({ code: e.currentTarget.value })}
-      />
       <Button
         type="button"
         variant="ghost"

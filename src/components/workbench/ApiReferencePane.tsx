@@ -303,10 +303,11 @@ function ItemDetail({
  * state and never touches Workbench state. Give it nothing and it renders the
  * bundled {@link GAME_API}.
  *
- * Search filters the top-level list across the whole tree (an item survives if
- * it or any descendant matches). Drilling into an item replaces the list with
- * that item's detail (signature, prose, examples) and its members; a breadcrumb
- * walks back up. No inline completion — that is a separate, deferred surface.
+ * Search filters the top-level list by TYPE NAME only — an item survives iff its
+ * own name matches; documentation and members (subtypes) are not searched. Drilling
+ * into an item replaces the list with that item's detail (signature, prose,
+ * examples) and its members; a breadcrumb walks back up. No inline completion —
+ * that is a separate, deferred surface.
  */
 export function ApiReferencePane({
   items = GAME_API,
@@ -391,7 +392,7 @@ export function ApiReferencePane({
           <Input
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Search the API…"
+            placeholder="Search type names…"
             className="pl-8"
           />
         </div>

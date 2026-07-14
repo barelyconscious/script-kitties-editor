@@ -49,8 +49,9 @@ describe("itemMatches", () => {
     expect(itemMatches(tree[0], "CREATURE")).toBe(true);
   });
 
-  it("matches on documentation prose", () => {
-    expect(itemMatches(tree[1], "current battle")).toBe(true);
+  it("does NOT match on documentation prose (name-only search)", () => {
+    // tree[1].documentation is "Returns the current battle." — a doc-only hit.
+    expect(itemMatches(tree[1], "current battle")).toBe(false);
   });
 
   it("does not match unrelated text", () => {
@@ -75,35 +76,30 @@ describe("filterApiTree", () => {
     expect(out[0].name).toBe("GetBattleState");
   });
 
-  it("keeps the full member list of a directly-matched container", () => {
+  it("keeps the full member list of a matched type, unfiltered", () => {
     const out = filterApiTree(tree, "Creature");
     expect(out).toHaveLength(1);
-    // Both members are retained even though neither says "Creature".
+    // Both members are retained — drilling in shows everything the type contains.
     expect(out[0].members?.map((m) => m.name)).toEqual(["name", "applyEffect"]);
   });
 
-  it("surfaces a deep member match and keeps the ancestor spine", () => {
-    const out = filterApiTree(tree, "applyEffect");
-    expect(out).toHaveLength(1);
-    expect(out[0].name).toBe("Creature");
-    // Only the matching member survives on the spine, not its sibling.
-    expect(out[0].members?.map((m) => m.name)).toEqual(["applyEffect"]);
+  it("does NOT surface a type via a member (subtype) name match", () => {
+    // `applyEffect` is a member of Creature, not a top-level type name.
+    expect(filterApiTree(tree, "applyEffect")).toEqual([]);
   });
 
-  it("matches a member by its documentation prose", () => {
-    const out = filterApiTree(tree, "round down");
-    expect(out).toHaveLength(1);
-    expect(out[0].name).toBe("math");
-    expect(out[0].members?.map((m) => m.name)).toEqual(["floor"]);
+  it("does NOT match a member by its documentation prose", () => {
+    // `math.floor`'s doc is "Round down." — neither a top-level name nor searched.
+    expect(filterApiTree(tree, "round down")).toEqual([]);
   });
 
-  it("returns nothing when neither item nor descendants match", () => {
+  it("returns nothing when no top-level name matches", () => {
     expect(filterApiTree(tree, "zzzznope")).toEqual([]);
   });
 
   it("does not mutate the input tree", () => {
     const before = JSON.stringify(tree);
-    filterApiTree(tree, "applyEffect");
+    filterApiTree(tree, "Creature");
     expect(JSON.stringify(tree)).toBe(before);
   });
 });

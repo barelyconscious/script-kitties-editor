@@ -123,7 +123,7 @@ export default function RegistryPalette() {
   }
 
   return (
-    <section className="rounded-lg border border-l-4 border-l-amber-400 bg-amber-50/40 p-4 dark:bg-amber-950/10">
+    <section className="rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -183,7 +183,7 @@ export default function RegistryPalette() {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 lg:grid-cols-2 2xl:grid-cols-3">
             {draft.map((row, i) => (
               <PaletteRowEditor
                 // biome-ignore lint/suspicious/noArrayIndexKey: names can be transiently empty/duplicated while editing, so the index is the only stable row identity.
@@ -244,14 +244,14 @@ function PaletteRowEditor({
 
       <Input
         aria-label={`Color name ${index + 1}`}
-        className="w-44 shrink-0 font-mono text-xs"
+        className="min-w-0 flex-1 font-mono text-xs"
         placeholder="ColorName"
         value={row.name}
         onChange={(e) => onChange({ name: e.currentTarget.value })}
       />
       <Input
         aria-label={`Color code ${index + 1}`}
-        className="w-44 shrink-0 font-mono text-xs"
+        className="min-w-0 flex-1 font-mono text-xs"
         placeholder="r,g,b,a"
         value={row.code}
         onChange={(e) => onChange({ code: e.currentTarget.value })}

@@ -307,6 +307,8 @@ const BUNDLE_DESCRIPTOR: CreationDescriptor<Bundle> = {
     description: "",
     sprite: "",
     creatures: [],
+    abilities: [],
+    biograms: [],
   }),
   save: saveBundle,
 };

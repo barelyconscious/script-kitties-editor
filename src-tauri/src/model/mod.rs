@@ -184,6 +184,10 @@ pub struct Bundle {
     pub sprite: String,
     #[serde(default)]
     pub creatures: Vec<BundleCreature>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abilities: Vec<BundleAbility>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub biograms: Vec<BundleBiogram>,
 }
 
 /// One member of a `Bundle`: a reference to a creature by `id` plus the optional
@@ -203,6 +207,34 @@ pub struct BundleCreature {
     pub base_stats_override: BTreeMap<String, i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abilities_override: Vec<String>,
+}
+
+/// One ability granted by a `Bundle`, referenced by `id`, plus optional
+/// draw-time overrides. Empty overrides are skipped on save.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleAbility {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sprite_override: String,
+}
+
+/// One biogram granted by a `Bundle`, referenced by `id`, plus optional
+/// draw-time overrides. Empty overrides are skipped on save.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleBiogram {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description_override: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sprite_override: String,
 }
 
 /// A gacha **pack**: a card pack whose `slots` each define a draw pool. The C++

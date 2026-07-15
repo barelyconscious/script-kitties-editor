@@ -9,7 +9,15 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
-import { type Bundle, type BundleCreature, loadBundles, saveBundle } from "@/lib/entities/bundles";
+import { type Biogram, loadBiograms } from "@/lib/entities/biograms";
+import {
+  type Bundle,
+  type BundleAbility,
+  type BundleBiogram,
+  type BundleCreature,
+  loadBundles,
+  saveBundle,
+} from "@/lib/entities/bundles";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
@@ -43,6 +51,14 @@ type LoadState =
   | { kind: "notFound" }
   | { kind: "loaded" };
 
+/**
+ * The minimal shape the shared {@link AddMemberPicker} and {@link OverrideCard}
+ * need from any base entity: an id, a display name, a sprite, and a description
+ * (used as the override placeholders). Creatures, abilities, and biograms all
+ * satisfy this.
+ */
+type MemberOption = { id: string; name: string; sprite: string; description: string };
+
 function BundleEditor({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [loaded, setLoaded] = useState<Bundle | null>(null);
@@ -52,7 +68,10 @@ function BundleEditor({ id }: { id: string }) {
   const setDraft = history.set;
   const reset = history.reset;
   const [population, setPopulation] = useState<Creature[]>([]);
-  const [abilities, setAbilities] = useState<AbilityOption[]>([]);
+  // Abilities kept with `sprite` so the Abilities section's picker/cards can show
+  // icons; the creature ability-override picker only wants `{ id, name }`.
+  const [abilities, setAbilities] = useState<MemberOption[]>([]);
+  const [biograms, setBiograms] = useState<Biogram[]>([]);
 
   // Portal target for the sprite pickers' popovers so they scroll within this
   // pane rather than overflowing it — same pattern as CreatureIdentityFields.
@@ -64,9 +83,10 @@ function BundleEditor({ id }: { id: string }) {
     Promise.all([
       loadBundles(),
       loadCreatures(),
-      invoke<{ id: string; name: string }[]>("get_abilities"),
+      invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
+      loadBiograms(),
     ])
-      .then(([bundles, creatures, abil]) => {
+      .then(([bundles, creatures, abil, biog]) => {
         if (cancelled) return;
         const found = bundles.find((b) => b.id === id) ?? null;
         if (!found) {
@@ -74,7 +94,15 @@ function BundleEditor({ id }: { id: string }) {
           return;
         }
         setPopulation(creatures);
-        setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
+        setAbilities(
+          abil.map((a) => ({
+            id: a.id,
+            name: a.name,
+            sprite: a.sprite,
+            description: a.description,
+          })),
+        );
+        setBiograms(biog);
         setLoaded(found);
         reset(found); // seed the draft, dropping any prior history
         setState({ kind: "loaded" });
@@ -113,8 +141,10 @@ function BundleEditor({ id }: { id: string }) {
     commit: history.commit,
   });
 
-  // Index the population for fast name/lookup in member cards.
+  // Index each population for fast name/lookup in member cards.
   const byId = useMemo(() => new Map(population.map((c) => [c.id, c])), [population]);
+  const abilityById = useMemo(() => new Map(abilities.map((a) => [a.id, a])), [abilities]);
+  const biogramById = useMemo(() => new Map(biograms.map((b) => [b.id, b])), [biograms]);
 
   if (state.kind === "loading") {
     return (
@@ -157,6 +187,38 @@ function BundleEditor({ id }: { id: string }) {
   };
 
   const usedIds = new Set(draft.creatures.map((m) => m.id));
+
+  const draftAbilities = draft.abilities ?? [];
+  const setAbilityMember = (index: number, next: BundleAbility) => {
+    setDraft({
+      ...draft,
+      abilities: draftAbilities.map((m, i) => (i === index ? next : m)),
+    });
+  };
+  const removeAbilityMember = (index: number) => {
+    setDraft({ ...draft, abilities: draftAbilities.filter((_, i) => i !== index) });
+  };
+  const addAbilityMember = (abilityId: string) => {
+    if (draftAbilities.some((m) => m.id === abilityId)) return;
+    setDraft({ ...draft, abilities: [...draftAbilities, { id: abilityId }] });
+  };
+  const usedAbilityIds = new Set(draftAbilities.map((m) => m.id));
+
+  const draftBiograms = draft.biograms ?? [];
+  const setBiogramMember = (index: number, next: BundleBiogram) => {
+    setDraft({
+      ...draft,
+      biograms: draftBiograms.map((m, i) => (i === index ? next : m)),
+    });
+  };
+  const removeBiogramMember = (index: number) => {
+    setDraft({ ...draft, biograms: draftBiograms.filter((_, i) => i !== index) });
+  };
+  const addBiogramMember = (biogramId: string) => {
+    if (draftBiograms.some((m) => m.id === biogramId)) return;
+    setDraft({ ...draft, biograms: [...draftBiograms, { id: biogramId }] });
+  };
+  const usedBiogramIds = new Set(draftBiograms.map((m) => m.id));
 
   return (
     <div className="flex flex-col gap-8">
@@ -210,7 +272,8 @@ function BundleEditor({ id }: { id: string }) {
               The creatures in this bundle. Override attributes applied when drawn.
             </p>
           </div>
-          <AddCreaturePicker
+          <AddMemberPicker
+            label="creature"
             options={population}
             disabledIds={usedIds}
             onAdd={addMember}
@@ -233,6 +296,82 @@ function BundleEditor({ id }: { id: string }) {
                 portalContainer={portalContainer}
                 onChange={(next) => setMember(index, next)}
                 onRemove={() => removeMember(index)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Abilities collection */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-medium text-sm">Abilities</h3>
+            <p className="text-muted-foreground text-xs">
+              The abilities granted by this bundle. Override attributes applied when drawn.
+            </p>
+          </div>
+          <AddMemberPicker
+            label="ability"
+            options={abilities}
+            disabledIds={usedAbilityIds}
+            onAdd={addAbilityMember}
+            container={portalContainer}
+          />
+        </div>
+
+        {draftAbilities.length === 0 ? (
+          <p className="rounded-md border border-dashed px-3 py-6 text-center text-muted-foreground text-sm">
+            No abilities yet. Add one above.
+          </p>
+        ) : (
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+            {draftAbilities.map((member, index) => (
+              <OverrideCard
+                key={member.id}
+                member={member}
+                base={abilityById.get(member.id) ?? null}
+                portalContainer={portalContainer}
+                onChange={(next) => setAbilityMember(index, next)}
+                onRemove={() => removeAbilityMember(index)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Biograms collection */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-medium text-sm">Biograms</h3>
+            <p className="text-muted-foreground text-xs">
+              The biograms granted by this bundle. Override attributes applied when drawn.
+            </p>
+          </div>
+          <AddMemberPicker
+            label="biogram"
+            options={biograms}
+            disabledIds={usedBiogramIds}
+            onAdd={addBiogramMember}
+            container={portalContainer}
+          />
+        </div>
+
+        {draftBiograms.length === 0 ? (
+          <p className="rounded-md border border-dashed px-3 py-6 text-center text-muted-foreground text-sm">
+            No biograms yet. Add one above.
+          </p>
+        ) : (
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+            {draftBiograms.map((member, index) => (
+              <OverrideCard
+                key={member.id}
+                member={member}
+                base={biogramById.get(member.id) ?? null}
+                portalContainer={portalContainer}
+                onChange={(next) => setBiogramMember(index, next)}
+                onRemove={() => removeBiogramMember(index)}
               />
             ))}
           </div>
@@ -329,14 +468,88 @@ function MemberCard({
   );
 }
 
-/** Searchable "Add creature" popover over the live creature population. */
-function AddCreaturePicker({
+/**
+ * One ability/biogram bundle member: the base entity plus its optional name /
+ * sprite / description overrides. Like {@link MemberCard} minus the creature-only
+ * ability-override and stat-override rows.
+ */
+function OverrideCard({
+  member,
+  base,
+  portalContainer,
+  onChange,
+  onRemove,
+}: {
+  member: BundleAbility | BundleBiogram;
+  base: MemberOption | null;
+  portalContainer: HTMLElement | null;
+  onChange: (next: BundleAbility) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
+      <div className="flex items-center gap-2">
+        <Sprite name={member.spriteOverride || base?.sprite || member.id} className="size-7" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-sm">{base?.name ?? member.id}</div>
+          <div className="truncate text-muted-foreground text-xs">{member.id}</div>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={onRemove}
+          aria-label={`Remove ${base?.name ?? member.id}`}
+        >
+          <XIcon className="size-4" />
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Name override</Label>
+          <Input
+            value={member.nameOverride ?? ""}
+            placeholder={base?.name ?? "Base name"}
+            onChange={(e) => onChange({ ...member, nameOverride: e.currentTarget.value })}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Sprite override</Label>
+          <SpritePicker
+            value={member.spriteOverride ?? ""}
+            container={portalContainer}
+            onChange={(name) => onChange({ ...member, spriteOverride: name })}
+          />
+        </div>
+        <div className="col-span-2 flex flex-col gap-1.5">
+          <Label className="text-xs">Description override</Label>
+          <Textarea
+            value={member.descriptionOverride ?? ""}
+            placeholder={base?.description || "Base description"}
+            rows={2}
+            onChange={(e) => onChange({ ...member, descriptionOverride: e.currentTarget.value })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Searchable "Add …" popover over a live entity population. Shared by all three
+ * bundle collection sections (creatures / abilities / biograms); `label` is the
+ * singular noun used in the trigger ("Add ability") and search placeholder.
+ */
+function AddMemberPicker({
+  label,
   options,
   disabledIds,
   onAdd,
   container,
 }: {
-  options: Creature[];
+  label: string;
+  options: MemberOption[];
   disabledIds: Set<string>;
   onAdd: (id: string) => void;
   container: HTMLElement | null;
@@ -359,7 +572,7 @@ function AddCreaturePicker({
     >
       <PopoverTrigger asChild>
         <Button type="button" variant="outline" size="sm">
-          <PlusIcon className="size-4" /> Add creature
+          <PlusIcon className="size-4" /> Add {label}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-1" container={container}>
@@ -367,7 +580,7 @@ function AddCreaturePicker({
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
-          placeholder="Search creatures…"
+          placeholder={`Search ${label}s…`}
           className="mb-1 h-8"
         />
         <div className="max-h-64 overflow-y-auto">

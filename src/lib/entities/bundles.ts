@@ -17,6 +17,26 @@ export type BundleCreature = {
 };
 
 /**
+ * One ability granted by a bundle: an ability referenced by `id`, plus optional
+ * draw-time overrides. Empty overrides are absent in the data (the backend skips
+ * them); the editor normalizes missing values with `?? ""`.
+ */
+export type BundleAbility = {
+  id: string;
+  nameOverride?: string;
+  descriptionOverride?: string;
+  spriteOverride?: string;
+};
+
+/** One biogram granted by a bundle. Same shape/semantics as {@link BundleAbility}. */
+export type BundleBiogram = {
+  id: string;
+  nameOverride?: string;
+  descriptionOverride?: string;
+  spriteOverride?: string;
+};
+
+/**
  * A gacha bundle: a named, customizable collection of creatures (seasons &
  * promotions). Mirrors the Rust `Bundle` (camelCase fields). Lives at
  * `Data/bundles.json` (an array, like every other entity file).
@@ -27,6 +47,8 @@ export type Bundle = {
   description: string;
   sprite?: string;
   creatures: BundleCreature[];
+  abilities: BundleAbility[];
+  biograms: BundleBiogram[];
 };
 
 export function loadBundles(): Promise<Bundle[]> {
@@ -50,5 +72,16 @@ export async function saveBundle(bundle: Bundle): Promise<void> {
       out.abilitiesOverride = c.abilitiesOverride;
     return out;
   });
-  await invoke("save_bundle", { bundle: { ...bundle, creatures } });
+
+  const stripOverrides = <T extends BundleAbility | BundleBiogram>(m: T): T => {
+    const out = { id: m.id } as T;
+    if (m.nameOverride?.trim()) out.nameOverride = m.nameOverride;
+    if (m.descriptionOverride?.trim()) out.descriptionOverride = m.descriptionOverride;
+    if (m.spriteOverride?.trim()) out.spriteOverride = m.spriteOverride;
+    return out;
+  };
+  const abilities = (bundle.abilities ?? []).map(stripOverrides);
+  const biograms = (bundle.biograms ?? []).map(stripOverrides);
+
+  await invoke("save_bundle", { bundle: { ...bundle, creatures, abilities, biograms } });
 }

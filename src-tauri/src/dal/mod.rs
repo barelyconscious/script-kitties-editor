@@ -13,15 +13,14 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     config::EditorConfig,
     model::{
-        Ability, AssetEntry, Biogram, Bundle, Charm, Creature, Dlc, Effect, GuiFolder, Item,
-        ItemDrop, Pack, Palette,
+        Ability, AssetEntry, Biogram, Charm, Creature, Dlc, Effect, GuiFolder, Item, ItemDrop,
+        Pack, Palette, Season,
     },
 };
 
 pub mod abilities;
 pub mod assets;
 pub mod biograms;
-pub mod bundles;
 pub mod charms;
 pub mod creatures;
 pub mod dlc;
@@ -32,6 +31,7 @@ pub mod items;
 pub mod packs;
 pub mod palette;
 pub mod scripts;
+pub mod seasons;
 pub mod sprites;
 
 /// The Tauri event name emitted to the frontend when anything under `gui/`
@@ -86,7 +86,7 @@ pub struct Dal {
     pub(crate) effects: Cache<(), Arc<Vec<Effect>>>,
     pub(crate) items: Cache<(), Arc<Vec<Item>>>,
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
-    pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
+    pub(crate) seasons: Cache<(), Arc<Vec<Season>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
     // The GUI color palette (name -> "r,g,b,a"), from Data/palette.json (stored on
     // disk as the engine's [{name,r,g,b,a}] array; dal::palette translates). A single
@@ -123,7 +123,7 @@ impl Dal {
         let effects: Cache<(), Arc<Vec<Effect>>> = Cache::builder().max_capacity(1).build();
         let items: Cache<(), Arc<Vec<Item>>> = Cache::builder().max_capacity(1).build();
         let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
-        let bundles: Cache<(), Arc<Vec<Bundle>>> = Cache::builder().max_capacity(1).build();
+        let seasons: Cache<(), Arc<Vec<Season>>> = Cache::builder().max_capacity(1).build();
         let packs: Cache<(), Arc<Vec<Pack>>> = Cache::builder().max_capacity(1).build();
         let palette: Cache<(), Arc<Palette>> = Cache::builder().max_capacity(1).build();
         let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
@@ -140,7 +140,7 @@ impl Dal {
         let emit_slot: EmitSlot = Arc::new(Mutex::new(None));
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &bundles, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
+            &item_drops, &seasons, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
             &components, &emit_slot,
         )?;
 
@@ -155,7 +155,7 @@ impl Dal {
             effects,
             items,
             item_drops,
-            bundles,
+            seasons,
             packs,
             palette,
             manifest,
@@ -184,7 +184,7 @@ impl Dal {
             &self.effects,
             &self.items,
             &self.item_drops,
-            &self.bundles,
+            &self.seasons,
             &self.packs,
             &self.palette,
             &self.manifest,
@@ -209,7 +209,7 @@ impl Dal {
         self.effects.invalidate_all();
         self.items.invalidate_all();
         self.item_drops.invalidate_all();
-        self.bundles.invalidate_all();
+        self.seasons.invalidate_all();
         self.packs.invalidate_all();
         self.palette.invalidate_all();
         self.manifest.invalidate_all();
@@ -250,7 +250,7 @@ fn build_watcher(
     effects: &Cache<(), Arc<Vec<Effect>>>,
     items: &Cache<(), Arc<Vec<Item>>>,
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
-    bundles: &Cache<(), Arc<Vec<Bundle>>>,
+    seasons: &Cache<(), Arc<Vec<Season>>>,
     packs: &Cache<(), Arc<Vec<Pack>>>,
     palette: &Cache<(), Arc<Palette>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
@@ -301,8 +301,8 @@ fn build_watcher(
             let c = item_drops.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("bundles.json"), {
-            let c = bundles.clone();
+        (data_dir.join("seasons.json"), {
+            let c = seasons.clone();
             Box::new(move || c.invalidate(&()))
         }),
         (data_dir.join("packs.json"), {

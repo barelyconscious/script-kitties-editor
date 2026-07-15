@@ -9,7 +9,7 @@ The flagship tool (`src/pages/Workbench.tsx`, components in `src/components/work
 It is composed of three regions, left to right:
 
 - **Objects panel** (`ObjectList`) — a grouped, searchable sidebar of every `GameObject`
-  (grouped by type: Creatures, Bundles, Packs, Abilities, …). Loaded via `get_game_objects`.
+  (grouped by type: Creatures, Seasons, Packs, Abilities, …). Loaded via `get_game_objects`.
   Clicking an entry opens it as a **tab**. A `+` opens the **`NewObjectModal`** to create one.
 - **Tabs** (`TabBar` + `TabWorkspace`) — each open object is a tab. Tabs stay mounted so
   their draft/unsaved state survives switching. One **`TabWorkspace`** renders the body of
@@ -26,7 +26,7 @@ A **`TabWorkspace`** body depends on the object type:
   toggle flipping the center between the script editor and the read-only `CreatureChartPane`.
   Because the chart reads the live draft, it tracks unsaved edits, and focusing a stat box
   switches the charted stat.
-- **Bundle / Pack** → a **bespoke full-width pane** (`BundleEditorPane` / `PackEditorPane`),
+- **Season / Pack** → a **bespoke full-width pane** (`SeasonEditorPane` / `PackEditorPane`),
   no script pane — these are script-less, visually richer editors.
 
 Every pane registers a target with the tab's **save bus** (`saveBus.ts`), tagged **auto** or
@@ -46,15 +46,15 @@ draft, so it auto-saves like any edit.
 ### Pack editor terminology
 
 `PackEditorPane` renders a pack's **slots** as a grid of TCG-style **cards**. Each slot has
-**draw rules**: a **bundle-weight** distribution and a **rarity-weight** distribution (both
+**draw rules**: a **season-weight** distribution and a **rarity-weight** distribution (both
 authored with `WeightDistribution`, weights summing to 1.00, drawn from the
 `creatureRarities` enum). A slot can be a **stack** (`count`) — one card shown with a `−/×N/+`
 stepper and a layered sheet behind it — and slots are numbered cumulatively (a `×7` slot is
 "Slots 1-7", the next starts at 8).
 
-### Bundle editor terminology
+### Season editor terminology
 
-`BundleEditorPane` edits a **bundle** (a named collection of creatures). Each member creature
+`SeasonEditorPane` edits a **season** (a named collection of creatures). Each member creature
 can carry **overrides** applied when drawn: `nameOverride`, `descriptionOverride`,
 `spriteOverride`, `baseStatsOverride`, and `abilitiesOverride`.
 

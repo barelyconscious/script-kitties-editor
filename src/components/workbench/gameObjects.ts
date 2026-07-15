@@ -15,7 +15,7 @@ export type GameObjectType =
   | "Charm"
   | "Item"
   | "Creature"
-  | "Bundle"
+  | "Season"
   | "Pack";
 
 /** Mirrors Rust `GameObject` (camelCase fields). */
@@ -34,7 +34,7 @@ export type GameObject = {
  */
 export const GROUP_ORDER: readonly GameObjectType[] = [
   "Creature",
-  "Bundle",
+  "Season",
   "Pack",
   "Ability",
   "Biogram",
@@ -46,7 +46,7 @@ export const GROUP_ORDER: readonly GameObjectType[] = [
 /** Human-friendly plural label for each group header. */
 export const GROUP_LABELS: Record<GameObjectType, string> = {
   Creature: "Creatures",
-  Bundle: "Bundles",
+  Season: "Seasons",
   Pack: "Packs",
   Ability: "Abilities",
   Biogram: "Biograms",

@@ -1,7 +1,6 @@
 use crate::commands::abilities::{get_abilities, save_ability};
 use crate::commands::assets::update_asset_manifest;
 use crate::commands::biograms::{get_biograms, save_biogram};
-use crate::commands::bundles::{get_bundles, save_bundle};
 use crate::commands::charms::{get_charms, save_charm};
 use crate::commands::config::{get_config, save_config};
 use crate::commands::creatures::{get_creatures, save_creature};
@@ -17,6 +16,7 @@ use crate::commands::packs::{get_packs, save_pack};
 use crate::commands::palette::{get_palette, save_palette};
 use crate::commands::registry::{get_registry, save_registry};
 use crate::commands::scripts::{create_script, get_script, open_script_in_vscode, save_script};
+use crate::commands::seasons::{get_seasons, save_season};
 use crate::commands::sprites::{get_sprite, list_sprites};
 use crate::config::{get_or_create_config, write_to_disk, EditorConfig};
 use crate::dal::Dal;
@@ -223,8 +223,8 @@ pub fn run() {
             save_item,
             get_item_drops,
             save_item_drop,
-            get_bundles,
-            save_bundle,
+            get_seasons,
+            save_season,
             get_packs,
             save_pack,
             get_palette,

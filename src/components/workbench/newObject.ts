@@ -2,10 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Creature, saveCreature } from "@/lib/creature";
 import { type Ability, saveAbility } from "@/lib/entities/abilities";
 import { type Biogram, saveBiogram } from "@/lib/entities/biograms";
-import { type Bundle, saveBundle } from "@/lib/entities/bundles";
 import { type Charm, saveCharm } from "@/lib/entities/charms";
 import { type Effect, saveEffect } from "@/lib/entities/effects";
 import { type Pack, savePack } from "@/lib/entities/packs";
+import { type Season, saveSeason } from "@/lib/entities/seasons";
 import { DEFAULT_DROP, type ItemRow, saveItemRow } from "@/lib/items";
 import type { GameObjectType } from "./gameObjects";
 
@@ -297,9 +297,9 @@ const CREATURE_DESCRIPTOR: CreationDescriptor<Creature> = {
   save: saveCreature,
 };
 
-// Bundles & packs are gacha-authoring entities: script-less, so creation never
+// Seasons & packs are gacha-authoring entities: script-less, so creation never
 // mints or points at a Lua file (scriptPolicy "none").
-const BUNDLE_DESCRIPTOR: CreationDescriptor<Bundle> = {
+const SEASON_DESCRIPTOR: CreationDescriptor<Season> = {
   scriptPolicy: { kind: "none" },
   makeDefault: ({ id, name }) => ({
     id,
@@ -310,7 +310,7 @@ const BUNDLE_DESCRIPTOR: CreationDescriptor<Bundle> = {
     abilities: [],
     biograms: [],
   }),
-  save: saveBundle,
+  save: saveSeason,
 };
 
 const PACK_DESCRIPTOR: CreationDescriptor<Pack> = {
@@ -336,7 +336,7 @@ const REGISTRY: Record<GameObjectType, CreationDescriptor<{ id: string }>> = {
   Item: erase(ITEM_DESCRIPTOR),
   Charm: erase(CHARM_DESCRIPTOR),
   Creature: erase(CREATURE_DESCRIPTOR),
-  Bundle: erase(BUNDLE_DESCRIPTOR),
+  Season: erase(SEASON_DESCRIPTOR),
   Pack: erase(PACK_DESCRIPTOR),
 };
 

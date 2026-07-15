@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * The weighted draw configuration for one pack slot: which bundles can be drawn
+ * The weighted draw configuration for one pack slot: which seasons can be drawn
  * from (by weight) and the rarity distribution (weights that should sum to 1).
  * Maps may be absent in the data when empty (the backend skips them).
  */
 export type DrawRules = {
-  bundles: Record<string, number>;
+  seasons: Record<string, number>;
   rarity: Record<string, number>;
 };
 

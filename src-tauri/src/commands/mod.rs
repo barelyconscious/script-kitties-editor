@@ -1,7 +1,6 @@
 pub mod abilities;
 pub mod assets;
 pub mod biograms;
-pub mod bundles;
 pub mod charms;
 pub mod config;
 pub mod creatures;
@@ -15,4 +14,5 @@ pub mod packs;
 pub mod palette;
 pub mod registry;
 pub mod scripts;
+pub mod seasons;
 pub mod sprites;

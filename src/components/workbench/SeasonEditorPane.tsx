@@ -11,13 +11,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { type Biogram, loadBiograms } from "@/lib/entities/biograms";
 import {
-  type Bundle,
-  type BundleAbility,
-  type BundleBiogram,
-  type BundleCreature,
-  loadBundles,
-  saveBundle,
-} from "@/lib/entities/bundles";
+  loadSeasons,
+  type Season,
+  type SeasonAbility,
+  type SeasonBiogram,
+  type SeasonCreature,
+  saveSeason,
+} from "@/lib/entities/seasons";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
@@ -26,23 +26,23 @@ import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
 
 /**
- * The bespoke, full-width DATA editor for a BUNDLE tab. A bundle groups creatures
+ * The bespoke, full-width DATA editor for a SEASON tab. A season groups creatures
  * and overrides a handful of their draw-time attributes; this pane authors that.
  *
  * Wiring mirrors {@link CreatureDataPane}/`DataEditor`: load the record + the
  * creature population (for the add picker) + abilities (for the override picker),
  * track a draft vs. baseline, and register ONE "data" target with the per-tab
- * save bus so the shared Save button / ⌘S persist it. Bundles are script-less,
+ * save bus so the shared Save button / ⌘S persist it. Seasons are script-less,
  * so there is no SCRIPT pane — {@link TabWorkspace} renders this full-width.
  */
-export interface BundleEditorPaneProps {
-  /** Primary key of the bundle being edited. */
+export interface SeasonEditorPaneProps {
+  /** Primary key of the season being edited. */
   id: string;
 }
 
-export function BundleEditorPane({ id }: BundleEditorPaneProps) {
+export function SeasonEditorPane({ id }: SeasonEditorPaneProps) {
   // Remount on id change so draft/baseline state never leaks across tabs.
-  return <BundleEditor key={id} id={id} />;
+  return <SeasonEditor key={id} id={id} />;
 }
 
 type LoadState =
@@ -59,11 +59,11 @@ type LoadState =
  */
 type MemberOption = { id: string; name: string; sprite: string; description: string };
 
-function BundleEditor({ id }: { id: string }) {
+function SeasonEditor({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [loaded, setLoaded] = useState<Bundle | null>(null);
+  const [loaded, setLoaded] = useState<Season | null>(null);
   // The draft + its undo history; `setDraft` records edits, `reset` re-seeds.
-  const history = useHistoryState<Bundle | null>(null);
+  const history = useHistoryState<Season | null>(null);
   const draft = history.value;
   const setDraft = history.set;
   const reset = history.reset;
@@ -81,14 +81,14 @@ function BundleEditor({ id }: { id: string }) {
     let cancelled = false;
     setState({ kind: "loading" });
     Promise.all([
-      loadBundles(),
+      loadSeasons(),
       loadCreatures(),
       invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
       loadBiograms(),
     ])
-      .then(([bundles, creatures, abil, biog]) => {
+      .then(([seasons, creatures, abil, biog]) => {
         if (cancelled) return;
-        const found = bundles.find((b) => b.id === id) ?? null;
+        const found = seasons.find((b) => b.id === id) ?? null;
         if (!found) {
           setState({ kind: "notFound" });
           return;
@@ -123,16 +123,16 @@ function BundleEditor({ id }: { id: string }) {
   const save = useCallback(async () => {
     const current = draftRef.current;
     if (!current) return;
-    await saveBundle(current);
+    await saveSeason(current);
     setLoaded(current);
   }, []);
 
-  // Bundles auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
+  // Seasons auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
   // run the same guarded write), and it persists on its own as you edit.
   const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
 
-  // Undo/redo for the bundle draft (Ctrl+Z), driven from the tab.
+  // Undo/redo for the season draft (Ctrl+Z), driven from the tab.
   useUndoTarget({
     undo: history.undo,
     redo: history.redo,
@@ -158,7 +158,7 @@ function BundleEditor({ id }: { id: string }) {
     return (
       <PaneStatus>
         <FileWarning className="size-5 text-amber-500" />
-        <span className="font-medium text-foreground">Could not load this bundle.</span>
+        <span className="font-medium text-foreground">Could not load this season.</span>
         <span className="text-xs">{state.message}</span>
       </PaneStatus>
     );
@@ -167,12 +167,12 @@ function BundleEditor({ id }: { id: string }) {
     return (
       <PaneStatus>
         <FileWarning className="size-5 text-amber-500" />
-        <span>No bundle found for “{id}”.</span>
+        <span>No season found for “{id}”.</span>
       </PaneStatus>
     );
   }
 
-  const setMember = (index: number, next: BundleCreature) => {
+  const setMember = (index: number, next: SeasonCreature) => {
     setDraft({
       ...draft,
       creatures: draft.creatures.map((m, i) => (i === index ? next : m)),
@@ -189,7 +189,7 @@ function BundleEditor({ id }: { id: string }) {
   const usedIds = new Set(draft.creatures.map((m) => m.id));
 
   const draftAbilities = draft.abilities ?? [];
-  const setAbilityMember = (index: number, next: BundleAbility) => {
+  const setAbilityMember = (index: number, next: SeasonAbility) => {
     setDraft({
       ...draft,
       abilities: draftAbilities.map((m, i) => (i === index ? next : m)),
@@ -205,7 +205,7 @@ function BundleEditor({ id }: { id: string }) {
   const usedAbilityIds = new Set(draftAbilities.map((m) => m.id));
 
   const draftBiograms = draft.biograms ?? [];
-  const setBiogramMember = (index: number, next: BundleBiogram) => {
+  const setBiogramMember = (index: number, next: SeasonBiogram) => {
     setDraft({
       ...draft,
       biograms: draftBiograms.map((m, i) => (i === index ? next : m)),
@@ -230,17 +230,17 @@ function BundleEditor({ id }: { id: string }) {
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bundle-name" className="text-xs">
+            <Label htmlFor="season-name" className="text-xs">
               Name
             </Label>
             <Input
-              id="bundle-name"
+              id="season-name"
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.currentTarget.value })}
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bundle-sprite" className="text-xs">
+            <Label htmlFor="season-sprite" className="text-xs">
               Sprite
             </Label>
             <SpritePicker
@@ -250,11 +250,11 @@ function BundleEditor({ id }: { id: string }) {
             />
           </div>
           <div className="col-span-2 flex flex-col gap-1.5">
-            <Label htmlFor="bundle-description" className="text-xs">
+            <Label htmlFor="season-description" className="text-xs">
               Description
             </Label>
             <Textarea
-              id="bundle-description"
+              id="season-description"
               value={draft.description}
               rows={3}
               onChange={(e) => setDraft({ ...draft, description: e.currentTarget.value })}
@@ -269,7 +269,7 @@ function BundleEditor({ id }: { id: string }) {
           <div>
             <h3 className="font-medium text-sm">Creatures</h3>
             <p className="text-muted-foreground text-xs">
-              The creatures in this bundle. Override attributes applied when drawn.
+              The creatures in this season. Override attributes applied when drawn.
             </p>
           </div>
           <AddMemberPicker
@@ -308,7 +308,7 @@ function BundleEditor({ id }: { id: string }) {
           <div>
             <h3 className="font-medium text-sm">Abilities</h3>
             <p className="text-muted-foreground text-xs">
-              The abilities granted by this bundle. Override attributes applied when drawn.
+              The abilities granted by this season. Override attributes applied when drawn.
             </p>
           </div>
           <AddMemberPicker
@@ -346,7 +346,7 @@ function BundleEditor({ id }: { id: string }) {
           <div>
             <h3 className="font-medium text-sm">Biograms</h3>
             <p className="text-muted-foreground text-xs">
-              The biograms granted by this bundle. Override attributes applied when drawn.
+              The biograms granted by this season. Override attributes applied when drawn.
             </p>
           </div>
           <AddMemberPicker
@@ -384,7 +384,7 @@ function BundleEditor({ id }: { id: string }) {
   );
 }
 
-/** One bundle member: the base creature plus its optional draw-time overrides. */
+/** One season member: the base creature plus its optional draw-time overrides. */
 function MemberCard({
   member,
   base,
@@ -393,11 +393,11 @@ function MemberCard({
   onChange,
   onRemove,
 }: {
-  member: BundleCreature;
+  member: SeasonCreature;
   base: Creature | null;
   abilities: AbilityOption[];
   portalContainer: HTMLElement | null;
-  onChange: (next: BundleCreature) => void;
+  onChange: (next: SeasonCreature) => void;
   onRemove: () => void;
 }) {
   return (
@@ -469,7 +469,7 @@ function MemberCard({
 }
 
 /**
- * One ability/biogram bundle member: the base entity plus its optional name /
+ * One ability/biogram season member: the base entity plus its optional name /
  * sprite / description overrides. Like {@link MemberCard} minus the creature-only
  * ability-override and stat-override rows.
  */
@@ -480,10 +480,10 @@ function OverrideCard({
   onChange,
   onRemove,
 }: {
-  member: BundleAbility | BundleBiogram;
+  member: SeasonAbility | SeasonBiogram;
   base: MemberOption | null;
   portalContainer: HTMLElement | null;
-  onChange: (next: BundleAbility) => void;
+  onChange: (next: SeasonAbility) => void;
   onRemove: () => void;
 }) {
   return (
@@ -538,7 +538,7 @@ function OverrideCard({
 
 /**
  * Searchable "Add …" popover over a live entity population. Shared by all three
- * bundle collection sections (creatures / abilities / biograms); `label` is the
+ * season collection sections (creatures / abilities / biograms); `label` is the
  * singular noun used in the trigger ("Add ability") and search placeholder.
  */
 function AddMemberPicker({
@@ -632,4 +632,4 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
-export default BundleEditorPane;
+export default SeasonEditorPane;

@@ -39,7 +39,7 @@ pub enum GameObjectType {
     Charm,
     Item,
     Creature,
-    Bundle,
+    Season,
     Pack,
 }
 
@@ -170,32 +170,32 @@ pub struct Creature {
     pub abilities_by_level: Vec<CreatureLevelUp>,
 }
 
-/// A gacha **bundle**: a named, customizable collection of creatures (seasons &
+/// A gacha **season**: a named, customizable collection of creatures (seasons &
 /// promotions). Each member may override a handful of the creature's draw-time
 /// attributes; everything else (growth curve, per-level unlocks, id, AI script)
 /// comes from the base creature.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Bundle {
+pub struct Season {
     pub id: String,
     pub name: String,
     pub description: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sprite: String,
     #[serde(default)]
-    pub creatures: Vec<BundleCreature>,
+    pub creatures: Vec<SeasonCreature>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub abilities: Vec<BundleAbility>,
+    pub abilities: Vec<SeasonAbility>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub biograms: Vec<BundleBiogram>,
+    pub biograms: Vec<SeasonBiogram>,
 }
 
-/// One member of a `Bundle`: a reference to a creature by `id` plus the optional
-/// per-creature overrides applied when the creature is drawn from this bundle.
+/// One member of a `Season`: a reference to a creature by `id` plus the optional
+/// per-creature overrides applied when the creature is drawn from this season.
 /// Empty overrides are skipped on save so untouched members stay minimal.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BundleCreature {
+pub struct SeasonCreature {
     pub id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name_override: String,
@@ -209,11 +209,11 @@ pub struct BundleCreature {
     pub abilities_override: Vec<String>,
 }
 
-/// One ability granted by a `Bundle`, referenced by `id`, plus optional
+/// One ability granted by a `Season`, referenced by `id`, plus optional
 /// draw-time overrides. Empty overrides are skipped on save.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BundleAbility {
+pub struct SeasonAbility {
     pub id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name_override: String,
@@ -223,11 +223,11 @@ pub struct BundleAbility {
     pub sprite_override: String,
 }
 
-/// One biogram granted by a `Bundle`, referenced by `id`, plus optional
+/// One biogram granted by a `Season`, referenced by `id`, plus optional
 /// draw-time overrides. Empty overrides are skipped on save.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BundleBiogram {
+pub struct SeasonBiogram {
     pub id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name_override: String,
@@ -271,13 +271,13 @@ fn slot_count_is_one(count: &u32) -> bool {
     *count == 1
 }
 
-/// The weighted draw configuration for a `PackSlot`: which bundles can be drawn
+/// The weighted draw configuration for a `PackSlot`: which seasons can be drawn
 /// from (by weight) and the rarity distribution (weights that should sum to 1).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DrawRules {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub bundles: BTreeMap<String, f64>,
+    pub seasons: BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rarity: BTreeMap<String, f64>,
 }

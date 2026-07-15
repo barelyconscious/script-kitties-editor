@@ -22,7 +22,7 @@
  *   "Colors and the palette".
  */
 
-import { Check, ChevronRight, Copy, Lock, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Lock, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
 import { Input } from "@/components/ui/input";
@@ -888,6 +888,13 @@ function ColorField({
   const palette = usePalette();
   const bound = isBoundField(value);
   const entries = Object.entries(palette);
+  const [query, setQuery] = useState("");
+  // Filter by palette name OR its code, case-insensitively, so a long palette is
+  // findable by either. Empty query shows everything.
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? entries.filter(([n, code]) => n.toLowerCase().includes(q) || code.toLowerCase().includes(q))
+    : entries;
   // Preview swatch: a {token} can't preview (no model here), a palette name maps
   // through the palette, and a literal code renders directly.
   const previewCode = bound ? undefined : (palette[value.trim()] ?? value);
@@ -896,7 +903,8 @@ function ColorField({
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1.5">
-        <Popover>
+        {/* Reset the search each time the popover closes so it reopens clean. */}
+        <Popover onOpenChange={(open) => !open && setQuery("")}>
           <PopoverTrigger asChild>
             <button
               type="button"
@@ -909,8 +917,16 @@ function ColorField({
               />
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-60 p-2" align="start">
-            <p className="mb-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+          {/* Bounded to the viewport (never taller than the space Radix reports via
+              --radix-popover-content-available-height) with the swatch list as the
+              only scroll region, so a long palette scrolls instead of overflowing
+              off-screen. collisionPadding keeps it off the very edge. */}
+          <PopoverContent
+            className="flex max-h-[var(--radix-popover-content-available-height)] w-60 flex-col gap-0 p-2"
+            align="start"
+            collisionPadding={8}
+          >
+            <p className="mb-1 shrink-0 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
               Palette
             </p>
             {entries.length === 0 ? (
@@ -918,33 +934,52 @@ function ColorField({
                 No named colors yet. Add them in the Registry, or type a code below.
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-0.5">
-                {entries.map(([colorName, code]) => {
-                  const swatchCss = colorCodeToCss(code);
-                  return (
-                    <button
-                      key={colorName}
-                      type="button"
-                      onClick={() => onSet(name, colorName)}
-                      className={cn(
-                        "flex items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-muted",
-                        value.trim() === colorName && "bg-muted",
-                      )}
-                    >
-                      <span
-                        className="size-4 shrink-0 rounded border"
-                        style={swatchCss ? { backgroundColor: swatchCss } : undefined}
-                      />
-                      <span className="truncate font-mono">{colorName}</span>
-                      <span className="ml-auto truncate text-[10px] text-muted-foreground/60">
-                        {code}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              <>
+                <div className="relative mb-1 shrink-0">
+                  <Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2 size-3 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.currentTarget.value)}
+                    placeholder="Search colors…"
+                    aria-label="Search palette colors"
+                    autoFocus
+                    className="h-7 pl-7 text-xs"
+                  />
+                </div>
+                {filtered.length === 0 ? (
+                  <p className="px-1 py-2 text-muted-foreground text-xs">
+                    No colors match “{query.trim()}”.
+                  </p>
+                ) : (
+                  <div className="-mr-1 grid max-h-56 grid-cols-1 gap-0.5 overflow-y-auto pr-1">
+                    {filtered.map(([colorName, code]) => {
+                      const swatchCss = colorCodeToCss(code);
+                      return (
+                        <button
+                          key={colorName}
+                          type="button"
+                          onClick={() => onSet(name, colorName)}
+                          className={cn(
+                            "flex items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-muted",
+                            value.trim() === colorName && "bg-muted",
+                          )}
+                        >
+                          <span
+                            className="size-4 shrink-0 rounded border"
+                            style={swatchCss ? { backgroundColor: swatchCss } : undefined}
+                          />
+                          <span className="truncate font-mono">{colorName}</span>
+                          <span className="ml-auto truncate text-[10px] text-muted-foreground/60">
+                            {code}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
-            <p className="mt-2 text-[10px] text-muted-foreground">
+            <p className="mt-2 shrink-0 text-[10px] text-muted-foreground">
               Or type a custom <span className="font-mono">r,g,b,a</span> code or a{" "}
               <span className="font-mono">{`{token}`}</span> in the field.
             </p>

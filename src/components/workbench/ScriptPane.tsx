@@ -3,6 +3,7 @@ import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { useRequestSave, useSaveTarget } from "./saveBus";
+import { noteScriptSaved, onScriptsChanged, scriptBasename, wasScriptSavedByApp } from "./scriptDiskSync";
 import { useScriptSync } from "./scriptSync";
 
 /**
@@ -94,6 +95,10 @@ export function ScriptPane({ scriptName }: ScriptPaneProps) {
   // keeps re-registration scoped to dirty toggling.
   const valueRef = useRef(value);
   valueRef.current = value;
+  // The on-disk baseline, read by the disk-sync listener to detect (a) whether a
+  // re-read actually differs from what we have and (b) our own save echoing back.
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const scriptNameRef = useRef(scriptName);
@@ -104,6 +109,10 @@ export function ScriptPane({ scriptName }: ScriptPaneProps) {
     const draft = valueRef.current;
     if (name.trim().length === 0) return; // nothing to persist for a script-less tab
     await invoke("save_script", { name, contents: draft });
+    // Record what we just wrote so the disk-sync listener recognizes (and ignores)
+    // this save echoing back through the filesystem watcher as a phantom "external"
+    // change (see scriptDiskSync).
+    noteScriptSaved(name, draft);
     // Persist succeeded → the draft is the new baseline; clears dirty.
     setLoaded(draft);
     // Fan out to any SIBLING tab showing the same file so it refreshes to the
@@ -136,6 +145,49 @@ export function ScriptPane({ scriptName }: ScriptPaneProps) {
     });
     return unsubscribe;
   }, [scriptName, sync, originId]);
+
+  // Subscribe to EXTERNAL (on-disk) edits of THIS file — e.g. saved from VS Code via
+  // the "Open in VS Code" button, a file move, a git checkout. The backend watcher
+  // emits `scripts-changed` with the changed basename; when it names our file we
+  // re-fetch the fresh contents (the cache was invalidated before the event) and
+  // apply the same trust model as the sibling sync above. Reads live state via refs
+  // so it never re-subscribes per keystroke — only when the file (scriptName) changes.
+  useEffect(() => {
+    if (scriptName.trim().length === 0) return; // script-less: nothing to sync
+    const mine = scriptBasename(scriptName);
+    return onScriptsChanged((changed) => {
+      // A null payload can't be attributed to a file; ignore rather than re-fetch
+      // every open pane. A named change that isn't ours is not our concern.
+      if (changed == null || scriptBasename(changed) !== mine) return;
+      void invoke<string | null>("get_script", { name: scriptNameRef.current })
+        .then((contents) => {
+          // A vanished file (null / read error) must never blank a live editor —
+          // keep what the user has rather than destroying it on an external delete.
+          if (contents == null) return;
+          // Our own save echoing back through the watcher, or disk already matches
+          // our baseline: nothing changed externally.
+          if (wasScriptSavedByApp(scriptNameRef.current, contents)) return;
+          if (contents === loadedRef.current) return;
+          const refresh = () => {
+            setLoaded(contents);
+            setValue(contents);
+          };
+          if (!dirtyRef.current) {
+            // Clean pane: silently adopt the external contents.
+            refresh();
+            return;
+          }
+          // Dirty pane: never silently lose work — warn before clobbering.
+          const ok = window.confirm(
+            `${scriptName} changed on disk. Discard your unsaved edits and load the new version?`,
+          );
+          if (ok) refresh();
+        })
+        .catch(() => {
+          // Read failed (e.g. broken install mid-edit) — keep the current buffer.
+        });
+    });
+  }, [scriptName]);
 
   useSaveTarget({
     id: "script",

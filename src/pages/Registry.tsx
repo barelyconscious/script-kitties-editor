@@ -180,7 +180,7 @@ export default function Registry() {
           )}
         </section>
 
-        {/* Region 2 — game-facing color palette; writes Data/gui_palette.json.
+        {/* Region 2 — game-facing color palette; writes Data/palette.json.
             Its own draft + dirty + Save live inside the component. */}
         <RegistryPalette />
       </div>

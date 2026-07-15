@@ -138,7 +138,7 @@ Scope note: the palette holds **colors only** for now (not fonts/sizes/other the
 
 The load-bearing constraint is in the requirement itself: *the runtime resolves against the same source.* That single sentence settles the location and rules out the obvious-but-wrong choice.
 
-**Location: `<gameInstallPath>/Data/gui_palette.json` — it is game data, not editor config.**
+**Location: `<gameInstallPath>/Data/palette.json` — it is game data, not editor config.**
 
 - The existing Registry tool persists to `./editor.registry.json` (the app's working dir, see `src-tauri/src/registry/mod.rs`). That file is **editor-private** — the game never reads it. **The palette must not follow that pattern.** A palette the runtime reads cannot live in the editor's private config; it has to ship inside the game's data tree.
 - It lives under `Data/` (alongside `abilities.json`, `creatures.json`, …), **not** in the `gui/` folder. Rationale: the `gui/` folder holds *component XML and controllers* (per-screen structure + behavior); the palette is *project-global theme data* that the runtime resolves for every screen. It is a sibling of the other domain JSON files, and placing it in `Data/` means it is picked up by `update_asset_manifest`'s existing walk and watched by the existing `Data/` non-recursive watch with zero new watcher wiring.
@@ -154,6 +154,14 @@ The load-bearing constraint is in the requirement itself: *the runtime resolves 
 }
 ```
 
+> **On-disk update (2026-07-13): the engine's shipped `Data/palette.json` is an ARRAY of `{name, r, g, b, a}` records with integer 0–255 channels, not this map object — engine format is ground truth.** The map-object shape below still describes the editor's *internal* representation (the app/wire `Palette` and everything the resolver/binding pipeline consumes); `dal::palette` now translates between that map and the on-disk array on read/save, so the whole discussion of the resolution map, keyed lookup, and code-string values still holds — only the file encoding changed. On-disk example:
+> ```json
+> [
+>   { "name": "TextDefault", "r": 185, "g": 178, "b": 165, "a": 255 },
+>   { "name": "PanelBg", "r": 0, "g": 0, "b": 0, "a": 200 }
+> ]
+> ```
+
 - Values are the same `r,g,b,a` color-code string form already used inline in XML (`textColor="185,178,165,255"`), so the resolver parses palette values and inline literals through one code path.
 - Flat map, not an array of `{name, code}` records: lookup is by name (`textColor="TextDefault"` → one map hit), and the runtime wants the same direct keyed access. (This differs from the Registry enums' `{value, description}[]` shape; the palette has no per-entry description requirement, and a keyed map is the right structure for name resolution. If descriptions are wanted later, they go in a sidecar or a `_meta` block, not by reshaping the resolution map.)
 - Keys are palette names (identifiers); the resolution rule above (`{token}` → bind; else palette-key match; else parse as literal code) relies on palette names being identifiers and codes being numeric, so the three never collide.
@@ -161,17 +169,17 @@ The load-bearing constraint is in the requirement itself: *the runtime resolves 
 **DAL exposure: a new `palette` domain, mirroring the existing per-domain pattern.**
 
 Consistent with every other domain in `src-tauri/src/dal/`:
-- New `dal/palette.rs` owning `get_palette()` / `save_palette(palette)`. `get_palette` reads `Data/gui_palette.json`, caches in a new `Cache<(), Arc<Palette>>` field on `Dal` (where `Palette = BTreeMap<String, String>` or an order-preserving map; see below), returns the cached `Arc`. `save_palette` writes atomically via the existing `atomic_write` + `serialize_pretty`, then refreshes the cache — identical to `save_charm`.
+- New `dal/palette.rs` owning `get_palette()` / `save_palette(palette)`. `get_palette` reads `Data/palette.json`, caches in a new `Cache<(), Arc<Palette>>` field on `Dal` (where `Palette = BTreeMap<String, String>` or an order-preserving map; see below), returns the cached `Arc`. `save_palette` writes atomically via the existing `atomic_write` + `serialize_pretty`, then refreshes the cache — identical to `save_charm`.
 - A `Palette` model type in `model/` (`BTreeMap<String,String>`, or a `serde_json`-`preserve_order` map if author-controlled key order matters for diffs — prefer order preservation so re-saves don't churn the file, matching the manifest's order-preserving discipline).
 - New Tauri commands `get_palette` / `save_palette` registered in `lib.rs`, thin wrappers in `commands/`, per the established three-step add-a-command recipe.
-- Watcher: add one row to the `invalidators` table in `dal/mod.rs` for `data_dir.join("gui_palette.json")` invalidating the new palette cache — same shape as the `charms.json` row. No new watch path needed (it's under the already-watched `Data/`).
-- **First-run absence:** if `Data/gui_palette.json` doesn't exist, `get_palette` returns an **empty palette** (`Ok` with no entries), not an error — a fresh project simply has no named colors yet, and the color field falls back to literal-code entry. (Contrast with `get_script`'s broken-install error: a missing palette is a legitimate empty state, not a corrupted install.) `save_palette` creates the file on first write.
+- Watcher: add one row to the `invalidators` table in `dal/mod.rs` for `data_dir.join("palette.json")` invalidating the new palette cache — same shape as the `charms.json` row. No new watch path needed (it's under the already-watched `Data/`).
+- **First-run absence:** if `Data/palette.json` doesn't exist, `get_palette` returns an **empty palette** (`Ok` with no entries), not an error — a fresh project simply has no named colors yet, and the color field falls back to literal-code entry. (Contrast with `get_script`'s broken-install error: a missing palette is a legitimate empty state, not a corrupted install.) `save_palette` creates the file on first write.
 
 The frontend's GUI-editor preview resolves palette names through `get_palette` (cache it module-level like `Sprite.tsx` does for sprites), so colors render true and recoloring an entry in the Registry updates every GUI that references it by name.
 
 #### Registry palette-editing UI (ux-designer)
 
-The palette is edited in the Registry tab, but it is **not** another enum section — it writes a *different file to a different substrate* (`Data/gui_palette.json`, game data) than the enum sections (`editor.registry.json`, editor config). The whole design problem here is making that split **legible** so the user never wonders why one tab saves two things to two places.
+The palette is edited in the Registry tab, but it is **not** another enum section — it writes a *different file to a different substrate* (`Data/palette.json`, game data) than the enum sections (`editor.registry.json`, editor config). The whole design problem here is making that split **legible** so the user never wonders why one tab saves two things to two places.
 
 **Layout — a separate, visually distinct band, not a card in the enum grid.**
 
@@ -179,8 +187,8 @@ Today the Registry page is: a header (title + one Save/Reset pair) over a `grid-
 
 - Split the page into **two labeled regions** with a clear divider between them:
   - **"Editor enums"** (the existing grid) — framed as *"values that populate the editor's own dropdowns,"* writes `editor.registry.json`.
-  - **"GUI color palette"** (the new region, full-width below the enum grid) — framed as *"named theme colors the **game** reads at runtime,"* writes `Data/gui_palette.json`.
-- Each region carries a small, persistent **target-file caption** in its header (e.g. a muted `editor.registry.json` / `Data/gui_palette.json` monospace tag). Naming the file is the cheapest, most honest way to make "two backends, one tab" legible — the user sees exactly where each region's Save lands.
+  - **"GUI color palette"** (the new region, full-width below the enum grid) — framed as *"named theme colors the **game** reads at runtime,"* writes `Data/palette.json`.
+- Each region carries a small, persistent **target-file caption** in its header (e.g. a muted `editor.registry.json` / `Data/palette.json` monospace tag). Naming the file is the cheapest, most honest way to make "two backends, one tab" legible — the user sees exactly where each region's Save lands.
 - Give the palette region a distinct accent (e.g. a left border / different card tint than the enum cards) so the eye registers it as a different *kind* of thing, not a sibling enum. It reads as game-facing data, the enums read as editor-facing config.
 
 **Independent save state — the load-bearing rule.** The palette region has its **own draft, its own dirty flag, and its own Save/Reset**, scoped to the palette only and physically located *in the palette region's header* (not the page header). The existing page Save/Reset stays with the enum region and continues to write only `editor.registry.json`. **Two backends → two Saves, each co-located with the data it persists** — the control's location tells you what file it writes. Do not add a single "Save all" that writes both; that is exactly the collapse the architecture warns against, and it reintroduces the confusion this layout exists to prevent. (If both regions are dirty and the user navigates away, warn per-region — consistent with the GUI editor's warn-on-switch.)
@@ -200,7 +208,7 @@ Today the Registry page is: a header (title + one Save/Reset pair) over a `grid-
   - On **remove**, and on **rename** (a name edit that commits to a different key), show a brief inline confirm/warning: *"GUIs that reference this color by name will stop resolving it — the editor can't update those references for you."* Keep it lightweight (an inline warning or a confirm on Save), not a modal per keystroke.
   - Do **not** promise a "used by N components" count or a reference list — that would require the cross-file indexing the editor deliberately doesn't do. The warning is unconditional and honest about the thinness instead of faking knowledge it doesn't have.
 
-**Empty state.** A fresh project has no `gui_palette.json`; the palette region shows an empty state with the "Add color" affordance and a one-line note that colors added here become available as named swatches in the GUI editor's color fields — closing the loop between where colors are *defined* (here) and where they're *used* (the GUI editor Properties panel).
+**Empty state.** A fresh project has no `palette.json`; the palette region shows an empty state with the "Add color" affordance and a one-line note that colors added here become available as named swatches in the GUI editor's color fields — closing the loop between where colors are *defined* (here) and where they're *used* (the GUI editor Properties panel).
 
 ### Repetition and control flow (`forEach`)
 
@@ -774,7 +782,7 @@ Where the shipped editor lives, so a fresh session can jump straight to the code
 ## Backend — `src-tauri/src/`
 
 - **`dal/gui.rs`** — the `gui` domain: `get_gui_tree` (recursive `gui/` walk → nested `GuiTree`, cached as one `Arc` keyed `()`), `get_component` (path-based read), `save_component` (register-on-save: inserts manifest entries for `.xml`/controller when absent), `create_component`, `create_folder`. No delete.
-- **`dal/palette.rs`** — the `palette` domain: `get_palette` / `save_palette` over `Data/gui_palette.json` (empty-on-missing, created on first save).
+- **`dal/palette.rs`** — the `palette` domain: `get_palette` / `save_palette` over `Data/palette.json` (empty-on-missing, created on first save).
 - **`dal/mod.rs`** — the watcher wiring: the one **recursive** watch on `gui/`, emitting the `gui-changed` (`GUI_CHANGED_EVENT`) Tauri event; the palette cache invalidator row.
 - **`commands/gui.rs`** / **`commands/palette.rs`** — thin command wrappers; registered in **`lib.rs`**'s `invoke_handler!` as `get_gui_tree`, `get_component`, `save_component`, `create_component`, `create_folder`, `get_palette`, `save_palette`.
 - **`model/`** — `GuiTree` / `GuiFolder` / `GuiComponentRef` and the `Palette` (order-preserving `name → color-code` map) types.

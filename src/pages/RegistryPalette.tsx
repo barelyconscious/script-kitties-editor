@@ -31,7 +31,7 @@ const CHECKERBOARD: React.CSSProperties = {
 
 /**
  * The GUI color palette region of the Registry tab. UNLIKE the enum sections, it
- * reads/writes `Data/gui_palette.json` (game data the runtime reads) via the
+ * reads/writes `Data/palette.json` (game data the runtime reads) via the
  * `get_palette`/`save_palette` commands — NOT `editor.registry.json`. It therefore
  * owns its OWN draft + dirty flag + Save/Reset, co-located in this region's header,
  * fully independent of the enum Save. After a save it invalidates the module-level
@@ -123,13 +123,13 @@ export default function RegistryPalette() {
   }
 
   return (
-    <section className="rounded-lg border border-l-4 border-l-amber-400 bg-amber-50/40 p-4 dark:bg-amber-950/10">
+    <section className="rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-base">GUI color palette</h2>
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] text-muted-foreground">
-              Data/gui_palette.json
+              Data/palette.json
             </code>
           </div>
           <p className="max-w-prose text-muted-foreground text-sm">
@@ -183,7 +183,7 @@ export default function RegistryPalette() {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 lg:grid-cols-2 2xl:grid-cols-3">
             {draft.map((row, i) => (
               <PaletteRowEditor
                 // biome-ignore lint/suspicious/noArrayIndexKey: names can be transiently empty/duplicated while editing, so the index is the only stable row identity.
@@ -244,17 +244,10 @@ function PaletteRowEditor({
 
       <Input
         aria-label={`Color name ${index + 1}`}
-        className="w-44 shrink-0 font-mono text-xs"
+        className="min-w-0 flex-1 font-mono text-xs"
         placeholder="ColorName"
         value={row.name}
         onChange={(e) => onChange({ name: e.currentTarget.value })}
-      />
-      <Input
-        aria-label={`Color code ${index + 1}`}
-        className="w-44 shrink-0 font-mono text-xs"
-        placeholder="r,g,b,a"
-        value={row.code}
-        onChange={(e) => onChange({ code: e.currentTarget.value })}
       />
       <Button
         type="button"

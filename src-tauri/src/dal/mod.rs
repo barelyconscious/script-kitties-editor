@@ -52,6 +52,18 @@ pub const GUI_CHANGED_EVENT: &str = "gui-changed";
 /// self-echo dedup is needed (unlike gui-changed).
 pub const SPRITES_CHANGED_EVENT: &str = "sprites-changed";
 
+/// The Tauri event name emitted to the frontend when a `.lua` script under a
+/// watched root OTHER than `gui/` (i.e. a `Scripts/` entity script) changes on
+/// disk — the signal an open Workbench script editor uses to re-fetch. The payload
+/// is the changed file's basename (e.g. `"creature_bitlynx.lua"`) so a listener can
+/// react only to ITS file. gui/ controller `.lua` edits are deliberately NOT sent
+/// here: they are covered by `gui-changed`, which the XGUI editor already handles.
+/// Emitted AFTER the scripts cache is invalidated so the frontend's re-fetch reads
+/// fresh bytes (mirrors the gui-changed / sprites-changed ordering). Own-save echoes
+/// are filtered on the frontend by comparing the re-read contents to what the editor
+/// last wrote (there is no path/content registry on this side).
+pub const SCRIPTS_CHANGED_EVENT: &str = "scripts-changed";
+
 /// A shared slot holding the `AppHandle` the filesystem watcher emits through.
 /// The watcher is built inside `Dal::new`, BEFORE the Tauri app (and thus its
 /// `AppHandle`) exists, so the watcher captures this empty slot and the setup
@@ -76,8 +88,9 @@ pub struct Dal {
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
     pub(crate) bundles: Cache<(), Arc<Vec<Bundle>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
-    // The GUI color palette (name -> "r,g,b,a"), from Data/gui_palette.json. A
-    // single coarse cache unit under key `()`, like the per-domain caches above.
+    // The GUI color palette (name -> "r,g,b,a"), from Data/palette.json (stored on
+    // disk as the engine's [{name,r,g,b,a}] array; dal::palette translates). A single
+    // coarse cache unit under key `()`, like the per-domain caches above.
     pub(crate) palette: Cache<(), Arc<Palette>>,
     // The game's assets.json manifest (logical name -> on-disk path).
     pub(crate) manifest: Cache<(), Arc<HashMap<String, AssetEntry>>>,
@@ -298,7 +311,7 @@ fn build_watcher(
         }),
         // The GUI palette lives under the already-watched Data/, so no new watch
         // is needed — just an exact-path invalidator like the domain files above.
-        (data_dir.join("gui_palette.json"), {
+        (data_dir.join("palette.json"), {
             let c = palette.clone();
             Box::new(move || c.invalidate(&()))
         }),
@@ -367,6 +380,20 @@ fn build_watcher(
             // bytes rather than the stale cache.
             if path.extension().and_then(|e| e.to_str()) == Some("lua") {
                 scripts_cache.invalidate_all();
+                // Notify the frontend so an OPEN Workbench script editor re-fetches.
+                // Only for NON-gui `.lua` (entity scripts under Scripts/): gui
+                // controllers are covered by the `gui-changed` emit below, which the
+                // XGUI editor handles — emitting here too would be redundant. Emit
+                // AFTER the invalidation above so the re-fetch reads fresh bytes.
+                if !path.starts_with(&gui_dir_match) {
+                    if let Some(handle) = emit_slot.lock().unwrap().as_ref() {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .map(String::from);
+                        let _ = handle.emit(SCRIPTS_CHANGED_EVENT, name);
+                    }
+                }
             }
             // Any change anywhere under gui/ (the recursive watch covers nested
             // folders) invalidates the single tree cache key and every cached

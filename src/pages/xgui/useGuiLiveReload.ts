@@ -29,6 +29,7 @@ import { invalidateComponents } from "../../lib/guiComponentCache";
 import { serializeGui } from "../../lib/guiNode";
 import { useEditorStore } from "./editorState";
 import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
+import { getPersistedHidden } from "./elementVisibilityStore";
 import { GUI_CHANGED_EVENT } from "./guiEvents";
 import type { GuiComponentRef } from "./guiTree";
 import { classifyOpenChange, onGuiChangedAlways, remapSelection } from "./liveReload";
@@ -109,10 +110,11 @@ export function useGuiLiveReload(reloadTree: () => Promise<unknown>): GuiLiveRel
         component.root,
         stateRef.current.selectedNodeId,
       );
-      // Re-resolve persisted locks against the re-parsed tree (nodeIds were
-      // re-minted), so a live external edit doesn't drop the user's locks.
+      // Re-resolve persisted locks/hides against the re-parsed tree (nodeIds were
+      // re-minted), so a live external edit doesn't drop the user's locks or hides.
       const lockedNodeIds = nodeIdsForKeys(component.root, getPersistedLocks(component.path));
-      dispatch({ type: "reloadOpen", component, selectedNodeId, lockedNodeIds });
+      const hiddenNodeIds = nodeIdsForKeys(component.root, getPersistedHidden(component.path));
+      dispatch({ type: "reloadOpen", component, selectedNodeId, lockedNodeIds, hiddenNodeIds });
     },
     [dispatch],
   );

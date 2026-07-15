@@ -224,11 +224,16 @@ export type EditorState = {
 export type EditorAction =
   /**
    * Seat a freshly-parsed component (F8 open-flow). Resets selection/tab/dirty.
-   * `lockedNodeIds` optionally SEEDS the locked set from persisted structural keys
-   * resolved against the just-parsed tree (element-lock persistence); omitted →
-   * nothing locked.
+   * `lockedNodeIds`/`hiddenNodeIds` optionally SEED the locked/hidden sets from
+   * persisted structural keys resolved against the just-parsed tree (element-lock /
+   * visibility persistence); omitted → nothing locked / all visible.
    */
-  | { type: "open"; component: OpenComponent; lockedNodeIds?: Set<string> }
+  | {
+      type: "open";
+      component: OpenComponent;
+      lockedNodeIds?: Set<string>;
+      hiddenNodeIds?: Set<string>;
+    }
   /** Clear the open component (back to the empty state). */
   | { type: "close" }
   /** Set the shared selection (tree click / preview click). */
@@ -391,11 +396,12 @@ export type EditorAction =
       component: OpenComponent;
       selectedNodeId: string | null;
       /**
-       * Re-seeds the locked set from persisted structural keys resolved against the
-       * re-parsed tree (the re-read re-mints nodeIds, so locks must be re-resolved).
-       * Omitted → nothing locked.
+       * Re-seeds the locked/hidden sets from persisted structural keys resolved
+       * against the re-parsed tree (the re-read re-mints nodeIds, so both must be
+       * re-resolved). Omitted → nothing locked / all visible.
        */
       lockedNodeIds?: Set<string>;
+      hiddenNodeIds?: Set<string>;
     };
 
 const initialState: EditorState = {
@@ -495,8 +501,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // Seed locks from persisted structural keys (resolved by the caller against
         // the just-parsed tree); empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
-        // Visibility hides are session-only — a fresh document starts all-visible.
-        hiddenNodeIds: new Set(),
+        // Seed hides from persisted structural keys (resolved by the caller against
+        // the just-parsed tree); empty when nothing was persisted.
+        hiddenNodeIds: action.hiddenNodeIds ?? new Set(),
         activeTab: "view",
         dirty: false,
         past: [],
@@ -736,8 +743,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         // The re-read tree re-mints nodeIds, so locks are re-resolved by the caller
         // from persisted structural keys; empty when nothing was persisted.
         lockedNodeIds: action.lockedNodeIds ?? new Set(),
-        // Visibility hides are session-only and keyed by the now-stale nodeIds — clear.
-        hiddenNodeIds: new Set(),
+        // The re-read tree re-mints nodeIds, so hides are re-resolved by the caller
+        // from persisted structural keys; empty when nothing was persisted.
+        hiddenNodeIds: action.hiddenNodeIds ?? new Set(),
         // Editor now matches disk — nothing unsaved.
         dirty: false,
         // A live external reload RESETS history — you cannot undo across a disk

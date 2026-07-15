@@ -27,3 +27,42 @@ pub fn save_script(name: String, contents: String, dal: State<Dal>) -> Result<()
 pub fn create_script(name: String, contents: String, dal: State<Dal>) -> Result<(), String> {
     dal.create_script(&name, contents)
 }
+
+/// Open a registered `.lua` script in VS Code. Resolves the logical `name` to its
+/// on-disk path through the asset manifest (the same resolution `get_script`
+/// uses), then launches the `code` CLI on it. Best-effort: errors if the name
+/// isn't registered; a missing `code` on PATH surfaces the spawn error.
+#[tauri::command]
+pub fn open_script_in_vscode(name: String, dal: State<Dal>) -> Result<(), String> {
+    let Some(path) = dal.resolve_asset(&name)? else {
+        return Err(format!(
+            "script '{name}' is not registered in the asset manifest, so it has no file to open."
+        ));
+    };
+    launch_vscode(&path)
+}
+
+/// Launch VS Code opening `path`. On Windows the `code` command is a batch shim
+/// (`code.cmd`), so it must be run through `cmd`; CREATE_NO_WINDOW keeps a console
+/// from flashing. Elsewhere the `code` binary is invoked directly.
+fn launch_vscode(path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    let path_str = path.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    let spawn = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        Command::new("cmd")
+            .args(["/C", "code", &path_str])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let spawn = Command::new("code").arg(&path_str).spawn();
+
+    spawn.map(|_| ()).map_err(|e| {
+        format!("could not launch VS Code (is the `code` command on your PATH?): {e}")
+    })
+}

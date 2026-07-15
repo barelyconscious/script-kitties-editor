@@ -3,58 +3,40 @@
  *
  * The reference pane renders the {@link GAME_API} tree (see `./gameApi.ts`).
  * Two concerns live here so they can be unit-tested without a DOM:
- *  - {@link filterApiTree}: a recursive search that keeps any item whose name or
- *    documentation matches the query *or* that has a surviving descendant, so a
- *    deep match is never orphaned from its ancestors.
+ *  - {@link filterApiTree}: a NAME-ONLY search over the top-level items — an item
+ *    is kept iff its own name matches the query (documentation and members/subtypes
+ *    are not searched), with its full member list retained so it stays drillable.
  *  - {@link formatSignature}: renders a function/method's args → returns as a
  *    single Lua-ish string for display.
  */
 
 import type { ApiArg, ApiItem } from "./gameApi";
 
-/** Whether a single item's own name or documentation contains the query. */
+/**
+ * Whether a single item's own NAME contains the query (case-insensitive). The
+ * search is deliberately name-only — an item's `documentation` prose is NOT matched
+ * — so the search bar finds types by name rather than acting as a full-text index.
+ */
 export function itemMatches(item: ApiItem, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  if (item.name.toLowerCase().includes(q)) return true;
-  if (item.documentation.toLowerCase().includes(q)) return true;
-  return false;
+  return item.name.toLowerCase().includes(q);
 }
 
 /**
- * Recursively filter an API tree by a free-text query.
+ * Filter an API list by a free-text query, keeping ONLY the top-level items whose
+ * own NAME matches. Documentation is not searched, and members (subtypes) do NOT
+ * pull their parent in — searching a method/property name like `applyEffect` finds
+ * nothing at the root, because the search is a type-name finder, not a deep
+ * full-text index. A kept item retains its full member list, so drilling into it
+ * still shows everything it contains.
  *
- * An item is kept when it matches directly, or when any of its (possibly deep)
- * `members` survive the filter. A kept item whose own text did not match still
- * has its surviving children attached, so the path from a root item down to a
- * deep match stays navigable. Items kept only because an *ancestor* matched are
- * NOT force-included — a match high in the tree does not flood every descendant
- * into the results; only the matching item and the spine to its matches remain.
- *
- * The returned tree is a structural copy (new arrays/objects for touched
- * nodes); the input is never mutated.
+ * Returns the input array unchanged for an empty query; never mutates the input.
  */
 export function filterApiTree(items: ApiItem[], query: string): ApiItem[] {
   const q = query.trim().toLowerCase();
   if (!q) return items;
-
-  const result: ApiItem[] = [];
-  for (const item of items) {
-    const self = itemMatches(item, q);
-    const filteredMembers = item.members ? filterApiTree(item.members, q) : undefined;
-
-    if (self) {
-      // Direct hit: keep the item with its FULL member list intact, so drilling
-      // into a matched container shows everything it contains, not a filtered
-      // subset that happens to share the query.
-      result.push(item);
-    } else if (filteredMembers && filteredMembers.length > 0) {
-      // No direct hit, but descendants matched — keep this node as a spine,
-      // carrying only the surviving members.
-      result.push({ ...item, members: filteredMembers });
-    }
-  }
-  return result;
+  return items.filter((item) => itemMatches(item, q));
 }
 
 /**

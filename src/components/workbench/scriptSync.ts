@@ -8,11 +8,13 @@ import { createContext, useContext, useRef } from "react";
  * every OTHER open tab showing the same file must refresh to the new contents —
  * and if a sibling holds UNSAVED edits, it must WARN before clobbering.
  *
- * This is FRONTEND-ORCHESTRATED off `save_script` SUCCESS. The Rust watcher
- * invalidates the cache but emits no Tauri event, and v1 adds no event bridge,
- * so there is no disk-watch auto-refresh — only the in-app save path fans out.
- * The refreshed contents come from the just-saved draft (the publish payload),
- * NOT a re-fetch via `get_script`.
+ * This is FRONTEND-ORCHESTRATED off `save_script` SUCCESS: it fans an IN-APP save
+ * out to sibling tabs, with the refreshed contents coming from the just-saved draft
+ * (the publish payload), NOT a re-fetch. It is DISTINCT from EXTERNAL (on-disk) edit
+ * sync — that path (a file changed by VS Code, a git checkout, …) is handled by
+ * {@link import("./scriptDiskSync")}, which reacts to the backend's `scripts-changed`
+ * watcher event and re-fetches via `get_script`. Both share the same clean-adopt /
+ * dirty-warn trust model; this one covers cross-tab, that one covers cross-process.
  *
  * The registry below is a tiny name-keyed pub/sub. A {@link ScriptSyncProvider}
  * holds ONE registry for the whole Workbench (created once via useRef), so every

@@ -16,7 +16,7 @@ use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
 use crate::commands::palette::{get_palette, save_palette};
 use crate::commands::registry::{get_registry, save_registry};
-use crate::commands::scripts::{create_script, get_script, save_script};
+use crate::commands::scripts::{create_script, get_script, open_script_in_vscode, save_script};
 use crate::commands::sprites::{get_sprite, list_sprites};
 use crate::config::{get_or_create_config, write_to_disk, EditorConfig};
 use crate::dal::Dal;
@@ -237,6 +237,7 @@ pub fn run() {
             get_script,
             save_script,
             create_script,
+            open_script_in_vscode,
             get_game_objects,
             get_gui_tree,
             get_component,

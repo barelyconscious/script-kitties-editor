@@ -5,15 +5,31 @@ use serde::{Deserialize, Serialize};
 // iteration order churned the whole stats block on every save.
 use std::collections::BTreeMap;
 
-/// The GUI color palette: a flat, **order-preserving** map of palette name
-/// (an identifier, e.g. `TextDefault`) -> color-code string (`r,g,b,a`, e.g.
-/// `185,178,165,255`). The runtime resolves `textColor="TextDefault"` against
-/// this same map, so the on-disk shape is exactly this object.
+/// The GUI color palette AS THE EDITOR HOLDS IT: a flat, **order-preserving** map of
+/// palette name (an identifier, e.g. `TextDefault`) -> color-code string (`r,g,b,a`,
+/// e.g. `185,178,165,255`). This is the app/wire shape the frontend binding pipeline
+/// consumes and the `get_palette`/`save_palette` commands exchange — NOT the on-disk
+/// shape. On disk the palette is the engine's array of {@link PaletteColor} objects
+/// (`Data/palette.json`); `dal::palette` translates between the two.
 ///
 /// `IndexMap` (not `BTreeMap`) because key order is author-controlled and must
-/// round-trip: re-saving an untouched palette should produce a byte-identical
-/// file, so an edit yields a minimal diff. Lives at `Data/gui_palette.json`.
+/// round-trip: re-saving an untouched palette should produce a byte-identical file,
+/// so an edit yields a minimal diff.
 pub type Palette = IndexMap<String, String>;
+
+/// One on-disk palette entry, matching the engine's `Data/palette.json` schema:
+/// a named color with 0–255 RGBA channels, e.g.
+/// `{ "name": "TextDefault", "r": 185, "g": 178, "b": 165, "a": 255 }`. This is the
+/// ground-truth format the C++ runtime reads; `dal::palette` maps a file of these to
+/// and from the editor's `name -> "r,g,b,a"` {@link Palette} map.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PaletteColor {
+    pub name: String,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum GameObjectType {

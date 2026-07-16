@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { parseScopeRef } from "../../lib/guiBinding";
 import type { GuiNode } from "../../lib/guiNode";
 import {
-  bindingDisplayValue,
   compoundLiveWrite,
   computedId,
   fieldsForTag,
@@ -385,30 +384,6 @@ describe("normalizeBinding", () => {
     const stored = normalizeBinding("creatures");
     const ref = parseScopeRef(stored.slice(1, -1));
     expect(ref).toEqual({ frame: "view", path: ["creatures"] });
-  });
-});
-
-describe("bindingDisplayValue", () => {
-  it("shows the inner dotted path for a simple {$.x} view form", () => {
-    expect(bindingDisplayValue("{$.creature}")).toBe("creature");
-    expect(bindingDisplayValue("{$.a.b}")).toBe("a.b");
-  });
-
-  it("round-trips a bare key through normalize → display", () => {
-    expect(bindingDisplayValue(normalizeBinding("creatures"))).toBe("creatures");
-    expect(bindingDisplayValue(normalizeBinding("creature.name"))).toBe("creature.name");
-  });
-
-  it("shows whole-object / item / named / non-view tokens verbatim", () => {
-    expect(bindingDisplayValue("{$.}")).toBe("{$.}");
-    expect(bindingDisplayValue("{.}")).toBe("{.}");
-    expect(bindingDisplayValue("{sprite}")).toBe("{sprite}");
-    expect(bindingDisplayValue("{$app.theme}")).toBe("{$app.theme}");
-  });
-
-  it("shows a non-token literal verbatim (e.g. a legacy bare value)", () => {
-    expect(bindingDisplayValue("creatures")).toBe("creatures");
-    expect(bindingDisplayValue("")).toBe("");
   });
 });
 

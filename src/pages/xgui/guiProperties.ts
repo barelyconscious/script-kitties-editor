@@ -15,7 +15,7 @@
  *   (per-field tokens, literal-vs-binding), "Colors and the palette".
  */
 
-import { isWholeToken, parseScopeRef } from "../../lib/guiBinding";
+import { isWholeToken } from "../../lib/guiBinding";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 
 // ---------------------------------------------------------------------------
@@ -171,13 +171,13 @@ export type FieldKind =
   | "text"
   /**
    * A whole-value BINDING expression (`data`/`dataCollection`/`tooltipData`). The
-   * field EDITS the inner model path (the author types `creatures` or `$.creatures`)
-   * while the STORED attr is normalized to the grammar's whole-value token form
-   * (`{$.creatures}`) — the only form the strict resolver + scaffold accept (a bare
-   * key resolves to nothing). Committed on BLUR/Enter, not per keystroke: every
-   * prefix of a path is itself a valid path, so a per-keystroke commit would spam the
-   * additive scaffold with a throwaway model entry for each character. See
-   * {@link normalizeBinding} / {@link bindingDisplayValue}.
+   * field shows/edits the grammar token VERBATIM (`{$.creatures}`) so it is WYSIWYG
+   * with the XML. {@link normalizeBinding} is a convenience on commit: a bare key or
+   * `$.`-prefixed path the author types (`creatures` / `$.creatures`) is wrapped into
+   * the whole-value token form — the only form the strict resolver + scaffold accept
+   * (a bare key resolves to nothing) — while a full hand-typed token is kept exactly.
+   * Committed on BLUR/Enter, not per keystroke: every prefix of a token is a throwaway
+   * that would otherwise spam the additive scaffold with a model entry per character.
    */
   | "binding"
   /** A `position`/`size` value rendered as four labeled inputs. */
@@ -297,26 +297,6 @@ export function normalizeBinding(input: string): string {
   // (`foo`, `foo.bar`) defaults to the View/local scope (`$.foo`).
   if (t.startsWith("$")) return `{${t}}`;
   return `{$.${t}}`;
-}
-
-/**
- * The value a `binding` field SHOWS for a stored attr — the inverse of
- * {@link normalizeBinding} for the common case. A simple View-scope path
- * (`{$.creature}` / `{$.a.b}`) displays its inner dotted path (`creature` / `a.b`), so
- * the field reads as "edit the path" and round-trips through `normalizeBinding`. Every
- * OTHER form shows VERBATIM so the author edits exactly what is stored: a whole-object
- * `{$.}` / `{.}`, a bare grid-item `{sprite}`, a named `{$app.x}`, or a non-token
- * literal (e.g. a legacy bare `creatures` — shown as-is until re-committed).
- *
- * Classifies the token through the shared {@link parseScopeRef}, so display and the
- * resolver read the grammar the same way.
- */
-export function bindingDisplayValue(stored: string): string {
-  const t = stored.trim();
-  if (!isWholeToken(t)) return stored;
-  const ref = parseScopeRef(t.slice(1, -1));
-  if (ref.frame === "view" && ref.path.length > 0) return ref.path.join(".");
-  return stored;
 }
 
 /**

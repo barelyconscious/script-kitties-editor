@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GuiParseError } from "../../lib/guiNode";
+import { useRegisterComponentOpener } from "./componentOpener";
 import { useEditorStore } from "./editorState";
 import { getPersistedLocks, nodeIdsForKeys } from "./elementLockStore";
 import { getPersistedHidden } from "./elementVisibilityStore";
@@ -168,6 +169,19 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
     },
     [state.open, state.dirty, openComponent],
   );
+
+  // Open a component by BASENAME through the same guarded flow as a row click.
+  // Registered with the shared opener so siblings (the structure tree's
+  // double-click-to-open on a `<Component>`) reuse the exact warn-on-switch path.
+  // A basename that resolves to no component (e.g. a dangling `src`) is a no-op.
+  const requestOpenByBasename = useCallback(
+    (basename: string) => {
+      const ref = findComponentByName(tree, basename);
+      if (ref) requestOpen(ref);
+    },
+    [tree, requestOpen],
+  );
+  useRegisterComponentOpener(requestOpenByBasename);
 
   // Resolve the warn-on-switch prompt. Save persists then switches (only if the
   // save lands — a failed save keeps us on the current component with the prompt

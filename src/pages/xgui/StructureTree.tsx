@@ -53,6 +53,7 @@ import {
 } from "../../lib/guiComponentCache";
 import type { GuiNode, GuiTag } from "../../lib/guiNode";
 import { ComponentPicker } from "./ComponentPicker";
+import { useComponentOpener } from "./componentOpener";
 import { exportedFunctionNames } from "./controllerScript";
 import { useEditorStore } from "./editorState";
 import { collectTooltipBasenames, type Lint, lintTree, worstSeverity } from "./guiLints";
@@ -152,6 +153,9 @@ export function StructureTree() {
   const { state, dispatch } = useEditorStore();
   const open = state.open;
   const root = open?.root ?? null;
+  // Double-clicking a `<Component>` row opens the component it references — the same
+  // guarded open a click in the component list performs (the list registers this).
+  const openComponent = useComponentOpener();
   // The parent a Component is being added under, while the picker is open. `null`
   // means the picker is closed.
   const [pickerParentId, setPickerParentId] = useState<string | null>(null);
@@ -488,6 +492,7 @@ export function StructureTree() {
           draggingNodeId={draggingNodeId}
           dropTarget={dropTarget}
           onSelect={(nodeId) => dispatch({ type: "select", nodeId })}
+          onOpenComponent={openComponent}
           onAdd={handleAdd}
           onAddHandler={handleAddHandler}
           onRemove={handleRemove}
@@ -553,6 +558,8 @@ type TreeRowProps = {
   /** The active drop target row + zone, driving this row's affordance (task 513). */
   dropTarget: { nodeId: string; zone: DropZone } | null;
   onSelect: (nodeId: string) => void;
+  /** Open the component a `<Component>` row references, by its `src` basename. */
+  onOpenComponent: (basename: string) => void;
   onAdd: (parentNodeId: string, tag: GuiTag) => void;
   onAddHandler: (nodeId: string, attr: string) => void;
   onRemove: (nodeId: string) => void;
@@ -572,6 +579,7 @@ function TreeRow({
   draggingNodeId,
   dropTarget,
   onSelect,
+  onOpenComponent,
   onAdd,
   onAddHandler,
   onRemove,
@@ -698,6 +706,18 @@ function TreeRow({
               <button
                 type="button"
                 onClick={() => onSelect(node.nodeId)}
+                // Double-clicking a Component element navigates to it — the same
+                // guarded open as clicking the component in the list. No-op for other
+                // tags and for a Component with no (or a dangling) `src`.
+                onDoubleClick={
+                  tag === "Component"
+                    ? () => {
+                        const basename = srcBasename(node.attrs.src);
+                        if (basename) onOpenComponent(basename);
+                      }
+                    : undefined
+                }
+                title={tag === "Component" ? "Double-click to open this component" : undefined}
                 className="flex min-w-0 flex-1 select-none items-center gap-1.5 text-left"
               >
                 {/* Per-tag type icon, left of the identity label, accent-colored —
@@ -920,6 +940,7 @@ function TreeRow({
               draggingNodeId={draggingNodeId}
               dropTarget={dropTarget}
               onSelect={onSelect}
+              onOpenComponent={onOpenComponent}
               onAdd={onAdd}
               onAddHandler={onAddHandler}
               onRemove={onRemove}

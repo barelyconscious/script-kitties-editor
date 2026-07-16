@@ -19,13 +19,13 @@ import {
   AutoSaveControllerProvider,
   type AutoSaveStatus,
 } from "./autoSave";
-import { BundleEditorPane } from "./BundleEditorPane";
 import { CreatureChartPane } from "./CreatureChartPane";
 import { CreatureDataPane } from "./CreatureDataPane";
 import { CreatureTabProvider } from "./creatureTab";
 import { DataPane } from "./DataPane";
 import { PackEditorPane } from "./PackEditorPane";
 import { ScriptPane } from "./ScriptPane";
+import { SeasonEditorPane } from "./SeasonEditorPane";
 import {
   RequestSaveProvider,
   SaveBusProvider,
@@ -97,10 +97,10 @@ export function TabWorkspace({
   // are immediately editable. Creatures additionally get a wider pane (the full
   // creature form is much larger than the flat-type field grid).
   const isCreature = tab.objectType === "Creature";
-  // Bundles & packs are script-less and get a BESPOKE, full-width editor pane:
+  // Seasons & packs are script-less and get a BESPOKE, full-width editor pane:
   // no Data/Script split, no data-toggle. They still register one save target
   // with this tab's bus, so the shared Save button / ⌘S work unchanged.
-  const isBespoke = tab.objectType === "Bundle" || tab.objectType === "Pack";
+  const isBespoke = tab.objectType === "Season" || tab.objectType === "Pack";
   const [dataOpen, setDataOpen] = useState(true);
   // Creatures can flip the center region between the aiController SCRIPT (the
   // default, editable) and a read-only STATS graph. Per-tab state, defaults to
@@ -117,7 +117,7 @@ export function TabWorkspace({
 
   const bus = useSaveBus();
 
-  // The active data editor's undo handlers (creatures/flat/bundle/pack register
+  // The active data editor's undo handlers (creatures/flat/season/pack register
   // exactly one). Drives the toolbar undo/redo buttons + Ctrl+Z keybinding.
   const [undoTarget, setUndoTarget] = useState<UndoTarget | null>(null);
   const undoTargetRef = useRef(undoTarget);
@@ -353,7 +353,7 @@ export function TabWorkspace({
                         </Button>
                       </div>
                     )}
-                    {/* Scripts save manually; bundles/packs are script-less, so the
+                    {/* Scripts save manually; seasons/packs are script-less, so the
                     button only appears when the tab actually has a script. */}
                     {bus.hasManualTarget && (
                       <Button
@@ -381,8 +381,8 @@ export function TabWorkspace({
                     className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background p-4 [scrollbar-gutter:stable]"
                     aria-label="Data"
                   >
-                    {tab.objectType === "Bundle" ? (
-                      <BundleEditorPane id={tab.id} />
+                    {tab.objectType === "Season" ? (
+                      <SeasonEditorPane id={tab.id} />
                     ) : (
                       <PackEditorPane id={tab.id} />
                     )}

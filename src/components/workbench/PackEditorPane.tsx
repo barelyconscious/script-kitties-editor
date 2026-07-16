@@ -12,7 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { type Bundle, loadBundles } from "@/lib/entities/bundles";
 import {
   type DrawRules,
   loadPacks,
@@ -20,6 +19,7 @@ import {
   type PackSlot,
   savePack,
 } from "@/lib/entities/packs";
+import { loadSeasons, type Season } from "@/lib/entities/seasons";
 import { useEnumValues } from "@/lib/registry";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { cn } from "@/lib/utils";
@@ -29,11 +29,11 @@ import { useUndoTarget } from "./undo";
 
 /**
  * The bespoke, full-width DATA editor for a PACK tab. A pack is a card pack whose
- * `slots` each define a weighted draw pool (bundle weights + rarity weights).
+ * `slots` each define a weighted draw pool (season weights + rarity weights).
  * Rendered as a flexing grid of TCG-style cards, one per slot.
  *
- * Wiring mirrors {@link BundleEditorPane}: load the record + the bundle list (for
- * bundle-weight options) + the Registry rarities (for rarity-weight options),
+ * Wiring mirrors {@link SeasonEditorPane}: load the record + the season list (for
+ * season-weight options) + the Registry rarities (for rarity-weight options),
  * track a draft vs. baseline, and register ONE "data" target with the per-tab
  * save bus. Packs are script-less — {@link TabWorkspace} renders this full-width.
  */
@@ -61,7 +61,7 @@ function PackEditor({ id }: { id: string }) {
   const draft = history.value;
   const setDraft = history.set;
   const reset = history.reset;
-  const [bundles, setBundles] = useState<Bundle[]>([]);
+  const [seasons, setSeasons] = useState<Season[]>([]);
   const rarities = useEnumValues("creatureRarities");
 
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
@@ -74,15 +74,15 @@ function PackEditor({ id }: { id: string }) {
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    Promise.all([loadPacks(), loadBundles()])
-      .then(([packs, bundleList]) => {
+    Promise.all([loadPacks(), loadSeasons()])
+      .then(([packs, seasonList]) => {
         if (cancelled) return;
         const found = packs.find((p) => p.id === id) ?? null;
         if (!found) {
           setState({ kind: "notFound" });
           return;
         }
-        setBundles(bundleList);
+        setSeasons(seasonList);
         setLoaded(found);
         reset(found); // seed the draft, dropping any prior history
         setState({ kind: "loaded" });
@@ -147,7 +147,7 @@ function PackEditor({ id }: { id: string }) {
     );
   }
 
-  const bundleOptions = bundles.map((b) => ({ value: b.id, label: b.name || b.id }));
+  const seasonOptions = seasons.map((b) => ({ value: b.id, label: b.name || b.id }));
   const rarityOptions = rarities.map((r) => ({ value: r, label: r }));
   // Total cards across all slots, counting each stack's size.
   const totalCards = draft.slots.reduce((acc, s) => acc + (s.count ?? 1), 0);
@@ -178,7 +178,7 @@ function PackEditor({ id }: { id: string }) {
     setFlash({ index, token: flashToken.current });
   };
   const addSlot = () => {
-    const empty: PackSlot = { drawRules: { bundles: {}, rarity: {} } };
+    const empty: PackSlot = { drawRules: { seasons: {}, rarity: {} } };
     setDraft({ ...draft, slots: [...draft.slots, empty] });
     // New slot lands at the end; flag that position for the insert flourish.
     flashToken.current += 1;
@@ -237,7 +237,7 @@ function PackEditor({ id }: { id: string }) {
               <span className="font-normal text-muted-foreground tabular-nums">{totalCards}</span>
             </h3>
             <p className="text-muted-foreground text-xs">
-              Each slot is one card draw, weighted by bundle and rarity.
+              Each slot is one card draw, weighted by season and rarity.
             </p>
           </div>
         </div>
@@ -249,7 +249,7 @@ function PackEditor({ id }: { id: string }) {
               key={index}
               startNumber={slotStarts[index]}
               slot={slot}
-              bundleOptions={bundleOptions}
+              seasonOptions={seasonOptions}
               rarityOptions={rarityOptions}
               onChange={(next) => setSlot(index, next)}
               onIncrement={() => bumpCount(index, 1)}
@@ -288,7 +288,7 @@ type WeightOption = { value: string; label: string };
 function SlotCard({
   startNumber,
   slot,
-  bundleOptions,
+  seasonOptions,
   rarityOptions,
   onChange,
   onIncrement,
@@ -299,7 +299,7 @@ function SlotCard({
   /** This slot's first card position (1-based, cumulative across earlier stacks). */
   startNumber: number;
   slot: PackSlot;
-  bundleOptions: WeightOption[];
+  seasonOptions: WeightOption[];
   rarityOptions: WeightOption[];
   onChange: (next: PackSlot) => void;
   onIncrement: () => void;
@@ -391,14 +391,14 @@ function SlotCard({
         </div>
 
         <WeightDistribution
-          label="Bundle weights"
-          emptyHint="No bundles. Add one to draw from."
-          addLabel="Add bundle"
-          options={bundleOptions}
+          label="Season weights"
+          emptyHint="No seasons. Add one to draw from."
+          addLabel="Add season"
+          options={seasonOptions}
           // The backend omits empty weight maps on save, so a loaded slot may have
-          // no `bundles`/`rarity` key — default to {} so the editor never crashes.
-          value={slot.drawRules.bundles ?? {}}
-          onChange={(bundles) => setRules({ ...slot.drawRules, bundles })}
+          // no `seasons`/`rarity` key — default to {} so the editor never crashes.
+          value={slot.drawRules.seasons ?? {}}
+          onChange={(seasons) => setRules({ ...slot.drawRules, seasons })}
         />
 
         <WeightDistribution
@@ -419,7 +419,7 @@ function SlotCard({
  * INDEPENDENT number field per chosen option — editing one never touches the
  * others, so the user has full control; the Σ readout simply flags when the set
  * doesn't total 1.00. Entered/shown and stored as 0..1 decimals. Used for both
- * the bundle and rarity weights of a slot's draw rules.
+ * the season and rarity weights of a slot's draw rules.
  */
 function WeightDistribution({
   label,

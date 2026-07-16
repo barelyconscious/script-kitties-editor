@@ -11,7 +11,7 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
     let creatures = dal.get_creatures()?;
     let effects = dal.get_effects()?;
     let items = dal.get_items()?;
-    let bundles = dal.get_bundles()?;
+    let seasons = dal.get_seasons()?;
     let packs = dal.get_packs()?;
 
     let mut all = Vec::with_capacity(
@@ -21,7 +21,7 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             + creatures.len()
             + effects.len()
             + items.len()
-            + bundles.len()
+            + seasons.len()
             + packs.len(),
     );
 
@@ -93,13 +93,13 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
         });
     }
 
-    for b in bundles.iter() {
+    for b in seasons.iter() {
         all.push(GameObject {
-            object_type: GameObjectType::Bundle,
+            object_type: GameObjectType::Season,
             id: b.id.clone(),
             name: b.name.clone(),
             sprite: b.sprite.clone(),
-            // Bundles are script-less.
+            // Seasons are script-less.
             script: String::new(),
             description: b.description.clone(),
         });

@@ -6,10 +6,10 @@ Start with [`README.md`](./README.md) for shared terms.
 
 ## Layers
 
-- **`model/`** — Serde structs (`Creature`, `Ability`, `Charm`, `Item`, `Bundle`, `Pack`, …),
+- **`model/`** — Serde structs (`Creature`, `Ability`, `Charm`, `Item`, `Season`, `Pack`, …),
   all `#[serde(rename_all = "camelCase")]` so JSON/TS use camelCase. Sparse/optional fields
   use `#[serde(default, skip_serializing_if = …)]` to stay out of the JSON when empty.
-- **`dal/`** — the **DAL**. One file per domain (`creatures`, `abilities`, `bundles`,
+- **`dal/`** — the **DAL**. One file per domain (`creatures`, `abilities`, `seasons`,
   `packs`, …). The `Dal` struct owns a **Moka cache** per domain and a **`notify` watcher**
   that invalidates a cache when its file changes outside the app. `dal::mod::data_dir()` =
   `<gameInstallPath>/Data`. Reads are cache-or-load; saves re-read, **upsert by `id`**,

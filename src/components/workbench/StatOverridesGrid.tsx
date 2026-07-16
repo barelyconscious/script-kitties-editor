@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
  * columns; here a missing key means "no override".
  *
  * Writes back a plain `Record<string, number>`. Zero-valued entries are stripped
- * on save (see `saveBundle`), so a row left at 0 is treated as no override.
+ * on save (see `saveSeason`), so a row left at 0 is treated as no override.
  */
 export function StatOverridesGrid({
   value,

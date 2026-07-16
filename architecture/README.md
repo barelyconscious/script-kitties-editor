@@ -32,7 +32,7 @@ A left **NavRail** switches between four **tools** (one React page each):
 ## Core vocabulary
 
 - **Entity** — a domain type with its own JSON file in `Data/` (ability, biogram, charm,
-  effect, item, creature, bundle, pack). The TS type + load/save + field schema for each
+  effect, item, creature, season, pack). The TS type + load/save + field schema for each
   lives in `src/lib/entities/` (or `src/lib/creature.ts`).
 - **GameObject** — a *lossy unified projection* (`id`, `name`, `sprite`, `script`,
   `description`, `objectType`) across entities, produced by the `get_game_objects` command.

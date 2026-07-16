@@ -35,6 +35,7 @@ import { serializeGui } from "@/lib/guiNode";
 import { setPreference, usePreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { ComponentList } from "./xgui/ComponentList";
+import { ComponentOpenerProvider } from "./xgui/componentOpener";
 import { useComponentRegistry } from "./xgui/componentRegistry";
 import { ControllerTab } from "./xgui/ControllerTab";
 import { DataModelPanel } from "./xgui/DataModelPanel";
@@ -85,28 +86,32 @@ export default function Xgui({ componentListCollapsed, active = false }: XguiPro
   return (
     <EditorStateProvider>
       <GuiTreeStoreProvider>
-        <ViewStatePersistence />
-        <div className="flex h-full min-h-0">
-          <ComponentList
-            collapsed={componentListCollapsed}
-            onCollapse={() => setPreference("xgui.componentListCollapsed", true)}
-          />
+        <ComponentOpenerProvider>
+          <ViewStatePersistence />
+          <div className="flex h-full min-h-0">
+            <ComponentList
+              collapsed={componentListCollapsed}
+              onCollapse={() => setPreference("xgui.componentListCollapsed", true)}
+            />
 
-          {/* When the list is collapsed, leave a slim labelled rail in its place so
-            it's obvious the panel exists and how to bring it back — matching the
-            Workbench's collapsed-list affordance. */}
-          {componentListCollapsed && (
-            <CollapsedListRail onShow={() => setPreference("xgui.componentListCollapsed", false)} />
-          )}
+            {/* When the list is collapsed, leave a slim labelled rail in its place so
+              it's obvious the panel exists and how to bring it back — matching the
+              Workbench's collapsed-list affordance. */}
+            {componentListCollapsed && (
+              <CollapsedListRail
+                onShow={() => setPreference("xgui.componentListCollapsed", false)}
+              />
+            )}
 
-          {/* Structure column: the tree (F9a) over properties (F9b), stacked
-            top-to-bottom. Events are handled entirely in the Lua controller, so the
-            editor authors no `<Event>` elements and there is no events panel. */}
-          <StructureColumn />
+            {/* Structure column: the tree (F9a) over properties (F9b), stacked
+              top-to-bottom. Events are handled entirely in the Lua controller, so the
+              editor authors no `<Event>` elements and there is no events panel. */}
+            <StructureColumn />
 
-          {/* MAIN content — the preview (+ Data Model) for the open component. */}
-          <MainContent active={active} />
-        </div>
+            {/* MAIN content — the preview (+ Data Model) for the open component. */}
+            <MainContent active={active} />
+          </div>
+        </ComponentOpenerProvider>
       </GuiTreeStoreProvider>
     </EditorStateProvider>
   );

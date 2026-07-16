@@ -50,7 +50,6 @@ import {
   rowsToAttrs,
 } from "./freeformRows";
 import {
-  bindingDisplayValue,
   COMPOUND_FIELD_LABELS,
   type CompoundFields,
   compoundLiveWrite,
@@ -382,22 +381,27 @@ function CopyIdButton({ value }: { value: string }) {
 
 /**
  * A whole-value BINDING field (`data` / `dataCollection` / `tooltipData`). The input
- * EDITS the inner model path; the STORED attr is the normalized grammar token
- * ({@link normalizeBinding}) — a bare key is unresolvable under the strict grammar, so
- * it must never land on the node. The displayed draft is the inner path of a simple
- * `{$.x}` form ({@link bindingDisplayValue}) so it reads as "edit the path".
+ * shows and edits the STORED token VERBATIM (`{$.selectedKittypack}`), so the field is
+ * WYSIWYG with the XML — what you type is what's stored. {@link normalizeBinding} is a
+ * convenience on commit only: a bare key or `$.`-prefixed path the author types
+ * (`creatures` / `$.creatures`) is wrapped into the grammar's whole-value token form
+ * (`{$.creatures}`) — the only form the strict resolver + scaffold accept — while a
+ * hand-typed full token is kept exactly as written.
  *
- * Edits are LOCAL until BLUR (or Enter): a half-typed path like "b"/"bu"/"but" never
+ * Edits are LOCAL until BLUR (or Enter): a half-typed token like "{$.c"/"{$.cr" never
  * commits — which would otherwise spawn a throwaway data-model object per keystroke.
- * An external change to the committed value (undo/redo, node switch) re-syncs the
- * draft to the newly-displayed path.
+ * An external change to the committed value (undo/redo, node switch) re-syncs the draft.
  */
 function BindingField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
-  const [draft, setDraft] = useState(() => bindingDisplayValue(value));
-  useEffect(() => setDraft(bindingDisplayValue(value)), [value]);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
   const commit = () => {
     const next = normalizeBinding(draft);
     if (next !== value) onCommit(next);
+    // Re-sync the field to the normalized/stored form so a convenience wrap (e.g.
+    // `creatures` → `{$.creatures}`) is reflected even when the stored value is
+    // unchanged and the `value`-effect doesn't fire.
+    else if (next !== draft) setDraft(next);
   };
   return (
     <Input
@@ -407,7 +411,7 @@ function BindingField({ value, onCommit }: { value: string; onCommit: (next: str
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      placeholder="model path, e.g. creature"
+      placeholder="{$.model.path}"
       className="h-7 font-mono text-xs"
     />
   );
@@ -547,10 +551,10 @@ function FieldControl({
   const { name, kind } = field;
   switch (kind) {
     case "binding":
-      // A whole-value binding (data / dataCollection / tooltipData) — edits the inner
-      // model path and stores the normalized grammar token, committed on blur/Enter
-      // (not per keystroke) so a half-typed path doesn't spawn a throwaway scaffold
-      // entry per character.
+      // A whole-value binding (data / dataCollection / tooltipData) — shows/edits the
+      // grammar token VERBATIM (WYSIWYG with the XML), committed on blur/Enter (not per
+      // keystroke) so a half-typed token doesn't spawn a throwaway scaffold entry per
+      // character. A bare key typed as convenience is normalized to the token on commit.
       return <BindingField value={value} onCommit={(v) => onSet(name, v)} />;
     case "compound":
       // `literalOnly` (grid `cellSize`) drops the per-field {token} affordance — grid

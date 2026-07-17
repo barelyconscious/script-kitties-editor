@@ -1,18 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 import { Sprite } from "@/components/Sprite";
+import { loadSpriteNames, useSpriteNamesVersion } from "@/components/spriteNamesCache";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-
-// Shared across all pickers; the manifest rarely changes within a session.
-let spriteNamesCache: Promise<string[]> | null = null;
-function loadSpriteNames(): Promise<string[]> {
-  if (!spriteNamesCache) {
-    spriteNamesCache = invoke<string[]>("list_sprites").catch(() => []);
-  }
-  return spriteNamesCache;
-}
 
 export function SpritePicker({
   value,
@@ -29,15 +20,19 @@ export function SpritePicker({
   const [open, setOpen] = useState(false);
   const [names, setNames] = useState<string[] | null>(null);
   const [query, setQuery] = useState("");
+  // Bumped when the shared name cache is cleared (e.g. an asset rescan); threaded into
+  // the fetch deps so an open picker re-fetches the fresh list, and a closed one picks
+  // it up on its next open (the cleared cache re-fetches instead of serving the memo).
+  const namesVersion = useSpriteNamesVersion();
 
   useEffect(() => {
-    if (!open || names) return;
+    if (!open) return;
     let cancelled = false;
     loadSpriteNames().then((n) => !cancelled && setNames(n));
     return () => {
       cancelled = true;
     };
-  }, [open, names]);
+  }, [open, namesVersion]);
 
   const filtered = useMemo(() => {
     if (!names) return [];

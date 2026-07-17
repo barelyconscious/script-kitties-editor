@@ -14,6 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTheme } from "@/hooks/use-theme";
+import { clearSpriteCache } from "./spriteCache";
+import { clearSpriteNames } from "./spriteNamesCache";
 
 /** Mirror of the Rust `ManifestUpdate` returned by `update_asset_manifest`. */
 type ManifestUpdate = {
@@ -42,6 +44,10 @@ export function SettingsDialog({
     setAssetStatus(null);
     try {
       const result = await invoke<ManifestUpdate>("update_asset_manifest");
+      // The rescan can add/remove/relocate sprites, so drop both the picker's cached
+      // name list AND the resolved-image cache; subscribed pickers/`<Sprite>`s re-fetch.
+      clearSpriteNames();
+      clearSpriteCache();
       setAssetStatus(
         `Done — ${result.added.length} added, ${result.updated.length} updated, ` +
           `${result.removed.length} removed (${result.total} total).`,

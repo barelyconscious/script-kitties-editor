@@ -1,6 +1,7 @@
 import { FileWarning, Loader2, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SpritePicker } from "@/components/data-tables/SpritePicker";
+import { IntegerInput } from "@/components/IntegerInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -212,6 +213,17 @@ function PackEditor({ id }: { id: string }) {
               value={draft.sprite ?? ""}
               container={portalContainer}
               onChange={(name) => setDraft({ ...draft, sprite: name })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pack-cost" className="text-xs">
+              Cost
+            </Label>
+            <IntegerInput
+              id="pack-cost"
+              min={0}
+              value={draft.cost ?? 0}
+              onValue={(cost) => setDraft({ ...draft, cost })}
             />
           </div>
           <div className="col-span-2 flex flex-col gap-1.5">

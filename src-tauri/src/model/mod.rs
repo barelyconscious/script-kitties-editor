@@ -247,8 +247,16 @@ pub struct Pack {
     pub description: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sprite: String,
+    /// The gacha price of this pack. Defaults to 0 (free) and is omitted from JSON
+    /// when 0 so existing packs stay diff-free until they are priced.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cost: i32,
     #[serde(default)]
     pub slots: Vec<PackSlot>,
+}
+
+fn is_zero(n: &i32) -> bool {
+    *n == 0
 }
 
 /// One card slot in a `Pack`. For now a slot carries only its `drawRules`; the

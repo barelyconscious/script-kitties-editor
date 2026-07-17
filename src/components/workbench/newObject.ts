@@ -320,6 +320,7 @@ const PACK_DESCRIPTOR: CreationDescriptor<Pack> = {
     name,
     description: "",
     sprite: "",
+    cost: 0,
     slots: [],
   }),
   save: savePack,

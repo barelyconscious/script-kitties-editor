@@ -28,6 +28,8 @@ export type Pack = {
   name: string;
   description: string;
   sprite?: string;
+  /** The gacha price of this pack. Defaults to 0 (free); the backend omits it when 0. */
+  cost?: number;
   slots: PackSlot[];
 };
 

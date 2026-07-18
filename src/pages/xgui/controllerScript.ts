@@ -13,22 +13,22 @@ import { toComponentBasename } from "./guiTree";
  * a controller as `controller(view, data)` — `data` is optional (Lua has no
  * optional-param syntax, so `function(view, data)` *is* the optional form; the
  * runtime may pass one arg or two) — and expects it to return its handler table.
- * Controllers commonly call `view:setModel(...)` to set/project the model, so we
+ * Controllers commonly call `view:setModel(...)` to seat/project the model, so we
  * scaffold that shape rather than an empty file — the author fills in the table
  * instead of remembering the wrapper.
  *
- * The seat is two-phase: the factory seats the model once at construction, and
- * the returned table may export `onDataChanged(data)` — the runtime calls it when
- * upstream data changes so the controller can choose whether/how to re-seat. We
- * scaffold that hook (with a commented `setModel` re-seat hint) so the author
- * starts from the full lifecycle shape, not just construction.
+ * The seat is two-phase: the factory seats the incoming `data` once at
+ * construction (`view:setModel(data)`), and the returned table exports
+ * `onDataChanged(newData)` — the runtime calls it when upstream data changes, and
+ * the scaffolded body re-seats the model (`view:setModel(newData)`) so the view
+ * follows the data by default. The author starts from the full lifecycle shape.
  */
 export const NEW_CONTROLLER_TEMPLATE = `return function(view, data)
-    view:setModel({ })
+    view:setModel(data)
     return {
-        onDataChanged = function(data)
+        onDataChanged = function(newData)
             -- re-seat the model when upstream data changes
-            -- view:setModel({ })
+            view:setModel(newData)
         end,
     }
 end

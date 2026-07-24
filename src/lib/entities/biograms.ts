@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
+import { bumpEntityVersion } from "./dataVersion";
 
 export type Biogram = {
   id: string;
@@ -28,4 +29,6 @@ export function loadBiograms(): Promise<Biogram[]> {
 
 export async function saveBiogram(biogram: Biogram): Promise<void> {
   await invoke("save_biogram", { biogram });
+  // Notify open lists (e.g. the season editor's biogram picker) to re-fetch.
+  bumpEntityVersion("biograms");
 }

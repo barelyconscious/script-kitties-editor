@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { bumpEntityVersion } from "@/lib/entities/dataVersion";
 import { CREATURE_STATS } from "@/lib/stats";
 
 /** A level threshold at which a creature unlocks new abilities. */
@@ -115,4 +116,6 @@ export async function saveCreature(creature: Creature): Promise<void> {
   await invoke("save_creature", {
     creature: { ...creature, baseStats, statGainsPerLevel },
   });
+  // Notify open lists (e.g. the season editor's creature picker) to re-fetch.
+  bumpEntityVersion("creatures");
 }

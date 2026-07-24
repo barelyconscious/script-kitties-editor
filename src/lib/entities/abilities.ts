@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
+import { bumpEntityVersion } from "./dataVersion";
 
 export type Ability = {
   id: string;
@@ -38,4 +39,6 @@ export function loadAbilities(): Promise<Ability[]> {
 
 export async function saveAbility(ability: Ability): Promise<void> {
   await invoke("save_ability", { ability });
+  // Notify open lists (e.g. the season editor's ability picker) to re-fetch.
+  bumpEntityVersion("abilities");
 }

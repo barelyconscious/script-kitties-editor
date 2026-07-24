@@ -69,6 +69,7 @@ To add a command: implement on `Dal` in `dal/`, add a thin wrapper in `commands/
 ## Conventions for changes
 
 - Verify with `bunx tsc --noEmit`, `bunx biome check` (scoped to touched files — the vendored `ui/` components carry pre-existing lint noise), and `cargo build` for Rust changes.
+- **Ignore biome's `format` (line-ending) error on hand-written TS files.** The working tree is CRLF (`core.autocrlf=true` on Windows) but biome's formatter wants LF, so EVERY hand-written `.ts`/`.tsx` reports a spurious whole-file `format` diagnostic (biome shows it as `␍` removals). It is pre-existing and environmental — not caused by your change — and `autocrlf` normalizes the committed blob regardless, so don't chase it. Running `biome --write` to "fix" it is futile: the next git touch flips the file back to CRLF and the error returns. Only treat NON-`format` diagnostics (lint/correctness, assist/organizeImports, suppressions) as real; confirm those against your diff.
 - This repo is **`script-kitties-editor`**; the game data repo is the separate `worlds-cpp` (default data path `worlds-cpp/worlds-cpp/Data`). Commit only here.
 
 ## State

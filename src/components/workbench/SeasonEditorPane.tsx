@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { type Biogram, loadBiograms } from "@/lib/entities/biograms";
+import { useEntityVersion } from "@/lib/entities/dataVersion";
 import {
   loadSeasons,
   type Season,
@@ -73,6 +74,14 @@ function SeasonEditor({ id }: { id: string }) {
   const [abilities, setAbilities] = useState<MemberOption[]>([]);
   const [biograms, setBiograms] = useState<Biogram[]>([]);
 
+  // Re-fetch the picker populations when an entity of that kind is saved anywhere
+  // (a new ability from the "New" modal, a rename in Data Tables, …) so this
+  // pane's dropdowns don't serve their pre-edit lists until a tab remount. Same
+  // notify pattern as the sprite-name cache (see lib/entities/dataVersion).
+  const abilitiesVersion = useEntityVersion("abilities");
+  const creaturesVersion = useEntityVersion("creatures");
+  const biogramsVersion = useEntityVersion("biograms");
+
   // Portal target for the sprite pickers' popovers so they scroll within this
   // pane rather than overflowing it — same pattern as CreatureIdentityFields.
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
@@ -115,6 +124,44 @@ function SeasonEditor({ id }: { id: string }) {
       cancelled = true;
     };
   }, [id, reset]);
+
+  // Refresh ONLY the picker populations when a watched entity is saved anywhere.
+  // Kept separate from the load effect above so a bump never re-runs `reset` and
+  // discards unsaved season edits. The mount run is skipped — the effect above
+  // already did the first load; this fires only on subsequent version bumps.
+  const didInitialLoad = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: versions are re-run triggers, not read in the body.
+  useEffect(() => {
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      loadCreatures(),
+      invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
+      loadBiograms(),
+    ])
+      .then(([creatures, abil, biog]) => {
+        if (cancelled) return;
+        setPopulation(creatures);
+        setAbilities(
+          abil.map((a) => ({
+            id: a.id,
+            name: a.name,
+            sprite: a.sprite,
+            description: a.description,
+          })),
+        );
+        setBiograms(biog);
+      })
+      // A transient refresh error just keeps the current lists — the load effect
+      // owns the pane's error state.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [abilitiesVersion, creaturesVersion, biogramsVersion]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 

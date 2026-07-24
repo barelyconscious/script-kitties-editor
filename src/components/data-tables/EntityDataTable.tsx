@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { bumpEntityVersion, entityKindForSaveCommand } from "@/lib/entities/dataVersion";
 import { cn } from "@/lib/utils";
 import { EntityEditDialog, type EntityField } from "./EntityEditDialog";
 
@@ -103,7 +104,13 @@ export function EntityDataTable<T extends { id: string }>({
     if (onSave) {
       await onSave(updated);
     } else {
-      await invoke(saveCommand as string, { [saveArgKey as string]: updated });
+      const command = saveCommand as string;
+      await invoke(command, { [saveArgKey as string]: updated });
+      // Notify open lists (e.g. the season editor's pickers) to re-fetch. The
+      // saveX wrappers do this on the other write paths; this is the raw-command
+      // path, so bump the matching kind here too.
+      const kind = entityKindForSaveCommand(command);
+      if (kind) bumpEntityVersion(kind);
     }
     // id isn't editable and is the sort key, so an in-place replace preserves
     // order — no refetch needed.

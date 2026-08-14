@@ -15,8 +15,13 @@ import {
   EntityDataTable,
 } from "@/components/data-tables/EntityDataTable";
 import { Sprite } from "@/components/Sprite";
+import type { EntityKind } from "@/lib/entities/dataVersion";
 import { ITEM_FIELDS, type ItemRow, loadItemRows, saveItemRow } from "@/lib/items";
 import { cn } from "@/lib/utils";
+
+// The row joins items.json ⋈ itemDropTable.json, so a change to either source
+// must re-fetch. Module scope = stable reference for the table.
+const ITEM_ROW_KINDS: readonly EntityKind[] = ["items", "itemDrops"];
 
 // Each item tag gets an evocative glyph + color for the table, plus a human
 // label for its tooltip. Insertion order drives the edit dialog's tag list too.
@@ -116,6 +121,7 @@ export default function ItemsDataTable() {
     <EntityDataTable<ItemRow>
       load={loadItemRows}
       onSave={saveItemRow}
+      refreshKinds={ITEM_ROW_KINDS}
       entityLabel="item"
       searchPlaceholder="Filter by name, tag, rarity, or biome…"
       columns={COLUMNS}

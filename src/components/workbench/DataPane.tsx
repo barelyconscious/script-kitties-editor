@@ -1,9 +1,15 @@
 import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EntityFieldsForm } from "@/components/data-tables/EntityFieldsForm";
+import { useEntityVersions } from "@/lib/entities/dataVersion";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { useAutoSave } from "./autoSave";
-import { type DataDescriptor, dataDescriptorFor, selectById } from "./dataRegistry";
+import {
+  classifyExternalRecord,
+  type DataDescriptor,
+  dataDescriptorFor,
+  selectById,
+} from "./dataRegistry";
 import type { GameObjectType } from "./gameObjects";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
@@ -89,6 +95,72 @@ function DataEditor({
   }, [descriptor, id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
+
+  // Re-fetch this record when its domain's version bumps — an in-app save in a
+  // sibling surface (Data Tables, another tab) OR an external disk edit routed
+  // through `data-changed` (see useDataLiveReload). Kept separate from the load
+  // effect above so a bump never blindly re-runs `reset` — the reconcile below
+  // decides, using the shared trust model: an unchanged/echoed record is a
+  // no-op, a clean pane silently adopts, a dirty pane is warned first.
+  const version = useEntityVersions(descriptor.kinds);
+  // Refs so the version-keyed effect reads the latest baseline/dirty without
+  // re-running on every keystroke.
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const didInitialLoad = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger, not read in the body.
+  useEffect(() => {
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      return;
+    }
+    let cancelled = false;
+    descriptor
+      .load()
+      .then((records) => {
+        if (cancelled) return;
+        const fetched = selectById(records, id);
+        const adopt = (record: { id: string } | null) => {
+          setLoaded(record);
+          reset(record); // re-seed the draft (dropping history) to the disk truth
+          setState(record ? { kind: "loaded" } : { kind: "notFound" });
+        };
+        switch (classifyExternalRecord(fetched, loadedRef.current, dirtyRef.current)) {
+          case "none":
+            return;
+          case "adopt":
+            adopt(fetched);
+            return;
+          case "conflict":
+            // Same clobber warning the script pane uses for external edits.
+            if (
+              window.confirm(
+                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
+              )
+            ) {
+              adopt(fetched);
+            }
+            return;
+          case "missing":
+            if (
+              dirtyRef.current &&
+              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
+            ) {
+              return; // keep editing; a later save re-creates the record
+            }
+            adopt(null);
+            return;
+        }
+      })
+      // A transient refresh error keeps the current record — the load effect
+      // above owns the pane's error state.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [version, descriptor, id, reset]);
 
   // Ref so the bus `save` closure reads the latest draft without being recreated
   // on every keystroke (the bus re-registers a target when `save` identity

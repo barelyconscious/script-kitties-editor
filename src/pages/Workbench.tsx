@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PanelLeftOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiReferencePane } from "@/components/workbench/ApiReferencePane";
 import { anyTabDirty, removeTab, setTabDirty } from "@/components/workbench/dirtyMap";
@@ -16,6 +16,7 @@ import {
 import { TabBar } from "@/components/workbench/TabBar";
 import { TabWorkspace } from "@/components/workbench/TabWorkspace";
 import { closeTab, openTab, tabKey, type WorkbenchTab } from "@/components/workbench/tabs";
+import { useAnyEntityVersion } from "@/lib/entities/dataVersion";
 import { setPreference } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 
@@ -143,6 +144,24 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
       // Keep the existing list; the next save/reload will try again.
     }
   }, []);
+
+  // Silently re-fetch when ANY entity domain changes — an in-app save in a
+  // surface that doesn't route through this shell (Data Tables), or an external
+  // disk edit routed through `data-changed` — so the list reflects renames,
+  // creates, and deletes without a remount. `get_game_objects` aggregates every
+  // domain, so the any-kind signal is the right granularity. The mount run is
+  // skipped: the initial `reload()` effect above owns the first (loading-state)
+  // fetch.
+  const anyEntityVersion = useAnyEntityVersion();
+  const didInitialObjectLoad = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the version is the re-fetch trigger, not read in the body.
+  useEffect(() => {
+    if (!didInitialObjectLoad.current) {
+      didInitialObjectLoad.current = true;
+      return;
+    }
+    void refreshObjects();
+  }, [anyEntityVersion, refreshObjects]);
 
   const handleOpen = useCallback((obj: GameObject) => {
     setTabs((prev) => {

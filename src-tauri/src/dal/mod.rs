@@ -64,6 +64,19 @@ pub const SPRITES_CHANGED_EVENT: &str = "sprites-changed";
 /// last wrote (there is no path/content registry on this side).
 pub const SCRIPTS_CHANGED_EVENT: &str = "scripts-changed";
 
+/// The Tauri event name emitted to the frontend when a watched DATA file (a
+/// `Data/*.json` domain file, `Data/palette.json`, or the root `assets.json`)
+/// changes on disk. The payload is the domain's kind string (`"abilities"`,
+/// `"itemDrops"`, `"palette"`, `"assets"`, …) — it MUST match the frontend's
+/// routing in `useDataLiveReload.ts` (entity kinds additionally match the
+/// `EntityKind` union in `lib/entities/dataVersion.ts`). Emitted AFTER the
+/// matching cache invalidation so the frontend's re-fetch reads fresh data
+/// (mirrors the gui-changed / sprites-changed / scripts-changed ordering).
+/// Own-save echoes are NOT filtered here: the frontend's version-bump consumers
+/// re-fetch and compare against their baseline, so an echo of the app's own
+/// write resolves to a no-op there.
+pub const DATA_CHANGED_EVENT: &str = "data-changed";
+
 /// A shared slot holding the `AppHandle` the filesystem watcher emits through.
 /// The watcher is built inside `Dal::new`, BEFORE the Tauri app (and thus its
 /// `AppHandle`) exists, so the watcher captures this empty slot and the setup
@@ -265,59 +278,62 @@ fn build_watcher(
     let gui_dir = game_root.join("gui");
     let sprites_dir = game_root.join("Sprites");
 
-    // (path the watcher reacts to, closure that invalidates the matching cache).
-    // To register a new domain: clone its cache handle and push a row here.
+    // (path the watcher reacts to, the `data-changed` payload kind, closure that
+    // invalidates the matching cache). To register a new domain: clone its cache
+    // handle and push a row here — the generic invalidate-then-emit loop below
+    // gives it frontend live-reload for free (route the kind in
+    // `useDataLiveReload.ts` / `EntityKind`).
     type Invalidator = Box<dyn Fn() + Send + Sync + 'static>;
-    let invalidators: Vec<(PathBuf, Invalidator)> = vec![
-        (data_dir.join("abilities.json"), {
+    let invalidators: Vec<(PathBuf, &'static str, Invalidator)> = vec![
+        (data_dir.join("abilities.json"), "abilities", {
             let c = abilities.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("biograms.json"), {
+        (data_dir.join("biograms.json"), "biograms", {
             let c = biograms.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("charms.json"), {
+        (data_dir.join("charms.json"), "charms", {
             let c = charms.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("creatures.json"), {
+        (data_dir.join("creatures.json"), "creatures", {
             let c = creatures.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("dlc.json"), {
+        (data_dir.join("dlc.json"), "dlc", {
             let c = dlcs.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("effects.json"), {
+        (data_dir.join("effects.json"), "effects", {
             let c = effects.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("items.json"), {
+        (data_dir.join("items.json"), "items", {
             let c = items.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("itemDropTable.json"), {
+        (data_dir.join("itemDropTable.json"), "itemDrops", {
             let c = item_drops.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("seasons.json"), {
+        (data_dir.join("seasons.json"), "seasons", {
             let c = seasons.clone();
             Box::new(move || c.invalidate(&()))
         }),
-        (data_dir.join("packs.json"), {
+        (data_dir.join("packs.json"), "packs", {
             let c = packs.clone();
             Box::new(move || c.invalidate(&()))
         }),
         // The GUI palette lives under the already-watched Data/, so no new watch
         // is needed — just an exact-path invalidator like the domain files above.
-        (data_dir.join("palette.json"), {
+        (data_dir.join("palette.json"), "palette", {
             let c = palette.clone();
             Box::new(move || c.invalidate(&()))
         }),
         // assets.json lives at the game root. When it changes, both the manifest
         // and every resolved sprite (paths derived from it) may be stale.
-        (game_root.join("assets.json"), {
+        (game_root.join("assets.json"), "assets", {
             let manifest = manifest.clone();
             let sprites = sprites.clone();
             Box::new(move || {
@@ -368,9 +384,16 @@ fn build_watcher(
             _ => return,
         }
         for path in &event.paths {
-            for (watched_path, invalidate) in &invalidators {
+            for (watched_path, kind, invalidate) in &invalidators {
                 if path == watched_path {
                     invalidate();
+                    // Emit AFTER invalidation so the frontend's re-fetch reads
+                    // fresh data, never the stale cache (the same ordering every
+                    // other watcher event uses). Generic over the table: a new
+                    // domain row emits without any per-domain emit code.
+                    if let Some(handle) = emit_slot.lock().unwrap().as_ref() {
+                        let _ = handle.emit(DATA_CHANGED_EVENT, *kind);
+                    }
                 }
             }
             // Any `.lua` change under a watched root (Scripts/ entity scripts OR

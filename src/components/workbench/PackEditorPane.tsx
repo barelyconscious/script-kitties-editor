@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { type EntityKind, useEntityVersions } from "@/lib/entities/dataVersion";
 import {
   type DrawRules,
   loadPacks,
@@ -25,6 +26,7 @@ import { useEnumValues } from "@/lib/registry";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { cn } from "@/lib/utils";
 import { useAutoSave } from "./autoSave";
+import { classifyExternalRecord } from "./dataRegistry";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
 
@@ -53,6 +55,12 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "notFound" }
   | { kind: "loaded" };
+
+// The pack tab reads two domains: the pack itself and the season list (for the
+// slots' season-weight options). A bump of either — an in-app save elsewhere or
+// an external disk edit routed through `data-changed` — re-fetches both.
+// Module scope = stable reference.
+const PACK_TAB_KINDS: readonly EntityKind[] = ["packs", "seasons"];
 
 function PackEditor({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -98,6 +106,69 @@ function PackEditor({ id }: { id: string }) {
   }, [id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
+
+  // Re-fetch the season options and reconcile THIS pack when either watched
+  // domain changes anywhere — an in-app save in another surface, or an external
+  // disk edit routed through `data-changed`. Same two-effect + trust-model
+  // wiring as SeasonEditorPane: the mount run is skipped (the load effect above
+  // owns the first fetch), season options always follow the fresh data, and the
+  // open record adopts silently when clean / warns when dirty.
+  const version = useEntityVersions(PACK_TAB_KINDS);
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const didInitialLoad = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger, not read in the body.
+  useEffect(() => {
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      return;
+    }
+    let cancelled = false;
+    Promise.all([loadPacks(), loadSeasons()])
+      .then(([packs, seasonList]) => {
+        if (cancelled) return;
+        setSeasons(seasonList);
+        const found = packs.find((p) => p.id === id) ?? null;
+        const adopt = (record: Pack | null) => {
+          setLoaded(record);
+          reset(record); // re-seed the draft (dropping history) to the disk truth
+          setState(record ? { kind: "loaded" } : { kind: "notFound" });
+        };
+        switch (classifyExternalRecord(found, loadedRef.current, dirtyRef.current)) {
+          case "none":
+            return;
+          case "adopt":
+            adopt(found);
+            return;
+          case "conflict":
+            if (
+              window.confirm(
+                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
+              )
+            ) {
+              adopt(found);
+            }
+            return;
+          case "missing":
+            if (
+              dirtyRef.current &&
+              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
+            ) {
+              return; // keep editing; a later save re-creates the record
+            }
+            adopt(null);
+            return;
+        }
+      })
+      // A transient refresh error keeps the current data — the load effect owns
+      // the pane's error state.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [version, id, reset]);
 
   const draftRef = useRef(draft);
   draftRef.current = draft;

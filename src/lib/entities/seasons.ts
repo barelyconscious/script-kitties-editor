@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { nonZeroStats } from "@/lib/stats";
+import { bumpEntityVersion } from "./dataVersion";
 
 /**
  * One member of a season: a creature referenced by `id`, plus the optional
@@ -84,4 +85,6 @@ export async function saveSeason(season: Season): Promise<void> {
   const biograms = (season.biograms ?? []).map(stripOverrides);
 
   await invoke("save_season", { season: { ...season, creatures, abilities, biograms } });
+  // Notify open lists/panes watching seasons to re-fetch.
+  bumpEntityVersion("seasons");
 }

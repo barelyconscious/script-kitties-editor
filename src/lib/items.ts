@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
+import { bumpEntityVersion } from "@/lib/entities/dataVersion";
 
 export type Item = {
   id: string;
@@ -70,6 +71,9 @@ export async function saveItemRow(row: ItemRow): Promise<void> {
   };
   await invoke("save_item", { item });
   await invoke("save_item_drop", { itemDrop });
+  // Notify open lists/panes watching the joined row's two sources to re-fetch.
+  bumpEntityVersion("items");
+  bumpEntityVersion("itemDrops");
 }
 
 // SINGLE SOURCE OF TRUTH for the item edit schema (the joined ItemRow).

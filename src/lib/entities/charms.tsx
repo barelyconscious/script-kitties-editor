@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { nonZeroStats, STAT_KEYS, STAT_META } from "@/lib/stats";
 import { cn } from "@/lib/utils";
+import { bumpEntityVersion } from "./dataVersion";
 
 export type Charm = {
   id: string;
@@ -38,6 +39,8 @@ export function loadCharms(): Promise<Charm[]> {
 export async function saveCharm(charm: Charm): Promise<void> {
   const stats = Object.fromEntries(nonZeroStats(charm.stats));
   await invoke("save_charm", { charm: { ...charm, stats } });
+  // Notify open lists/panes watching charms to re-fetch.
+  bumpEntityVersion("charms");
 }
 
 /**

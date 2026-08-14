@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dataDescriptorFor, hasDataPane, selectById } from "./dataRegistry";
+import { classifyExternalRecord, dataDescriptorFor, hasDataPane, selectById } from "./dataRegistry";
 import type { GameObjectType } from "./gameObjects";
 
 describe("dataDescriptorFor", () => {
@@ -54,5 +54,51 @@ describe("selectById", () => {
 
   it("returns null for an empty record set", () => {
     expect(selectById([], "a")).toBeNull();
+  });
+});
+
+describe("dataDescriptorFor kinds", () => {
+  it("each descriptor declares at least one watched entity kind", () => {
+    const types: GameObjectType[] = ["Ability", "Biogram", "Effect", "Item", "Charm"];
+    for (const t of types) {
+      const d = dataDescriptorFor(t);
+      expect(d?.kinds.length, t).toBeGreaterThan(0);
+    }
+  });
+
+  it("the item descriptor watches both sides of its join", () => {
+    expect(dataDescriptorFor("Item")?.kinds).toEqual(["items", "itemDrops"]);
+  });
+});
+
+describe("classifyExternalRecord", () => {
+  const record = { id: "a", name: "Alpha", range: 3 };
+
+  it("is 'none' when the fetched record equals the baseline (unchanged or own-save echo)", () => {
+    expect(classifyExternalRecord({ ...record }, record, false)).toBe("none");
+    // Content equality doubles as the echo filter even under unsaved edits.
+    expect(classifyExternalRecord({ ...record }, record, true)).toBe("none");
+  });
+
+  it("is 'adopt' when the record changed and the pane is clean", () => {
+    expect(classifyExternalRecord({ ...record, range: 5 }, record, false)).toBe("adopt");
+  });
+
+  it("is 'adopt' when there is no baseline yet (first data for this pane)", () => {
+    expect(classifyExternalRecord(record, null, false)).toBe("adopt");
+  });
+
+  it("is 'conflict' when the record changed under unsaved edits", () => {
+    expect(classifyExternalRecord({ ...record, range: 5 }, record, true)).toBe("conflict");
+  });
+
+  it("is 'missing' when the record no longer exists, regardless of dirtiness", () => {
+    expect(classifyExternalRecord(null, record, false)).toBe("missing");
+    expect(classifyExternalRecord(null, record, true)).toBe("missing");
+  });
+
+  it("compares structurally, not by reference", () => {
+    const clone = JSON.parse(JSON.stringify(record));
+    expect(classifyExternalRecord(clone, record, false)).toBe("none");
   });
 });

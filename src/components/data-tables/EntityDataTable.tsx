@@ -10,7 +10,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { bumpEntityVersion, entityKindForSaveCommand } from "@/lib/entities/dataVersion";
+import {
+  bumpEntityVersion,
+  type EntityKind,
+  entityKindForSaveCommand,
+  useEntityVersions,
+} from "@/lib/entities/dataVersion";
 import { cn } from "@/lib/utils";
 import { EntityEditDialog, type EntityField } from "./EntityEditDialog";
 
@@ -49,6 +54,7 @@ export function EntityDataTable<T extends { id: string }>({
   saveCommand,
   saveArgKey,
   onSave,
+  refreshKinds,
   entityLabel,
   columns,
   fields,
@@ -67,6 +73,14 @@ export function EntityDataTable<T extends { id: string }>({
   saveArgKey?: string;
   /** Custom save (e.g. to write back two records). Overrides command-based save. */
   onSave?: (updated: T) => Promise<void>;
+  /**
+   * The entity-version kinds whose bump should re-fetch the rows (an in-app save
+   * elsewhere, or an external disk edit routed through `data-changed`). Defaults
+   * to the kind derived from `saveCommand`; tables using a custom `load`/`onSave`
+   * (e.g. the items ⋈ drops join) must pass their kinds explicitly. Must be a
+   * stable reference (module scope), like `load`.
+   */
+  refreshKinds?: readonly EntityKind[];
   /** Singular, lowercase — used in titles and empty states, e.g. "ability". */
   entityLabel: string;
   columns: Column<T>[];
@@ -83,6 +97,20 @@ export function EntityDataTable<T extends { id: string }>({
   // setQuery is a stable state setter, so this context never needs to change.
   const columnCtx = useMemo<ColumnContext>(() => ({ setQuery }), []);
 
+  // The kinds whose version bump re-fetches the rows: explicit prop, else the
+  // one derived from saveCommand. Memoized for a stable array reference.
+  const kinds = useMemo<readonly EntityKind[]>(() => {
+    if (refreshKinds) return refreshKinds;
+    const kind = saveCommand ? entityKindForSaveCommand(saveCommand) : null;
+    return kind ? [kind] : [];
+  }, [refreshKinds, saveCommand]);
+  // Re-fetch when a watched kind is saved anywhere (another surface, or an
+  // external disk edit routed through `data-changed`) so the table never serves
+  // its mount-time rows forever. Re-runs keep the current rows on screen until
+  // fresh data lands — no loading flash (`rows` only gates the FIRST load).
+  const version = useEntityVersions(kinds);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger, not read in the body.
   useEffect(() => {
     let cancelled = false;
     const fetch = load ? load() : invoke<T[]>(loadCommand as string);
@@ -92,7 +120,7 @@ export function EntityDataTable<T extends { id: string }>({
     return () => {
       cancelled = true;
     };
-  }, [loadCommand, load]);
+  }, [loadCommand, load, version]);
 
   const filtered = useMemo(() => {
     if (!rows) return [];

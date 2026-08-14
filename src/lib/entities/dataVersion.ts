@@ -27,6 +27,46 @@
  * staleness sources at once. An own-save echoing back through the watcher just
  * causes a second bump — consumers re-fetch data equal to what they hold, so the
  * echo self-suppresses at the record level (no content registry needed).
+ *
+ * ── SCALING / KNOWN LANDMINES (read before optimizing, or if this feels slow) ──
+ *
+ * This design is deliberately COARSE and cheap-to-write, matching the sprite-name
+ * / palette precedent. It scales fine for the editor's realistic data sizes
+ * (hundreds of records per domain, a handful of open surfaces). The ceilings, and
+ * the ONE lever that removes them, are documented here so a future reader who
+ * trips a landmine knows it's a known trade-off, not a bug:
+ *
+ *  1. WHOLE-DOMAIN RE-FETCH, NOT PER-RECORD. A bump re-fetches the ENTIRE `get_*`
+ *     array and re-parses it across the IPC bridge — the changed record isn't
+ *     isolated. Cost per change ≈ O(domain size) × O(surfaces subscribed to that
+ *     kind). Imperceptible at hundreds of records; the first thing to feel slow at
+ *     tens of thousands.
+ *  2. `useAnyEntityVersion` AMPLIFIES. The Workbench object list re-fetches
+ *     `get_game_objects` (ALL domains) on ANY single entity change anywhere. It's
+ *     the most expensive consumer and hits the ceiling first.
+ *  3. DOUBLE-BUMP PER AUTO-SAVE. An auto-save fires TWO refresh waves: the in-app
+ *     {@link bumpEntityVersion}, then the disk write echoes back through the
+ *     watcher → `data-changed` → a second bump. A disk round-trip separates them,
+ *     so they do NOT coalesce. The echo is a CORRECTNESS no-op (content equality
+ *     via `classifyExternalRecord` catches it) but still pays a full
+ *     fetch + parse + `JSON.stringify` compare to DISCOVER it's a no-op. This is
+ *     the conscious trade-off vs. `scriptDiskSync`, which suppresses echoes BEFORE
+ *     re-fetching via a last-write map: simpler here (no registry), more redundant
+ *     work under active editing. Fine at small data; the scripts' pattern wins at
+ *     large data.
+ *  4. `window.confirm` (the dirty-editor conflict/deletion prompts in the panes)
+ *     is BLOCKING. A burst of external edits landing while several tabs are dirty
+ *     stacks sequential modal dialogs. Annoying, not broken — and identical to how
+ *     the existing script / GUI live-reload already behave, so it's consistent.
+ *
+ *  THE LEVER (do NOT build preemptively — reach for it the day a domain file gets
+ *  big enough to notice): carry the CHANGED IDS in the `data-changed` payload (the
+ *  backend already upserts by id, so it knows them) and have consumers PATCH their
+ *  local list instead of re-fetching the whole domain. That kills landmines #1 and
+ *  #2 together and is a localized change — payload shape + a consumer merge step —
+ *  that touches none of the subscription wiring here. Secondary levers: adopt the
+ *  scripts' suppress-before-fetch echo filter (#3); coalesce a burst of bumps into
+ *  one refresh on the next frame.
  */
 
 import { useSyncExternalStore } from "react";

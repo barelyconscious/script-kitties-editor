@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AbilitiesDataTable from "./data-tables/AbilitiesDataTable";
+import ArenaSurfacesDataTable from "./data-tables/ArenaSurfacesDataTable";
 import BiogramsDataTable from "./data-tables/BiogramsDataTable";
 import CharmsDataTable from "./data-tables/CharmsDataTable";
 import EffectsDataTable from "./data-tables/EffectsDataTable";
@@ -12,6 +13,7 @@ const TABLES = [
   { id: "charms", label: "Charms" },
   { id: "effects", label: "Effects" },
   { id: "items", label: "Items" },
+  { id: "surfaces", label: "Surfaces" },
 ] as const;
 
 type TableId = (typeof TABLES)[number]["id"];
@@ -46,6 +48,9 @@ export default function DataTables() {
       </TabsContent>
       <TabsContent value="items" className="min-h-0">
         <ItemsDataTable />
+      </TabsContent>
+      <TabsContent value="surfaces" className="min-h-0">
+        <ArenaSurfacesDataTable />
       </TabsContent>
     </Tabs>
   );

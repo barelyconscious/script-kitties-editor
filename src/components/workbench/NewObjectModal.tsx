@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useEnumValues } from "@/lib/registry";
 import { type GameObject, type GameObjectType, GROUP_LABELS, GROUP_ORDER } from "./gameObjects";
 import { createObject } from "./newObject";
 import {
@@ -81,6 +82,17 @@ export function NewObjectModal({
 
   const errors = useMemo(() => validateNewObject(form, objects), [form, objects]);
   const canSubmit = isValid(errors) && !busy;
+  // Arena surfaces pick their identity (the uppercase `kind`) from the `surfaces`
+  // Registry enum instead of a typed name → id. Offer only kinds not already
+  // defined, since a repeat kind would collide (surfaces upsert by kind).
+  const isArenaSurface = form.type === "ArenaSurface";
+  const surfaceKinds = useEnumValues("surfaces");
+  const availableKinds = useMemo(() => {
+    const used = new Set(
+      objects.filter((o) => o.objectType === "ArenaSurface").map((o) => o.id),
+    );
+    return surfaceKinds.filter((k) => !used.has(k));
+  }, [surfaceKinds, objects]);
   // Optional-script types (item/charm/creature) get an "attach a script" toggle;
   // the script-NAME input shows for intrinsic types or once the toggle is on.
   const scriptOptional = isScriptOptional(form.type);
@@ -149,11 +161,45 @@ export function NewObjectModal({
             </Select>
           </div>
 
+          {isArenaSurface && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-object-kind">Kind</Label>
+              <Select
+                value={form.id}
+                disabled={busy}
+                onValueChange={(v) =>
+                  setForm((f) => reduceForm(f, { kind: "surfaceKind", value: v }))
+                }
+              >
+                <SelectTrigger id="new-object-kind" className="w-full" aria-invalid={!!errors.id}>
+                  <SelectValue placeholder="Select a surface kind" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableKinds.length === 0 ? (
+                    <div className="px-2 py-1.5 text-muted-foreground text-sm">
+                      All registered kinds are defined.
+                    </div>
+                  ) : (
+                    availableKinds.map((k) => (
+                      <SelectItem key={k} value={k}>
+                        {k}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {errors.id && <p className="text-destructive text-xs">{errors.id}</p>}
+              <p className="text-muted-foreground text-xs">
+                Kinds come from the Registry. Add more there to offer new surfaces.
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-1.5">
             <Label htmlFor="new-object-name">Name</Label>
             <Input
               id="new-object-name"
-              autoFocus
+              autoFocus={!isArenaSurface}
               value={form.name}
               disabled={busy}
               onChange={(e) => {
@@ -168,21 +214,23 @@ export function NewObjectModal({
             {errors.name && <p className="text-destructive text-xs">{errors.name}</p>}
           </div>
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-object-id">ID</Label>
-            <Input
-              id="new-object-id"
-              value={form.id}
-              disabled={busy}
-              onChange={(e) => {
-                const value = e.currentTarget.value;
-                setForm((f) => reduceForm(f, { kind: "id", value }));
-              }}
-              placeholder="lower_snake_case"
-              aria-invalid={!!errors.id}
-            />
-            {errors.id && <p className="text-destructive text-xs">{errors.id}</p>}
-          </div>
+          {!isArenaSurface && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-object-id">ID</Label>
+              <Input
+                id="new-object-id"
+                value={form.id}
+                disabled={busy}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => reduceForm(f, { kind: "id", value }));
+                }}
+                placeholder="lower_snake_case"
+                aria-invalid={!!errors.id}
+              />
+              {errors.id && <p className="text-destructive text-xs">{errors.id}</p>}
+            </div>
+          )}
 
           {scriptOptional && (
             <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">

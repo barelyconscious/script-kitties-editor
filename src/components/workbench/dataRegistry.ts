@@ -1,5 +1,11 @@
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
 import { ABILITY_FIELDS, type Ability, loadAbilities, saveAbility } from "@/lib/entities/abilities";
+import {
+  ARENA_SURFACE_FIELDS,
+  type ArenaSurface,
+  loadArenaSurfaces,
+  saveArenaSurface,
+} from "@/lib/entities/arenaSurfaces";
 import { BIOGRAM_FIELDS, type Biogram, loadBiograms, saveBiogram } from "@/lib/entities/biograms";
 import { CHARM_WORKBENCH_FIELDS, type Charm, loadCharms, saveCharm } from "@/lib/entities/charms";
 import type { EntityKind } from "@/lib/entities/dataVersion";
@@ -64,6 +70,12 @@ const REGISTRY: Partial<Record<GameObjectType, DataDescriptor<{ id: string }>>> 
     load: loadCharms,
     save: saveCharm,
     kinds: ["charms"],
+  }),
+  ArenaSurface: descriptor<ArenaSurface>({
+    fields: ARENA_SURFACE_FIELDS,
+    load: loadArenaSurfaces,
+    save: saveArenaSurface,
+    kinds: ["arenaSurfaces"],
   }),
 };
 

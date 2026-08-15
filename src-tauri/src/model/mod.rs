@@ -41,6 +41,7 @@ pub enum GameObjectType {
     Creature,
     Season,
     Pack,
+    ArenaSurface,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,6 +91,28 @@ pub struct Effect {
     pub script: String,
     pub description: String,
     pub tags: Vec<String>,
+}
+
+/// One combat **arena surface** (`Data/arena_surfaces.json`) — a battlefield tile
+/// effect (burning ground, water, ice, poison, …) an ability's `CREATE_SURFACE`
+/// action lays down. The engine's `ArenaSurfaceDataTable` keys these by `kind`,
+/// which MUST match the uppercase `Surface.*` enum the C++ binds for Lua
+/// (`CombatResolver.cpp` — `surfaces::Frozen == "FROZEN"`), so `kind` is an
+/// uppercase token, not a lower_snake_case id like other entities. The runtime
+/// `FArenaSurface` also carries a `Duration` and a loaded Lua table, but neither
+/// is authored here: `Duration` is set at cast time and the table comes from the
+/// `script`. `script` is loaded via `LuaLoader::LoadTable`, which expects a
+/// factory function returning a table (not a bare table).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArenaSurface {
+    /// The uppercase surface kind (`FROZEN`, `BURNING`, …) — the identity key the
+    /// engine looks up. Unique within `arena_surfaces.json`.
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    pub sprite: String,
+    pub script: String,
 }
 
 #[derive(Serialize, Deserialize)]

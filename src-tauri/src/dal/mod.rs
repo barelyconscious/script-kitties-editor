@@ -13,12 +13,13 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     config::EditorConfig,
     model::{
-        Ability, AssetEntry, Biogram, Charm, Creature, Dlc, Effect, GuiFolder, Item, ItemDrop,
-        Pack, Palette, Season,
+        Ability, ArenaSurface, AssetEntry, Biogram, Charm, Creature, Dlc, Effect, GuiFolder, Item,
+        ItemDrop, Pack, Palette, Season,
     },
 };
 
 pub mod abilities;
+pub mod arena_surfaces;
 pub mod assets;
 pub mod biograms;
 pub mod charms;
@@ -101,6 +102,7 @@ pub struct Dal {
     pub(crate) item_drops: Cache<(), Arc<Vec<ItemDrop>>>,
     pub(crate) seasons: Cache<(), Arc<Vec<Season>>>,
     pub(crate) packs: Cache<(), Arc<Vec<Pack>>>,
+    pub(crate) arena_surfaces: Cache<(), Arc<Vec<ArenaSurface>>>,
     // The GUI color palette (name -> "r,g,b,a"), from Data/palette.json (stored on
     // disk as the engine's [{name,r,g,b,a}] array; dal::palette translates). A single
     // coarse cache unit under key `()`, like the per-domain caches above.
@@ -138,6 +140,8 @@ impl Dal {
         let item_drops: Cache<(), Arc<Vec<ItemDrop>>> = Cache::builder().max_capacity(1).build();
         let seasons: Cache<(), Arc<Vec<Season>>> = Cache::builder().max_capacity(1).build();
         let packs: Cache<(), Arc<Vec<Pack>>> = Cache::builder().max_capacity(1).build();
+        let arena_surfaces: Cache<(), Arc<Vec<ArenaSurface>>> =
+            Cache::builder().max_capacity(1).build();
         let palette: Cache<(), Arc<Palette>> = Cache::builder().max_capacity(1).build();
         let manifest: Cache<(), Arc<HashMap<String, AssetEntry>>> =
             Cache::builder().max_capacity(1).build();
@@ -153,8 +157,8 @@ impl Dal {
         let emit_slot: EmitSlot = Arc::new(Mutex::new(None));
         let watcher = build_watcher(
             &game_root, &abilities, &biograms, &charms, &creatures, &dlcs, &effects, &items,
-            &item_drops, &seasons, &packs, &palette, &manifest, &sprites, &scripts, &gui_tree,
-            &components, &emit_slot,
+            &item_drops, &seasons, &packs, &arena_surfaces, &palette, &manifest, &sprites, &scripts,
+            &gui_tree, &components, &emit_slot,
         )?;
 
         Ok(Self {
@@ -170,6 +174,7 @@ impl Dal {
             item_drops,
             seasons,
             packs,
+            arena_surfaces,
             palette,
             manifest,
             sprites,
@@ -199,6 +204,7 @@ impl Dal {
             &self.item_drops,
             &self.seasons,
             &self.packs,
+            &self.arena_surfaces,
             &self.palette,
             &self.manifest,
             &self.sprites,
@@ -224,6 +230,7 @@ impl Dal {
         self.item_drops.invalidate_all();
         self.seasons.invalidate_all();
         self.packs.invalidate_all();
+        self.arena_surfaces.invalidate_all();
         self.palette.invalidate_all();
         self.manifest.invalidate_all();
         self.sprites.invalidate_all();
@@ -265,6 +272,7 @@ fn build_watcher(
     item_drops: &Cache<(), Arc<Vec<ItemDrop>>>,
     seasons: &Cache<(), Arc<Vec<Season>>>,
     packs: &Cache<(), Arc<Vec<Pack>>>,
+    arena_surfaces: &Cache<(), Arc<Vec<ArenaSurface>>>,
     palette: &Cache<(), Arc<Palette>>,
     manifest: &Cache<(), Arc<HashMap<String, AssetEntry>>>,
     sprites: &Cache<String, Arc<Option<String>>>,
@@ -323,6 +331,10 @@ fn build_watcher(
         }),
         (data_dir.join("packs.json"), "packs", {
             let c = packs.clone();
+            Box::new(move || c.invalidate(&()))
+        }),
+        (data_dir.join("arena_surfaces.json"), "arenaSurfaces", {
+            let c = arena_surfaces.clone();
             Box::new(move || c.invalidate(&()))
         }),
         // The GUI palette lives under the already-watched Data/, so no new watch

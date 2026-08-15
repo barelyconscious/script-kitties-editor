@@ -19,6 +19,27 @@ import { creationDescriptorFor, deriveId, isOptionalScript } from "./newObject";
 export const ID_PATTERN = /^[a-z0-9_]+$/;
 
 /**
+ * Arena surfaces are the one exception to lower_snake_case ids: their identity is
+ * the uppercase `kind` the engine binds to Lua's `Surface` enum (`FROZEN`, …), so
+ * their "id" must be UPPER_SNAKE_CASE. Picked from the `surfaces` Registry rather
+ * than derived from the name.
+ */
+export const SURFACE_KIND_PATTERN = /^[A-Z0-9_]+$/;
+
+/**
+ * A display name derived from an uppercase surface kind: `FROZEN` → "Frozen",
+ * `DEEP_FREEZE` → "Deep Freeze". Seeds the Name field when a kind is picked.
+ */
+export function surfaceKindToName(kind: string): string {
+  return kind
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
  * The mutable form fields the modal tracks, plus the manual-edit flags that
  * freeze a field from auto-derivation once the user has typed into it.
  */
@@ -117,7 +138,11 @@ export type FormAction =
   | { kind: "id"; value: string }
   | { kind: "script"; value: string }
   | { kind: "attachScript"; value: boolean }
-  | { kind: "type"; value: GameObjectType };
+  | { kind: "type"; value: GameObjectType }
+  // ArenaSurface only: the kind (its identity) is picked from a registry select
+  // rather than derived from the name, so it gets its own action that seeds
+  // id/name/script together.
+  | { kind: "surfaceKind"; value: string };
 
 /**
  * Apply a field edit, cascading derivations downstream while honoring the
@@ -135,9 +160,24 @@ export function reduceForm(state: NewObjectFormState, action: FormAction): NewOb
   switch (action.kind) {
     case "name": {
       const name = action.value;
-      const id = state.idEdited ? state.id : deriveId(name);
+      // Surfaces never derive their id from the name (it's the kind, set via the
+      // "surfaceKind" action), so leave id untouched for them.
+      const id =
+        state.idEdited || state.type === "ArenaSurface" ? state.id : deriveId(name);
       const script = nextScript(state, state.type, id);
       return { ...state, name, id, script };
+    }
+    case "surfaceKind": {
+      const id = action.value;
+      // Freeze id from name-derivation and seed a friendly name + the script from
+      // the chosen kind.
+      return {
+        ...state,
+        id,
+        idEdited: true,
+        name: surfaceKindToName(id),
+        script: deriveScript(state.type, id),
+      };
     }
     case "id": {
       const id = action.value;
@@ -223,12 +263,18 @@ export function validateNewObject(
     errors.name = "Name is required.";
   }
 
+  // Surfaces use the uppercase kind pattern; every other type is lower_snake_case.
+  const isSurface = type === "ArenaSurface";
   if (id.length === 0) {
-    errors.id = "ID is required.";
-  } else if (!ID_PATTERN.test(id)) {
-    errors.id = "ID must be lower_snake_case (a–z, 0–9, underscore).";
+    errors.id = isSurface ? "Kind is required." : "ID is required.";
+  } else if (isSurface ? !SURFACE_KIND_PATTERN.test(id) : !ID_PATTERN.test(id)) {
+    errors.id = isSurface
+      ? "Kind must be UPPER_SNAKE_CASE (A–Z, 0–9, underscore)."
+      : "ID must be lower_snake_case (a–z, 0–9, underscore).";
   } else if (objects.some((o) => o.objectType === type && o.id === id)) {
-    errors.id = `A ${type.toLowerCase()} with id "${id}" already exists.`;
+    errors.id = isSurface
+      ? `A surface with kind "${id}" already exists.`
+      : `A ${type.toLowerCase()} with id "${id}" already exists.`;
   }
 
   // Validate the script only when one will actually be attached: an optional

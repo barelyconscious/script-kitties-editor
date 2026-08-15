@@ -1,4 +1,5 @@
 use crate::commands::abilities::{get_abilities, save_ability};
+use crate::commands::arena_surfaces::{get_arena_surfaces, save_arena_surface};
 use crate::commands::assets::update_asset_manifest;
 use crate::commands::biograms::{get_biograms, save_biogram};
 use crate::commands::charms::{get_charms, save_charm};
@@ -227,6 +228,8 @@ pub fn run() {
             save_season,
             get_packs,
             save_pack,
+            get_arena_surfaces,
+            save_arena_surface,
             get_palette,
             save_palette,
             get_registry,

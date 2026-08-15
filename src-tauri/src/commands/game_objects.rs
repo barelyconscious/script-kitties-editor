@@ -13,6 +13,7 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
     let items = dal.get_items()?;
     let seasons = dal.get_seasons()?;
     let packs = dal.get_packs()?;
+    let arena_surfaces = dal.get_arena_surfaces()?;
 
     let mut all = Vec::with_capacity(
         abilities.len()
@@ -22,7 +23,8 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             + effects.len()
             + items.len()
             + seasons.len()
-            + packs.len(),
+            + packs.len()
+            + arena_surfaces.len(),
     );
 
     for a in abilities.iter() {
@@ -114,6 +116,19 @@ pub fn get_game_objects(dal: State<Dal>) -> Result<Vec<GameObject>, String> {
             // Packs are script-less.
             script: String::new(),
             description: p.description.clone(),
+        });
+    }
+
+    for s in arena_surfaces.iter() {
+        all.push(GameObject {
+            object_type: GameObjectType::ArenaSurface,
+            // Surfaces have no lower_snake_case id; their identity is the uppercase
+            // `kind`, which the frontend maps back onto its generic `id` field.
+            id: s.kind.clone(),
+            name: s.name.clone(),
+            sprite: s.sprite.clone(),
+            script: s.script.clone(),
+            description: s.description.clone(),
         });
     }
 

@@ -86,7 +86,8 @@ export type EntityKind =
   | "items"
   | "itemDrops"
   | "seasons"
-  | "packs";
+  | "packs"
+  | "arenaSurfaces";
 
 /** Per-kind monotonic version, bumped on every save of that kind. */
 const versions: Record<EntityKind, number> = {
@@ -100,6 +101,7 @@ const versions: Record<EntityKind, number> = {
   itemDrops: 0,
   seasons: 0,
   packs: 0,
+  arenaSurfaces: 0,
 };
 
 /** Whether an arbitrary string (e.g. a `data-changed` payload) names a watched kind. */
@@ -147,6 +149,8 @@ export function entityKindForSaveCommand(command: string): EntityKind | null {
       return "seasons";
     case "save_pack":
       return "packs";
+    case "save_arena_surface":
+      return "arenaSurfaces";
     default:
       return null;
   }

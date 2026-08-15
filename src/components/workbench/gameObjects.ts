@@ -16,7 +16,8 @@ export type GameObjectType =
   | "Item"
   | "Creature"
   | "Season"
-  | "Pack";
+  | "Pack"
+  | "ArenaSurface";
 
 /** Mirrors Rust `GameObject` (camelCase fields). */
 export type GameObject = {
@@ -39,6 +40,7 @@ export const GROUP_ORDER: readonly GameObjectType[] = [
   "Ability",
   "Biogram",
   "Effect",
+  "ArenaSurface",
   "Item",
   "Charm",
 ];
@@ -51,6 +53,7 @@ export const GROUP_LABELS: Record<GameObjectType, string> = {
   Ability: "Abilities",
   Biogram: "Biograms",
   Effect: "Effects",
+  ArenaSurface: "Arena Surfaces",
   Item: "Items",
   Charm: "Charms",
 };

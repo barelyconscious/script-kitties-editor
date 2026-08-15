@@ -10,6 +10,7 @@ import {
   type NewObjectFormState,
   reduceForm,
   showScriptName,
+  surfaceKindToName,
   validateNewObject,
 } from "./newObjectForm";
 
@@ -300,5 +301,53 @@ describe("policy coverage", () => {
       const s = initialFormState(t);
       expect(s.type, t).toBe(t);
     }
+  });
+});
+
+describe("arena surfaces", () => {
+  it("title-cases a kind into a display name", () => {
+    expect(surfaceKindToName("FROZEN")).toBe("Frozen");
+    expect(surfaceKindToName("DEEP_FREEZE")).toBe("Deep Freeze");
+    expect(surfaceKindToName("")).toBe("");
+  });
+
+  it("surfaceKind seeds id/name/script and freezes id from name-derivation", () => {
+    const start = initialFormState("ArenaSurface");
+    const picked = reduceForm(start, { kind: "surfaceKind", value: "FROZEN" });
+    expect(picked).toMatchObject({
+      id: "FROZEN",
+      name: "Frozen",
+      script: "surface_frozen.lua",
+      idEdited: true,
+    });
+    // Editing the name afterward must NOT re-derive the (uppercase) id.
+    const renamed = reduceForm(picked, { kind: "name", value: "Deep Freeze" });
+    expect(renamed.id).toBe("FROZEN");
+    expect(renamed.name).toBe("Deep Freeze");
+  });
+
+  it("never lower-cases a surface id from a typed name", () => {
+    // Even before a kind is picked, a name edit leaves the surface id blank rather
+    // than deriving a lower_snake_case id from the name.
+    const s = reduceForm(initialFormState("ArenaSurface"), { kind: "name", value: "Frozen" });
+    expect(s.id).toBe("");
+  });
+
+  it("validates the kind as UPPER_SNAKE_CASE and flags collisions", () => {
+    const base: NewObjectFormState = {
+      ...initialFormState("ArenaSurface"),
+      name: "Frozen",
+      id: "FROZEN",
+      script: "surface_frozen.lua",
+    };
+    // A clean, unused kind passes.
+    expect(isValid(validateNewObject(base, []))).toBe(true);
+
+    // A lowercase kind fails the pattern.
+    expect(validateNewObject({ ...base, id: "frozen" }, []).id).toMatch(/UPPER_SNAKE_CASE/);
+
+    // A kind already used by another surface collides.
+    const existing = obj({ objectType: "ArenaSurface", id: "FROZEN", script: "surface_frozen.lua" });
+    expect(validateNewObject(base, [existing]).id).toMatch(/already exists/);
   });
 });

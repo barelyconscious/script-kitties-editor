@@ -121,12 +121,10 @@ end${WS_BEFORE_RETURN}return Item\r\n`;
 // the engine, so this is a forward-looking stub rather than a settled contract.
 export const ARENA_SURFACE_SCRIPT_TEMPLATE = `return function()
     return {
-        -- Called when the surface is first placed on a tile. (engine hook: WIP)
-        onSurfaceApplied = function(self)
+        onSurfaceApplied = function()
         end,
 
-        -- Called when a creature steps onto the surface. (engine hook: WIP)
-        onSteppedOn = function(self, creature)
+        onSteppedOn = function()
         end,
     }
 end\r\n`;

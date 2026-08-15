@@ -30,19 +30,20 @@ export type GameObject = {
 };
 
 /**
- * Display order of the object-list groups. Creatures lead (the headline editor),
- * then the script-bearing entities, with Charms (data-only today) last.
+ * Display order of the object-list groups — alphabetical by group label, so the
+ * list and both "New object" pickers read A→Z (Abilities, Arena Surfaces,
+ * Biograms, …). Drives the Workbench list order AND the New Object type dropdowns.
  */
 export const GROUP_ORDER: readonly GameObjectType[] = [
-  "Creature",
-  "Season",
-  "Pack",
   "Ability",
-  "Biogram",
-  "Effect",
   "ArenaSurface",
-  "Item",
+  "Biogram",
   "Charm",
+  "Creature",
+  "Effect",
+  "Item",
+  "Pack",
+  "Season",
 ];
 
 /** Human-friendly plural label for each group header. */

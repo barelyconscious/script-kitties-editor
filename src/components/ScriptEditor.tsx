@@ -78,9 +78,15 @@ export function ScriptEditor({
       onChangeRef.current(editor.getValue());
     });
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      onSaveRef.current?.();
-    });
+    // Only CLAIM ⌘S/Ctrl+S when this editor actually has a save handler. Monaco
+    // consumes (preventDefault + stopPropagation) any key it binds a command to,
+    // so binding an onSave-less no-op here would swallow the shortcut and block a
+    // surrounding window-level Save handler from ever seeing it.
+    if (onSaveRef.current) {
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        onSaveRef.current?.();
+      });
+    }
 
     return () => {
       changeSub.dispose();

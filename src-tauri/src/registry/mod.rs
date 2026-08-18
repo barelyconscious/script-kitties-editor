@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
 // Editor-owned, user-tweakable enums (tags, ability shapes, rarities, biomes,
-// damage types). Persisted next to editor.conf.json so the values survive
+// spell schools). Persisted next to editor.conf.json so the values survive
 // restarts. NOT (yet) read by the game — this is the editor's source of truth
 // for the dropdowns; a later step can point the game's Lua at this file.
 const REGISTRY_PATH: &str = "./editor.registry.json";
@@ -34,8 +34,8 @@ pub struct Registry {
     pub rarities: Vec<RegistryEntry>,
     #[serde(default = "default_biomes")]
     pub biomes: Vec<RegistryEntry>,
-    #[serde(default = "default_damage_types")]
-    pub damage_types: Vec<RegistryEntry>,
+    #[serde(default = "default_spell_schools")]
+    pub spell_schools: Vec<RegistryEntry>,
     /// Card rarity tiers for gacha draws. Editor-tweakable (unlike `rarities`,
     /// the fixed item tiers) since the gacha tiers are a design knob.
     #[serde(default = "default_creature_rarities")]
@@ -86,7 +86,7 @@ fn default_registry() -> Registry {
         ability_shapes: default_ability_shapes(),
         rarities: default_rarities(),
         biomes: default_biomes(),
-        damage_types: default_damage_types(),
+        spell_schools: default_spell_schools(),
         creature_rarities: default_creature_rarities(),
     }
 }
@@ -156,13 +156,15 @@ fn default_biomes() -> Vec<RegistryEntry> {
     ]
 }
 
-fn default_damage_types() -> Vec<RegistryEntry> {
+fn default_spell_schools() -> Vec<RegistryEntry> {
     vec![
         entry("PHYSICAL", "Physical damage."),
         entry("FIRE", "Fire damage."),
         entry("WATER", "Water damage."),
         entry("ELECTRIC", "Electric damage."),
         entry("POISON", "Poison damage."),
+        entry("FROST", "Frost damage."),
+        entry("TECHNICAL", "Technical damage."),
     ]
 }
 

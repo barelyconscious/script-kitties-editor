@@ -129,8 +129,8 @@ describe("GAME_API merged surface coverage", () => {
     }
   });
 
-  it("includes the full DamageType enum values", () => {
-    const dt = top("DamageType");
+  it("includes the full SpellSchool enum values", () => {
+    const dt = top("SpellSchool");
     const values = (dt?.members ?? []).map((m) => m.name);
     for (const v of ["PHYSICAL", "FIRE", "WATER", "ELECTRIC", "POISON", "FROST", "TECHNICAL"]) {
       expect(values).toContain(v);

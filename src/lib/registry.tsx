@@ -28,7 +28,7 @@ export type Registry = {
   abilityShapes: RegistryEntry[];
   rarities: RegistryEntry[];
   biomes: RegistryEntry[];
-  damageTypes: RegistryEntry[];
+  spellSchools: RegistryEntry[];
   /** Card rarity tiers for gacha draws (editable, unlike `rarities`). */
   creatureRarities: RegistryEntry[];
 };
@@ -72,7 +72,7 @@ export const DEFAULT_REGISTRY: Registry = {
   abilityShapes: ["POINT", "SPHERE", "CONE", "SELF"].map(v),
   rarities: ["POOR", "COMMON", "UNCOMMON", "RARE", "EPIC", "UNIQUE"].map(v),
   biomes: ["DESERT", "FOREST", "MOUNTAINS", "PLAINS", "SWAMP"].map(v),
-  damageTypes: ["PHYSICAL", "FIRE", "WATER", "ELECTRIC", "POISON"].map(v),
+  spellSchools: ["PHYSICAL", "FIRE", "WATER", "ELECTRIC", "POISON", "FROST", "TECHNICAL"].map(v),
   creatureRarities: ["COMMON", "UNCOMMON", "RARE", "MYTHIC"].map(v),
 };
 

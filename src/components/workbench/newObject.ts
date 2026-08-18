@@ -69,7 +69,7 @@ export function typeStem(type: GameObjectType, id: string): string {
 // ---------------------------------------------------------------------------
 
 export const ABILITY_SCRIPT_TEMPLATE = `return function(self, combat)
-    combat.targets[1]:takeDamage(1, DamageType.PHYSICAL)
+    combat.targets[1]:takeDamage(1, SpellSchool.PHYSICAL)
 end\r\n`;
 
 export const BIOGRAM_SCRIPT_TEMPLATE = `return function(self, combat, actions)

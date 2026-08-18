@@ -64,6 +64,12 @@ export interface TabWorkspaceProps {
    * a manual reload.
    */
   onSaved?: () => void;
+  /**
+   * Fired when a script is attached to this tab's previously script-less object,
+   * with the new script file name, so the shell can update this tab's
+   * `scriptName` (which flips the script pane into the editor).
+   */
+  onScriptAttached: (scriptName: string) => void;
 }
 
 /** How long a "Saved" confirmation lingers before auto-clearing. */
@@ -92,6 +98,7 @@ export function TabWorkspace({
   alsoOpenElsewhere,
   onDirtyChange,
   onSaved,
+  onScriptAttached,
 }: TabWorkspaceProps) {
   // Every type opens with the DATA pane visible by default so an object's fields
   // are immediately editable. Creatures additionally get a wider pane (the full
@@ -422,7 +429,12 @@ export function TabWorkspace({
                           creatureView === "chart" && "hidden",
                         )}
                       >
-                        <ScriptPane scriptName={tab.scriptName} />
+                        <ScriptPane
+                          scriptName={tab.scriptName}
+                          objectType={tab.objectType}
+                          objectId={tab.id}
+                          onScriptAttached={onScriptAttached}
+                        />
                       </div>
                       {creatureView === "chart" && <CreatureChartPane />}
                     </section>
@@ -444,7 +456,12 @@ export function TabWorkspace({
                       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
                       aria-label="Script"
                     >
-                      <ScriptPane scriptName={tab.scriptName} />
+                      <ScriptPane
+                        scriptName={tab.scriptName}
+                        objectType={tab.objectType}
+                        objectId={tab.id}
+                        onScriptAttached={onScriptAttached}
+                      />
                     </section>
                   </>
                 )}

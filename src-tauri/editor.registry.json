@@ -204,5 +204,27 @@
       "value": "MYTHIC",
       "description": "A premium rare creature card."
     }
+  ],
+  "surfaces": [
+    {
+      "value": "BURNING",
+      "description": "Fiery ground that burns creatures standing on it."
+    },
+    {
+      "value": "WET",
+      "description": "Soaked ground; interacts with fire and electricity."
+    },
+    {
+      "value": "ELECTRIFIED",
+      "description": "Charged ground that shocks creatures on it."
+    },
+    {
+      "value": "POISONED",
+      "description": "Toxic ground that poisons creatures on it."
+    },
+    {
+      "value": "FROZEN",
+      "description": "Icy ground that chills or freezes creatures on it."
+    }
   ]
 }

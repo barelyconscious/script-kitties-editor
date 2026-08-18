@@ -51,8 +51,8 @@ const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string; readOnly?:
     readOnly: true,
   },
   {
-    key: "damageTypes",
-    title: "Damage Types",
+    key: "spellSchools",
+    title: "Spell Schools",
     blurb: "Referenced by Lua scripts. Fixed by the game.",
     readOnly: true,
   },
@@ -60,7 +60,7 @@ const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string; readOnly?:
 
 /**
  * The Registry tool: edit the tweakable enums (tags, ability shapes, rarities,
- * biomes, damage types) that drive the editor's dropdowns. Values + descriptions
+ * biomes, spell schools) that drive the editor's dropdowns. Values + descriptions
  * are persisted in an editor-owned config file (editor.registry.json) via the
  * backend. Editing here updates every form's dropdown live on save.
  */

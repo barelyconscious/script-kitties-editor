@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { NAV_RAIL_TOOLS, NavRail, type NavRailTool } from "./components/NavRail";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { useDataLiveReload } from "./components/useDataLiveReload";
 import { useSpritesLiveReload } from "./components/useSpritesLiveReload";
 import { usePreference } from "./lib/preferences";
 import { RegistryProvider } from "./lib/registry";
@@ -18,6 +19,12 @@ function App() {
   // listener clears the shared sprite cache on a `sprites-changed` event so every
   // consumer (object list, sprite picker, data tables, XGUI preview) re-fetches.
   useSpritesLiveReload();
+
+  // App-wide: keep entity data in sync with external edits to the game's data
+  // files. One listener routes a `data-changed` event into the entity version
+  // store (and the palette / sprite-name caches), so every surface subscribed
+  // via `useEntityVersion` re-fetches — the same signal in-app saves fire.
+  useDataLiveReload();
 
   // Whether the Workbench's object-list pane is collapsed. Held in the central
   // preferences layer so it survives tool switches now and can move to

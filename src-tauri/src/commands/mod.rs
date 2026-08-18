@@ -1,4 +1,5 @@
 pub mod abilities;
+pub mod arena_surfaces;
 pub mod assets;
 pub mod biograms;
 pub mod charms;

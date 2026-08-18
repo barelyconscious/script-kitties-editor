@@ -40,6 +40,11 @@ const SECTIONS: { key: RegistryEnumKey; title: string; blurb: string; readOnly?:
     blurb: "Card rarity tiers for gacha draws (low → high).",
   },
   {
+    key: "surfaces",
+    title: "Arena Surfaces",
+    blurb: "Kinds chosen when authoring a combat surface. Must match the game's Surface enum.",
+  },
+  {
     key: "biomes",
     title: "Biomes",
     blurb: "World biomes for item drops. Fixed by the game.",

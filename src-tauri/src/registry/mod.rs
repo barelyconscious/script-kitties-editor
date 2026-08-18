@@ -40,6 +40,12 @@ pub struct Registry {
     /// the fixed item tiers) since the gacha tiers are a design knob.
     #[serde(default = "default_creature_rarities")]
     pub creature_rarities: Vec<RegistryEntry>,
+    /// Arena-surface kinds (`FROZEN`, `BURNING`, …) — the uppercase tokens an
+    /// `arena_surfaces.json` entry's `kind` is chosen from. These MUST match the
+    /// engine's hardcoded `Surface.*` Lua enum (`CombatResolver.cpp`), so adding a
+    /// new surface kind here is only half the job until the engine grows it too.
+    #[serde(default = "default_surfaces")]
+    pub surfaces: Vec<RegistryEntry>,
 }
 
 /// Load the registry, creating it with defaults on first run. A malformed file
@@ -88,6 +94,7 @@ fn default_registry() -> Registry {
         biomes: default_biomes(),
         spell_schools: default_spell_schools(),
         creature_rarities: default_creature_rarities(),
+        surfaces: default_surfaces(),
     }
 }
 
@@ -175,5 +182,18 @@ fn default_creature_rarities() -> Vec<RegistryEntry> {
         entry("UNCOMMON", "Uncommon"),
         entry("RARE", "Rare."),
         entry("MYTHIC", "Mythic"),
+    ]
+}
+
+// The uppercase surface kinds the engine binds to Lua's `Surface` enum
+// (CombatResolver.cpp). Mirror those exactly so the editor's picker never offers
+// a kind the runtime can't resolve.
+fn default_surfaces() -> Vec<RegistryEntry> {
+    vec![
+        entry("BURNING", "Fiery ground that burns creatures standing on it."),
+        entry("WET", "Soaked ground; interacts with fire and electricity."),
+        entry("ELECTRIFIED", "Charged ground that shocks creatures on it."),
+        entry("POISONED", "Toxic ground that poisons creatures on it."),
+        entry("FROZEN", "Icy ground that chills or freezes creatures on it."),
     ]
 }

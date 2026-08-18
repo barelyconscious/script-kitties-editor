@@ -78,9 +78,9 @@ describe("groupObjects", () => {
     obj({ objectType: "Charm", id: "luck", name: "Lucky Charm" }),
   ];
 
-  it("groups objects into GROUP_ORDER, Creatures first", () => {
+  it("groups objects into GROUP_ORDER, alphabetical by label", () => {
     const groups = groupObjects(objects, "");
-    expect(groups.map((g) => g.type)).toEqual(["Creature", "Ability", "Charm"]);
+    expect(groups.map((g) => g.type)).toEqual(["Ability", "Charm", "Creature"]);
   });
 
   it("sorts within a group by name", () => {
@@ -97,7 +97,7 @@ describe("groupObjects", () => {
   it("drops groups that are empty after filtering", () => {
     const groups = groupObjects(objects, "bit");
     // "bit" matches Bite (Ability) and Bit Lynx / bitlynx (Creature) only.
-    expect(groups.map((g) => g.type)).toEqual(["Creature", "Ability"]);
+    expect(groups.map((g) => g.type)).toEqual(["Ability", "Creature"]);
     expect(groups.find((g) => g.type === "Creature")?.objects).toHaveLength(1);
     expect(groups.find((g) => g.type === "Ability")?.objects).toHaveLength(1);
   });

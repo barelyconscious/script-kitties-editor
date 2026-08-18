@@ -22,6 +22,7 @@ import {
 import { useHistoryState } from "@/lib/useHistoryState";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
+import { classifyExternalRecord } from "./dataRegistry";
 import { StatOverridesGrid } from "./StatOverridesGrid";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
@@ -81,6 +82,9 @@ function SeasonEditor({ id }: { id: string }) {
   const abilitiesVersion = useEntityVersion("abilities");
   const creaturesVersion = useEntityVersion("creatures");
   const biogramsVersion = useEntityVersion("biograms");
+  // Also watch the season's OWN domain, so an external edit to seasons.json
+  // (routed through `data-changed`) reconciles this record, not just the pickers.
+  const seasonsVersion = useEntityVersion("seasons");
 
   // Portal target for the sprite pickers' popovers so they scroll within this
   // pane rather than overflowing it — same pattern as CreatureIdentityFields.
@@ -125,11 +129,21 @@ function SeasonEditor({ id }: { id: string }) {
     };
   }, [id, reset]);
 
-  // Refresh ONLY the picker populations when a watched entity is saved anywhere.
-  // Kept separate from the load effect above so a bump never re-runs `reset` and
-  // discards unsaved season edits. The mount run is skipped — the effect above
-  // already did the first load; this fires only on subsequent version bumps.
+  // Refresh the picker populations when a watched entity is saved anywhere, and
+  // reconcile THIS season against a fresh read of its own domain. Kept separate
+  // from the load effect above so a bump never blindly re-runs `reset` and
+  // discards unsaved season edits — the reconcile below decides, using the
+  // shared trust model (see `classifyExternalRecord`): an unchanged/echoed
+  // record is a no-op, a clean pane silently adopts, a dirty pane is warned.
+  // The mount run is skipped — the effect above already did the first load;
+  // this fires only on subsequent version bumps.
   const didInitialLoad = useRef(false);
+  // Refs so the version-keyed effect reads the latest baseline/dirtiness
+  // without re-running on every keystroke. (`dirty` is derived below; the ref
+  // assignment there keeps this effect's read fresh.)
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  const dirtyRef = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: versions are re-run triggers, not read in the body.
   useEffect(() => {
     if (!didInitialLoad.current) {
@@ -138,11 +152,12 @@ function SeasonEditor({ id }: { id: string }) {
     }
     let cancelled = false;
     Promise.all([
+      loadSeasons(),
       loadCreatures(),
       invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
       loadBiograms(),
     ])
-      .then(([creatures, abil, biog]) => {
+      .then(([seasons, creatures, abil, biog]) => {
         if (cancelled) return;
         setPopulation(creatures);
         setAbilities(
@@ -154,6 +169,37 @@ function SeasonEditor({ id }: { id: string }) {
           })),
         );
         setBiograms(biog);
+        const found = seasons.find((s) => s.id === id) ?? null;
+        const adopt = (record: Season | null) => {
+          setLoaded(record);
+          reset(record); // re-seed the draft (dropping history) to the disk truth
+          setState(record ? { kind: "loaded" } : { kind: "notFound" });
+        };
+        switch (classifyExternalRecord(found, loadedRef.current, dirtyRef.current)) {
+          case "none":
+            return;
+          case "adopt":
+            adopt(found);
+            return;
+          case "conflict":
+            if (
+              window.confirm(
+                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
+              )
+            ) {
+              adopt(found);
+            }
+            return;
+          case "missing":
+            if (
+              dirtyRef.current &&
+              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
+            ) {
+              return; // keep editing; a later save re-creates the record
+            }
+            adopt(null);
+            return;
+        }
       })
       // A transient refresh error just keeps the current lists — the load effect
       // owns the pane's error state.
@@ -161,9 +207,11 @@ function SeasonEditor({ id }: { id: string }) {
     return () => {
       cancelled = true;
     };
-  }, [abilitiesVersion, creaturesVersion, biogramsVersion]);
+  }, [abilitiesVersion, creaturesVersion, biogramsVersion, seasonsVersion, id, reset]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
+  // Feed the refresh effect's ref (declared above the effect, derived here).
+  dirtyRef.current = dirty;
 
   const draftRef = useRef(draft);
   draftRef.current = draft;

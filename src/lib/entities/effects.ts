@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EntityField } from "@/components/data-tables/EntityEditDialog";
+import { bumpEntityVersion } from "./dataVersion";
 
 export type Effect = {
   id: string;
@@ -28,4 +29,6 @@ export function loadEffects(): Promise<Effect[]> {
 
 export async function saveEffect(effect: Effect): Promise<void> {
   await invoke("save_effect", { effect });
+  // Notify open lists/panes watching effects to re-fetch.
+  bumpEntityVersion("effects");
 }

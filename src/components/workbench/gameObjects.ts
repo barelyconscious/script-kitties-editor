@@ -16,7 +16,8 @@ export type GameObjectType =
   | "Item"
   | "Creature"
   | "Season"
-  | "Pack";
+  | "Pack"
+  | "ArenaSurface";
 
 /** Mirrors Rust `GameObject` (camelCase fields). */
 export type GameObject = {
@@ -29,18 +30,20 @@ export type GameObject = {
 };
 
 /**
- * Display order of the object-list groups. Creatures lead (the headline editor),
- * then the script-bearing entities, with Charms (data-only today) last.
+ * Display order of the object-list groups — alphabetical by group label, so the
+ * list and both "New object" pickers read A→Z (Abilities, Arena Surfaces,
+ * Biograms, …). Drives the Workbench list order AND the New Object type dropdowns.
  */
 export const GROUP_ORDER: readonly GameObjectType[] = [
-  "Creature",
-  "Season",
-  "Pack",
   "Ability",
+  "ArenaSurface",
   "Biogram",
+  "Charm",
+  "Creature",
   "Effect",
   "Item",
-  "Charm",
+  "Pack",
+  "Season",
 ];
 
 /** Human-friendly plural label for each group header. */
@@ -51,6 +54,7 @@ export const GROUP_LABELS: Record<GameObjectType, string> = {
   Ability: "Abilities",
   Biogram: "Biograms",
   Effect: "Effects",
+  ArenaSurface: "Arena Surfaces",
   Item: "Items",
   Charm: "Charms",
 };

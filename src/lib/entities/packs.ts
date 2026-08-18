@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { bumpEntityVersion } from "./dataVersion";
 
 /**
  * The weighted draw configuration for one pack slot: which seasons can be drawn
@@ -43,4 +44,6 @@ export function loadPacks(): Promise<Pack[]> {
  */
 export async function savePack(pack: Pack): Promise<void> {
   await invoke("save_pack", { pack });
+  // Notify open lists/panes watching packs to re-fetch.
+  bumpEntityVersion("packs");
 }

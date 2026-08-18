@@ -2,8 +2,13 @@ import { Sparkles } from "lucide-react";
 import { type Column, EntityDataTable } from "@/components/data-tables/EntityDataTable";
 import { Sprite } from "@/components/Sprite";
 import { CHARM_FIELDS, type Charm, saveCharm } from "@/lib/entities/charms";
+import type { EntityKind } from "@/lib/entities/dataVersion";
 import { nonZeroStats, STAT_META, signed } from "@/lib/stats";
 import { cn } from "@/lib/utils";
+
+// Charms save through the typed `saveCharm` (no saveCommand to derive a kind
+// from), so the watched kind is explicit. Module scope = stable reference.
+const CHARM_KINDS: readonly EntityKind[] = ["charms"];
 
 /** Compact icon badges for a charm's non-zero stats, e.g. "+3 ⚔  -1 🛡". */
 function StatBadges({ stats }: { stats: Record<string, number> }) {
@@ -54,6 +59,7 @@ export default function CharmsDataTable() {
     <EntityDataTable<Charm>
       loadCommand="get_charms"
       onSave={saveCharm}
+      refreshKinds={CHARM_KINDS}
       entityLabel="charm"
       searchPlaceholder="Filter by name or stat…"
       columns={COLUMNS}

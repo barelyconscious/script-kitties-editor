@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { type Creature, saveCreature } from "@/lib/creature";
 import { type Ability, saveAbility } from "@/lib/entities/abilities";
+import { type ArenaSurface, saveArenaSurface } from "@/lib/entities/arenaSurfaces";
 import { type Biogram, saveBiogram } from "@/lib/entities/biograms";
 import { type Charm, saveCharm } from "@/lib/entities/charms";
 import { type Effect, saveEffect } from "@/lib/entities/effects";
@@ -112,6 +113,21 @@ export const ITEM_SCRIPT_TEMPLATE = `local Item = {}
 function Item:onUse(creature)
     -- your code here
 end${WS_BEFORE_RETURN}return Item\r\n`;
+
+// Arena surfaces load their script via the engine's `LuaLoader::LoadTable`, which
+// requires the chunk to return a FACTORY FUNCTION that returns a table — not a
+// bare table (unlike the Effect template above). The hook names mirror the C++
+// `FArenaSurface::OnSurfaceApplied` / `OnSteppedOn`, which are still WIP (NYI) in
+// the engine, so this is a forward-looking stub rather than a settled contract.
+export const ARENA_SURFACE_SCRIPT_TEMPLATE = `return function()
+    return {
+        onSurfaceApplied = function()
+        end,
+
+        onSteppedOn = function()
+        end,
+    }
+end\r\n`;
 
 // Charms had no script in the predecessor editor (the field is new), so there is
 // no byte-for-byte template to copy. This is a minimal, table-returning stub the
@@ -297,6 +313,31 @@ const CREATURE_DESCRIPTOR: CreationDescriptor<Creature> = {
   save: saveCreature,
 };
 
+// A surface's files are named `surface_<lowercased kind>` (e.g. kind "FROZEN" →
+// surface_frozen.lua / .png). The stem lowercases the kind because filenames are
+// lowercase even though the kind identity is uppercase.
+const surfaceStem = (id: string): string => `surface_${id.toLowerCase()}`;
+
+const ARENA_SURFACE_DESCRIPTOR: CreationDescriptor<ArenaSurface> = {
+  // Surfaces always get a fresh per-surface script (intrinsic, like effects), but
+  // in the factory-function form the engine's LoadTable requires.
+  scriptPolicy: {
+    kind: "create",
+    deriveName: (id) => `${surfaceStem(id)}.lua`,
+    template: ARENA_SURFACE_SCRIPT_TEMPLATE,
+  },
+  makeDefault: ({ id, name, script }) => ({
+    // `id` IS the uppercase kind (see the ArenaSurface type); saveArenaSurface maps
+    // it back to the wire `kind`.
+    id,
+    name,
+    sprite: `${surfaceStem(id)}.png`,
+    script: script ?? `${surfaceStem(id)}.lua`,
+    description: "",
+  }),
+  save: saveArenaSurface,
+};
+
 // Seasons & packs are gacha-authoring entities: script-less, so creation never
 // mints or points at a Lua file (scriptPolicy "none").
 const SEASON_DESCRIPTOR: CreationDescriptor<Season> = {
@@ -339,6 +380,7 @@ const REGISTRY: Record<GameObjectType, CreationDescriptor<{ id: string }>> = {
   Creature: erase(CREATURE_DESCRIPTOR),
   Season: erase(SEASON_DESCRIPTOR),
   Pack: erase(PACK_DESCRIPTOR),
+  ArenaSurface: erase(ARENA_SURFACE_DESCRIPTOR),
 };
 
 function erase<T extends { id: string }>(

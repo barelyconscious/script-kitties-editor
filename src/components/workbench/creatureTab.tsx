@@ -1,6 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import { type Creature, loadCreatures } from "@/lib/creature";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { type Creature, loadCreatures, sameCreature } from "@/lib/creature";
+import { type EntityKind, useEntityVersions } from "@/lib/entities/dataVersion";
 import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
 import { useAutoSave } from "./autoSave";
@@ -8,6 +17,12 @@ import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
 
 type Ability = { id: string; name: string };
+
+// The creature tab reads two domains: the creature population (this creature +
+// the chart's avg/max) and the ability list (the pickers). A bump of either —
+// an in-app save elsewhere or an external disk edit routed through
+// `data-changed` — re-fetches both. Module scope = stable reference.
+const CREATURE_TAB_KINDS: readonly EntityKind[] = ["creatures", "abilities"];
 
 export type CreatureTabLoadState =
   | { kind: "loading" }
@@ -102,12 +117,93 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
     saving,
     saveError,
     save,
+    revert,
     undo,
     redo,
     canUndo,
     canRedo,
     commitHistory,
   } = useCreatureDraft(saved, onSaved);
+
+  // Re-fetch the population + ability list when either domain changes anywhere —
+  // an in-app save in another surface, or an external disk edit routed through
+  // `data-changed` — and reconcile THIS creature against the fresh data using the
+  // shared trust model (see DataPane): unchanged/own-echo → no-op, clean → adopt
+  // silently, dirty → confirm before clobbering. The mount run is skipped — the
+  // load effect above owns the first fetch and the loading state.
+  const version = useEntityVersions(CREATURE_TAB_KINDS);
+  // Refs so the version-keyed effect reads the latest baseline/dirty without
+  // re-running on every keystroke.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  // Adopting an external change must RE-SEED the draft: useCreatureDraft only
+  // reseeds on an id change (so post-save baseline advances preserve history),
+  // so the adopt path raises this flag and the effect below runs one revert()
+  // against the just-advanced baseline.
+  const pendingAdopt = useRef(false);
+  const didInitialLoad = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-fetch trigger, not read in the body.
+  useEffect(() => {
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      return;
+    }
+    let cancelled = false;
+    Promise.all([loadCreatures(), invoke<Ability[]>("get_abilities")])
+      .then(([creatures, abil]) => {
+        if (cancelled) return;
+        // The pickers and the chart's population always follow the fresh data —
+        // they aren't part of this tab's draft, so no reconcile is needed.
+        setPopulation(creatures);
+        setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
+        const found = creatures.find((c) => c.id === id) ?? null;
+        const baseline = savedRef.current;
+        if (!found) {
+          if (
+            !dirtyRef.current ||
+            window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
+          ) {
+            setState({ kind: "notFound" });
+          }
+          return;
+        }
+        // Unchanged record — nothing about THIS creature changed, or our own
+        // save echoing back through the watcher. Content equality is the echo
+        // filter; no last-write registry needed.
+        if (baseline && sameCreature(found, baseline)) return;
+        if (
+          dirtyRef.current &&
+          !window.confirm(
+            `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
+          )
+        ) {
+          return; // keep editing; a later save clobbers the disk version
+        }
+        pendingAdopt.current = true;
+        setSaved(found);
+        setState({ kind: "loaded" }); // recovers a previously-notFound tab too
+      })
+      // A transient refresh error keeps the current data — the load effect owns
+      // the pane's error state.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [version, id]);
+
+  // The revert half of the adopt dance above: once setSaved has advanced the
+  // baseline, one revert() re-seeds the draft (dropping undo history) to it.
+  // Keyed on `saved` so it runs in the render where the new baseline is live.
+  const revertRef = useRef(revert);
+  revertRef.current = revert;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `saved` is the re-run trigger — the revert must fire in the render where the adopted baseline is live, even though the body reads it via refs.
+  useEffect(() => {
+    if (!pendingAdopt.current) return;
+    pendingAdopt.current = false;
+    revertRef.current();
+  }, [saved]);
 
   // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
   // the same guarded write, and it also persists on its own as you edit.

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -65,6 +65,7 @@ export function NewObjectModal({
   const initialType = type ?? GROUP_ORDER[0];
   const [form, setForm] = useState(() => initialFormState(initialType));
   const [busy, setBusy] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   // A backend/partial-failure message from createObject — shown as a banner; the
   // modal stays OPEN so the user never has to guess the disk state.
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -130,7 +131,18 @@ export function NewObjectModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onOpenAutoFocus={(e) => {
+          // Radix focuses the first focusable element (the Type select) on open;
+          // override it to land in the Name field. Surfaces have no Name input,
+          // so let Radix's default focus stand there.
+          if (!isArenaSurface) {
+            e.preventDefault();
+            nameRef.current?.focus();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New object</DialogTitle>
           <DialogDescription>
@@ -206,7 +218,7 @@ export function NewObjectModal({
             <Label htmlFor="new-object-name">Name</Label>
             <Input
               id="new-object-name"
-              autoFocus={!isArenaSurface}
+              ref={nameRef}
               value={form.name}
               disabled={busy}
               onChange={(e) => {

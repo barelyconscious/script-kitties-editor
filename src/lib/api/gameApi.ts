@@ -993,18 +993,6 @@ const coreTypes = (): ApiItem[] => [
       { name: "attack", type: "property", documentation: "The attack stat.", detail: "double" },
       { name: "defense", type: "property", documentation: "The defense stat.", detail: "double" },
       { name: "speed", type: "property", documentation: "The speed stat.", detail: "double" },
-      {
-        name: "specialAttack",
-        type: "property",
-        documentation: "The special attack stat.",
-        detail: "double",
-      },
-      {
-        name: "specialDefense",
-        type: "property",
-        documentation: "The special defense stat.",
-        detail: "double",
-      },
       { name: "luck", type: "property", documentation: "The luck stat.", detail: "double" },
       {
         name: "fireDamage",

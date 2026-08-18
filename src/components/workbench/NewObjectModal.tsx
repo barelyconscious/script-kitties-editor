@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -121,6 +121,13 @@ export function NewObjectModal({
     setSubmitError(result.message);
   }
 
+  // Enter in any field submits the form → Create. handleCreate no-ops when the
+  // form is invalid or busy, so a premature Enter just does nothing.
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void handleCreate();
+  }
+
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent className="sm:max-w-md">
@@ -138,7 +145,7 @@ export function NewObjectModal({
           </div>
         )}
 
-        <div className="grid gap-4">
+        <form id="new-object-form" onSubmit={handleSubmit} className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="new-object-type">Type</Label>
             <Select
@@ -272,13 +279,13 @@ export function NewObjectModal({
               {errors.script && <p className="text-destructive text-xs">{errors.script}</p>}
             </div>
           )}
-        </div>
+        </form>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleCreate} disabled={!canSubmit}>
+          <Button type="submit" form="new-object-form" disabled={!canSubmit}>
             {busy ? "Creating…" : "Create"}
           </Button>
         </DialogFooter>

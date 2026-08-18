@@ -1007,6 +1007,18 @@ const coreTypes = (): ApiItem[] => [
         detail: "double",
       },
       {
+        name: "waterDamage",
+        type: "property",
+        documentation: "The water damage stat.",
+        detail: "double",
+      },
+      {
+        name: "waterDefense",
+        type: "property",
+        documentation: "The water defense stat.",
+        detail: "double",
+      },
+      {
         name: "frostDamage",
         type: "property",
         documentation: "The frost damage stat.",
@@ -1019,15 +1031,15 @@ const coreTypes = (): ApiItem[] => [
         detail: "double",
       },
       {
-        name: "lightningDamage",
+        name: "electricDamage",
         type: "property",
-        documentation: "The lightning damage stat.",
+        documentation: "The electric damage stat.",
         detail: "double",
       },
       {
-        name: "lightningDefense",
+        name: "electricDefense",
         type: "property",
-        documentation: "The lightning defense stat.",
+        documentation: "The electric defense stat.",
         detail: "double",
       },
       {
@@ -1040,6 +1052,18 @@ const coreTypes = (): ApiItem[] => [
         name: "poisonDefense",
         type: "property",
         documentation: "The poison defense stat.",
+        detail: "double",
+      },
+      {
+        name: "technicalDamage",
+        type: "property",
+        documentation: "The technical damage stat.",
+        detail: "double",
+      },
+      {
+        name: "technicalDefense",
+        type: "property",
+        documentation: "The technical defense stat.",
         detail: "double",
       },
     ],

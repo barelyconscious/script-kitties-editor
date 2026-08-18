@@ -1,5 +1,6 @@
 import {
   Clover,
+  Cog,
   Droplet,
   Flame,
   Heart,
@@ -33,10 +34,12 @@ export const STAT_META: Record<string, { label: string; Icon: LucideIcon; color:
   waterDefense: { label: "Water Defense", Icon: Shield, color: "text-blue-300" },
   frostDamage: { label: "Frost Damage", Icon: Snowflake, color: "text-sky-400" },
   frostDefense: { label: "Frost Defense", Icon: Shield, color: "text-sky-300" },
-  lightningDamage: { label: "Lightning Damage", Icon: Zap, color: "text-amber-400" },
-  lightningDefense: { label: "Lightning Defense", Icon: Shield, color: "text-amber-300" },
+  electricDamage: { label: "Electric Damage", Icon: Zap, color: "text-amber-400" },
+  electricDefense: { label: "Electric Defense", Icon: Shield, color: "text-amber-300" },
   poisonDamage: { label: "Poison Damage", Icon: Skull, color: "text-green-500" },
   poisonDefense: { label: "Poison Defense", Icon: Shield, color: "text-emerald-400" },
+  technicalDamage: { label: "Technical Damage", Icon: Cog, color: "text-zinc-400" },
+  technicalDefense: { label: "Technical Defense", Icon: Shield, color: "text-zinc-300" },
 };
 
 /** All known stat keys, in canonical display order. */
@@ -58,10 +61,12 @@ export const CREATURE_STATS = [
   "waterDefense",
   "frostDamage",
   "frostDefense",
-  "lightningDamage",
-  "lightningDefense",
+  "electricDamage",
+  "electricDefense",
   "poisonDamage",
   "poisonDefense",
+  "technicalDamage",
+  "technicalDefense",
 ];
 
 /** Human label for a stat key, falling back to the raw key. */

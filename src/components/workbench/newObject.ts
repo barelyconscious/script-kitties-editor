@@ -69,50 +69,61 @@ export function typeStem(type: GameObjectType, id: string): string {
 // game's runtime expects these exact shapes, so they are NOT reformatted.
 // ---------------------------------------------------------------------------
 
-export const ABILITY_SCRIPT_TEMPLATE = `return function(self, combat)
-    combat.targets[1]:takeDamage(1, SpellSchool.PHYSICAL)
+export const ABILITY_SCRIPT_TEMPLATE = `return function()
+    return {
+        actions = {
+            doDamage(1.0, SpellSchool.PHYSICAL)
+        }
+    }
 end\r\n`;
 
-export const BIOGRAM_SCRIPT_TEMPLATE = `return function(self, combat, actions)
-    local modifiedActions = actions
-    -- combat code here
-    return modifiedActions
+export const BIOGRAM_SCRIPT_TEMPLATE = `return function()
+    return {{
+        mod = CombatMod.DAMAGE_DONE,
+        scale = Scale.PERCENT,
+        value = 1.50
+    }}
 end\r\n`;
 
-// NOTE: the predecessor's Effect/Item templates have a WHITESPACE-ONLY line
-// ("    ", four spaces) just before the final `return`. It is preserved here
-// byte-for-byte via an explicit constant so an editor/formatter trailing-space
-// trim can never silently alter the script the game runtime expects.
-const WS_BEFORE_RETURN = "\n    \n";
-
-export const EFFECT_SCRIPT_TEMPLATE = `local Effect = {}
-
-function Effect:onApplied(target)
-    -- target is the creature the effect is applied to
+export const EFFECT_SCRIPT_TEMPLATE = `return function()
+    return {
+        baseModifiers = {},
+        incoming = {
+            modifiers = {}
+        },
+        outgoing = {
+            modifiers = {},
+            onMove = function()
+                -- return a list of actions to be applied
+                return {}
+            end
+        },
+        applied = function()
+            -- return a list of actions to be applied
+            return {}
+        end,
+        tick = function()
+            -- return a list of actions to be applied
+            return {}
+        end,
+        expired = function()
+            -- return a list of actions to be applied
+            return {}
+        end,
+        removed = function()
+            -- return a list of actions to be applied
+            return {}
+        end
+    }
 end
+\r\n`;
 
-function Effect:onRemoved(target)
-    -- target is the creature the effect is applied to
-end
-
-function Effect:tick(target)
-    -- called on every game tick
-    -- target is the creature the effect is applied to
-end
-
-function Effect:onIncomingAction(caster, action)
-    -- called when the affected creature receives an action
-end
-
-function Effect:onOutgoingAction(caster, action)
-    -- called when the affected creature casts an action
-end${WS_BEFORE_RETURN}return Effect\r\n`;
-
-export const ITEM_SCRIPT_TEMPLATE = `local Item = {}
-
-function Item:onUse(creature)
-    -- your code here
-end${WS_BEFORE_RETURN}return Item\r\n`;
+export const ITEM_SCRIPT_TEMPLATE = `return function()
+    return {
+        -- return a list of actions to be applied
+        actions = {}
+    }
+end\r\n`;
 
 // Arena surfaces load their script via the engine's `LuaLoader::LoadTable`, which
 // requires the chunk to return a FACTORY FUNCTION that returns a table — not a

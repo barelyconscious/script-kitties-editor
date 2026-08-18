@@ -197,7 +197,13 @@ export function TabWorkspace({
       if (hiddenRef.current) return; // inactive tab: let the active one handle it
       const key = e.key.toLowerCase();
       if (key === "s") {
+        // stopPropagation so the focused Monaco editor never also sees ⌘S: this
+        // listener is CAPTURE-phase (see the addEventListener below), so it runs
+        // BEFORE Monaco's own ⌘S keybinding — which otherwise swallows the combo
+        // (preventDefault + stop) and shadows this handler, leaving an in-editor
+        // ⌘S doing nothing. Mirrors the XGUI editor's capture-phase Cmd+S.
         e.preventDefault();
+        e.stopPropagation();
         void handleSaveScript();
         return;
       }
@@ -215,8 +221,10 @@ export function TabWorkspace({
         }
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // Capture phase so ⌘S is intercepted before the focused Monaco script editor
+    // (undo/redo below still defer to Monaco via the `.monaco-editor` check).
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [handleSaveScript]);
 
   return (

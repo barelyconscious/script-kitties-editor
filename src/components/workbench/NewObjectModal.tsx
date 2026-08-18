@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -65,6 +65,7 @@ export function NewObjectModal({
   const initialType = type ?? GROUP_ORDER[0];
   const [form, setForm] = useState(() => initialFormState(initialType));
   const [busy, setBusy] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   // A backend/partial-failure message from createObject — shown as a banner; the
   // modal stays OPEN so the user never has to guess the disk state.
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -121,9 +122,27 @@ export function NewObjectModal({
     setSubmitError(result.message);
   }
 
+  // Enter in any field submits the form → Create. handleCreate no-ops when the
+  // form is invalid or busy, so a premature Enter just does nothing.
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void handleCreate();
+  }
+
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onOpenAutoFocus={(e) => {
+          // Radix focuses the first focusable element (the Type select) on open;
+          // override it to land in the Name field. Surfaces have no Name input,
+          // so let Radix's default focus stand there.
+          if (!isArenaSurface) {
+            e.preventDefault();
+            nameRef.current?.focus();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New object</DialogTitle>
           <DialogDescription>
@@ -138,7 +157,7 @@ export function NewObjectModal({
           </div>
         )}
 
-        <div className="grid gap-4">
+        <form id="new-object-form" onSubmit={handleSubmit} className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="new-object-type">Type</Label>
             <Select
@@ -199,7 +218,7 @@ export function NewObjectModal({
             <Label htmlFor="new-object-name">Name</Label>
             <Input
               id="new-object-name"
-              autoFocus={!isArenaSurface}
+              ref={nameRef}
               value={form.name}
               disabled={busy}
               onChange={(e) => {
@@ -272,13 +291,13 @@ export function NewObjectModal({
               {errors.script && <p className="text-destructive text-xs">{errors.script}</p>}
             </div>
           )}
-        </div>
+        </form>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleCreate} disabled={!canSubmit}>
+          <Button type="submit" form="new-object-form" disabled={!canSubmit}>
             {busy ? "Creating…" : "Create"}
           </Button>
         </DialogFooter>

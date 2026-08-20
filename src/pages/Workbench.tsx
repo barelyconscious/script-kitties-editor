@@ -188,6 +188,14 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
     [reload, handleOpen],
   );
 
+  // A script was attached to a previously script-less object in `key`'s tab: point
+  // the tab at the new file so its script pane re-loads into the editor. The record
+  // save already bumped the entity version, so the object list + data pane refresh
+  // through the usual live-reload path.
+  const handleScriptAttached = useCallback((key: string, scriptName: string) => {
+    setTabs((prev) => prev.map((t) => (tabKey(t) === key ? { ...t, scriptName } : t)));
+  }, []);
+
   const handleClose = useCallback(
     (key: string) => {
       // Guard: a dirty tab prompts before discarding its unsaved drafts.
@@ -266,6 +274,7 @@ export default function Workbench({ onDirtyChange, objectListCollapsed }: Workbe
                       alsoOpenElsewhere={(openCounts.get(tab.scriptName) ?? 0) > 1}
                       onDirtyChange={(dirty) => handleTabDirtyChange(key, dirty)}
                       onSaved={refreshObjects}
+                      onScriptAttached={(scriptName) => handleScriptAttached(key, scriptName)}
                     />
                   </div>
                 );

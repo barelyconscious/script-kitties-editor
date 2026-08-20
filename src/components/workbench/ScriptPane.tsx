@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { FileWarning, Loader2 } from "lucide-react";
+import { FilePlus2, FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
+import { Button } from "@/components/ui/button";
+import { attachScript, canAttachScript } from "./attachScript";
+import type { GameObjectType } from "./gameObjects";
 import { useRequestSave, useSaveTarget } from "./saveBus";
 import { noteScriptSaved, onScriptsChanged, scriptBasename, wasScriptSavedByApp } from "./scriptDiskSync";
 import { useScriptSync } from "./scriptSync";
@@ -27,6 +30,16 @@ import { useScriptSync } from "./scriptSync";
 export interface ScriptPaneProps {
   /** The script FILE this tab points at — "" when the object is script-less. */
   scriptName: string;
+  /** The tab's object type — drives the starter template when adding a script. */
+  objectType: GameObjectType;
+  /** The tab's object id — the record pointed at a newly-attached script. */
+  objectId: string;
+  /**
+   * Called after a script is attached to a previously script-less object, with
+   * the new file name, so the shell can update the tab's `scriptName` — which
+   * re-loads this pane into the editor.
+   */
+  onScriptAttached: (scriptName: string) => void;
 }
 
 type LoadState =
@@ -35,7 +48,12 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "contents" };
 
-export function ScriptPane({ scriptName }: ScriptPaneProps) {
+export function ScriptPane({
+  scriptName,
+  objectType,
+  objectId,
+  onScriptAttached,
+}: ScriptPaneProps) {
   // A stable identity for THIS pane instance, used as the publish `originId` so a
   // pane can skip reacting to its own save.
   const originId = useId();
@@ -216,7 +234,15 @@ export function ScriptPane({ scriptName }: ScriptPaneProps) {
           <ScriptEditor
             value=""
             onChange={noop}
-            placeholder={<PaneStatus load={load} scriptName={scriptName} />}
+            placeholder={
+              <PaneStatus
+                load={load}
+                scriptName={scriptName}
+                objectType={objectType}
+                objectId={objectId}
+                onScriptAttached={onScriptAttached}
+              />
+            }
           />
         )}
       </div>
@@ -224,7 +250,19 @@ export function ScriptPane({ scriptName }: ScriptPaneProps) {
   );
 }
 
-function PaneStatus({ load, scriptName }: { load: LoadState; scriptName: string }) {
+function PaneStatus({
+  load,
+  scriptName,
+  objectType,
+  objectId,
+  onScriptAttached,
+}: {
+  load: LoadState;
+  scriptName: string;
+  objectType: GameObjectType;
+  objectId: string;
+  onScriptAttached: (scriptName: string) => void;
+}) {
   if (load.kind === "loading") {
     return (
       <span className="flex items-center gap-2">
@@ -244,8 +282,65 @@ function PaneStatus({ load, scriptName }: { load: LoadState; scriptName: string 
       </span>
     );
   }
-  // scriptless
-  return <span>This object has no script yet.</span>;
+  // scriptless — offer to attach one (types that can't take a script just say so).
+  return (
+    <ScriptlessPane
+      objectType={objectType}
+      objectId={objectId}
+      onScriptAttached={onScriptAttached}
+    />
+  );
+}
+
+/**
+ * The script-less state: a message plus an "Add script" button that mints a
+ * starter script for this object and points the record at it (see
+ * {@link attachScript}). On success the tab's `scriptName` flips to the new file
+ * and this pane re-loads into the editor, so this component is torn down — hence
+ * `busy` stays set through success (no spinner flip-back before unmount).
+ */
+function ScriptlessPane({
+  objectType,
+  objectId,
+  onScriptAttached,
+}: {
+  objectType: GameObjectType;
+  objectId: string;
+  onScriptAttached: (scriptName: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!canAttachScript(objectType)) {
+    return <span>This object has no script.</span>;
+  }
+
+  async function handleAdd() {
+    setBusy(true);
+    setError(null);
+    const result = await attachScript(objectType, objectId);
+    if (result.ok) {
+      onScriptAttached(result.script);
+      return; // pane is about to unmount as the tab flips to the new script
+    }
+    setBusy(false);
+    setError(result.message);
+  }
+
+  return (
+    <div className="flex max-w-sm flex-col items-center gap-3">
+      <p className="font-medium text-foreground text-sm">No script yet</p>
+      <p className="text-muted-foreground text-xs">
+        Attach a Lua script to this {objectType.toLowerCase()}. It creates a starter script and
+        points this object at it.
+      </p>
+      {error && <p className="text-destructive text-xs">{error}</p>}
+      <Button type="button" disabled={busy} onClick={() => void handleAdd()}>
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}
+        Add script
+      </Button>
+    </div>
+  );
 }
 
 function noop() {}

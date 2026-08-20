@@ -183,30 +183,40 @@ export function NewObjectModal({
           {isArenaSurface && (
             <div className="grid gap-1.5">
               <Label htmlFor="new-object-kind">Kind</Label>
-              <Select
-                value={form.id}
-                disabled={busy}
-                onValueChange={(v) =>
-                  setForm((f) => reduceForm(f, { kind: "surfaceKind", value: v }))
-                }
-              >
-                <SelectTrigger id="new-object-kind" className="w-full" aria-invalid={!!errors.id}>
-                  <SelectValue placeholder="Select a surface kind" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableKinds.length === 0 ? (
-                    <div className="px-2 py-1.5 text-muted-foreground text-sm">
-                      All registered kinds are defined.
-                    </div>
-                  ) : (
-                    availableKinds.map((k) => (
+              {/* A Radix Select whose content has NO SelectItem children (every kind
+                  already used, or none registered) fails to open — a click appears
+                  to do nothing and any message placed inside the dropdown never
+                  shows. Render a plain, legible box in that case instead of a dead,
+                  item-less Select. */}
+              {availableKinds.length === 0 ? (
+                <div
+                  id="new-object-kind"
+                  className="flex h-8 w-full items-center rounded-lg border border-input bg-muted/40 px-2.5 text-muted-foreground text-sm"
+                >
+                  {surfaceKinds.length === 0
+                    ? "No surface kinds are registered."
+                    : "Every registered kind already has a surface."}
+                </div>
+              ) : (
+                <Select
+                  value={form.id}
+                  disabled={busy}
+                  onValueChange={(v) =>
+                    setForm((f) => reduceForm(f, { kind: "surfaceKind", value: v }))
+                  }
+                >
+                  <SelectTrigger id="new-object-kind" className="w-full" aria-invalid={!!errors.id}>
+                    <SelectValue placeholder="Select a surface kind" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableKinds.map((k) => (
                       <SelectItem key={k} value={k}>
                         {k}
                       </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               {errors.id && <p className="text-destructive text-xs">{errors.id}</p>}
               <p className="text-muted-foreground text-xs">
                 Kinds come from the Registry. Add more there to offer new surfaces.

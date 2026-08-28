@@ -108,28 +108,41 @@ const DEFAULT_TEXT_COLOR = "185,178,165,255";
 const PREVIEW_TEXT_FONT = '"Web437 IBM VGA", monospace';
 
 /**
- * Match the game's on-screen text proportions. Calibrated from a side-by-side
- * screenshot of the same component (game vs preview), normalized to the shared
- * panel width so the two windows' zoom cancels out. The engine renders vgaoem.fon
- * with glyph cells that are ~1.8x WIDER (relative to the layout) than the base
- * 9x16 proportions, while the glyph HEIGHT nearly matches. So we bump the size a
- * touch and stretch each glyph horizontally.
- *
- * HEIGHT_SCALE multiplies the authored `fontSize` (uniform size). WIDTH_STRETCH is
- * an additional horizontal-only scale applied on top (see the text wrapper in the
- * box render). Net width ≈ HEIGHT_SCALE * WIDTH_STRETCH; net height ≈ HEIGHT_SCALE.
- * Tune these two if the preview drifts from the game.
+ * The engine now renders vgaoem.fon at its native proportions — the old
+ * horizontal-stretch bug (glyph cells drawn ~1.8x wider than the layout) is fixed,
+ * and font scaling is 1:1 with the authored `fontSize`. So the preview draws the
+ * Web437 face at the authored size with NO glyph stretch: native aspect ratio. If
+ * the preview ever drifts from the game again, reintroduce a uniform size factor
+ * here rather than a non-uniform stretch.
  */
-const PREVIEW_FONT_HEIGHT_SCALE = 1.1;
-const PREVIEW_FONT_WIDTH_STRETCH = 1.65;
 
-/** transform-origin for the horizontal text stretch, so it grows away from the
- *  text's anchor edge and stays put under its `textAlign`. */
-function stretchOrigin(align: CSSProperties["textAlign"]): string {
-  if (align === "center") return "center";
-  if (align === "right" || align === "end") return "right center";
-  return "left center";
-}
+/**
+ * Match the engine's LINE WRAPPING. `worlds-cpp` `TextMetrics.cpp` (script-kitties
+ * branch) wraps with a greedy WORD wrap whose string width is the font's NATIVE
+ * aspect ratio scaled to the authored size:
+ *
+ *   text::Measure(str).x = str.length * (glyphW / glyphH) * fontSize   // monospace
+ *   text::Wrap: append words; break BEFORE a word when the line would exceed the
+ *               box width (a single over-long word is never split — it overflows).
+ *
+ * The game font is vgaoem.fon, whose FNT glyph cell is 8x12 (dfPixWidth 8,
+ * dfPixHeight 12), so the engine's per-character advance FOR WRAPPING is
+ * (8/12)·fontSize ≈ 0.667·fontSize. Our preview font, Web437 "IBM VGA 9x16", has a
+ * narrower native advance (9/16 = 0.5625·fontSize), so the browser fits ~1.19x more
+ * characters per line and wraps LATER than the game.
+ *
+ * We keep the Web437 face at its native proportions (no glyph stretch — see above)
+ * and instead pad each character out to the engine's cell width with `letter-spacing`.
+ * CSS's own greedy word-wrap (which matches text::Wrap) then breaks at the same
+ * column the engine does, and the text block fills the box to the same footprint:
+ *
+ *   letter-spacing = (8/12 − 9/16)·fontSize ≈ 0.104·fontSize
+ *
+ * Tune WRAP_LETTER_SPACING if the preview's wrap drifts from the game.
+ */
+const VGAOEM_GLYPH_ASPECT = 8 / 12;
+const WEB437_GLYPH_ASPECT = 9 / 16;
+const PREVIEW_TEXT_WRAP_LETTER_SPACING = VGAOEM_GLYPH_ASPECT - WEB437_GLYPH_ASPECT;
 
 /** Map a resolved `textAlign` value to its CSS `text-align`. */
 function cssTextAlign(value: string | undefined): CSSProperties["textAlign"] {
@@ -349,10 +362,15 @@ const GuiBox = memo(function GuiBox({
       : undefined,
     color: textColor,
     fontFamily: isText ? PREVIEW_TEXT_FONT : undefined,
-    // HEIGHT_SCALE brings the authored size up to the game's rendered size; the
-    // extra horizontal stretch lives on the inner text wrapper below.
-    fontSize:
-      isText && Number.isFinite(fontSize) ? `${fontSize * PREVIEW_FONT_HEIGHT_SCALE}px` : undefined,
+    // The engine draws the face 1:1 with the authored size (no stretch), so the
+    // preview renders at the authored `fontSize` and native glyph proportions.
+    fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
+    // Pad each glyph out to the engine's wrap cell (8/12·fontSize) so CSS word-wrap
+    // breaks at the same column the game does — see the WRAP_LETTER_SPACING note.
+    letterSpacing:
+      isText && Number.isFinite(fontSize)
+        ? `${fontSize * PREVIEW_TEXT_WRAP_LETTER_SPACING}px`
+        : undefined,
     // The engine draws each glyph flush to the element's top (DrawText renders at
     // the box origin). Collapse the inherited leading (the app base is 1.5, which
     // otherwise centers the glyph in a tall line box and drops it below where the
@@ -391,31 +409,7 @@ const GuiBox = memo(function GuiBox({
       )}
       style={style}
     >
-      {isText ? (
-        // The game draws vgaoem.fon with much wider glyph cells than the base
-        // 9x16 font. An inline-block wrapper lets us stretch ONLY the glyphs
-        // horizontally (transform is visual-only, so the box geometry, selection
-        // rect and hit-testing are untouched); the origin follows textAlign so
-        // the text grows away from its anchor edge instead of drifting.
-        //
-        // Because scaleX is visual-only, wrapping is computed on the UNSTRETCHED
-        // text — so we pre-shrink the wrapper to (100% / stretch). The browser
-        // then wraps at that narrower width, and the scaleX blows each line back
-        // out to exactly fill the box, keeping wrapped text inside the bounds.
-        <span
-          style={{
-            display: "inline-block",
-            width: `${100 / PREVIEW_FONT_WIDTH_STRETCH}%`,
-            // Top-align to the box's line box so the collapsed leading isn't
-            // reintroduced as a baseline offset above the glyphs.
-            verticalAlign: "top",
-            transform: `scaleX(${PREVIEW_FONT_WIDTH_STRETCH})`,
-            transformOrigin: stretchOrigin(cssTextAlign(attrs.textAlign)),
-          }}
-        >
-          {boxText(resolved)}
-        </span>
-      ) : null}
+      {isText ? boxText(resolved) : null}
       {node.tag === "Component" ? (
         // F6b: a <Component> mounts its src child (or a placeholder) IN PLACE of
         // ordinary children. The child is mounted in a FRESH root scope built from

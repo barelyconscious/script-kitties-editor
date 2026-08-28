@@ -2,14 +2,11 @@ import { FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EntityFieldsForm } from "@/components/data-tables/EntityFieldsForm";
 import { useEntityVersions } from "@/lib/entities/dataVersion";
+import { fetchDataMtimeSig } from "@/lib/entities/diskMtime";
 import { useHistoryState } from "@/lib/useHistoryState";
-import { useAutoSave } from "./autoSave";
-import {
-  classifyExternalRecord,
-  type DataDescriptor,
-  dataDescriptorFor,
-  selectById,
-} from "./dataRegistry";
+import { useConflictPrompt } from "./ConflictDialog";
+import { type DataDescriptor, dataDescriptorFor, selectById } from "./dataRegistry";
+import { guardedWrite, SaveCancelled } from "./diskGuard";
 import type { GameObjectType } from "./gameObjects";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
@@ -68,45 +65,51 @@ function DataEditor({
   const draft = history.value;
   const reset = history.reset;
 
-  // SECOND FETCH: pull the full per-domain records and select this one by id.
+  // The mtime signature of this domain's file(s) as of the last disk read (load,
+  // save, or clean adopt). The save guard compares the current on-disk signature
+  // against this to detect an external edit before clobbering (see diskGuard).
+  const mtimeSigRef = useRef<string | null>(null);
+
+  // Read the full per-domain records + the file mtime signature from disk, select
+  // this record by id, and reseat the baseline + draft to it (dropping history).
+  // Shared by the initial load, the clean-adopt live-reload, and the conflict
+  // "Reload" choice — one disk-truth path so they can't diverge.
+  const seatFromDisk = useCallback(
+    async (cancelled?: () => boolean) => {
+      const [records, sig] = await Promise.all([
+        descriptor.load(),
+        fetchDataMtimeSig(descriptor.kinds),
+      ]);
+      if (cancelled?.()) return;
+      const record = selectById(records, id);
+      mtimeSigRef.current = sig;
+      setLoaded(record);
+      reset(record);
+      setState(record ? { kind: "loaded" } : { kind: "notFound" });
+    },
+    [descriptor, id, reset],
+  );
+
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    descriptor
-      .load()
-      .then((records) => {
-        if (cancelled) return;
-        const record = selectById(records, id);
-        if (!record) {
-          setState({ kind: "notFound" });
-          return;
-        }
-        setLoaded(record);
-        reset(record); // seed the draft, dropping any prior history
-        setState({ kind: "loaded" });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setState({ kind: "error", message: errorMessage(err) });
-      });
+    seatFromDisk(() => cancelled).catch((err) => {
+      if (!cancelled) setState({ kind: "error", message: errorMessage(err) });
+    });
     return () => {
       cancelled = true;
     };
-  }, [descriptor, id, reset]);
+  }, [seatFromDisk]);
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 
-  // Re-fetch this record when its domain's version bumps — an in-app save in a
-  // sibling surface (Data Tables, another tab) OR an external disk edit routed
-  // through `data-changed` (see useDataLiveReload). Kept separate from the load
-  // effect above so a bump never blindly re-runs `reset` — the reconcile below
-  // decides, using the shared trust model: an unchanged/echoed record is a
-  // no-op, a clean pane silently adopts, a dirty pane is warned first.
+  // Live-reload: when this domain's version bumps (an in-app save elsewhere or an
+  // external disk edit routed through `data-changed`), reconcile via the file
+  // mtime — the single conflict signal. Equal signature ⇒ our own save echo or no
+  // real change (ignore). Changed while we have unsaved edits ⇒ leave it; the
+  // save guard will surface the conflict when the user actually saves. Changed
+  // while clean ⇒ silently adopt the disk truth.
   const version = useEntityVersions(descriptor.kinds);
-  // Refs so the version-keyed effect reads the latest baseline/dirty without
-  // re-running on every keystroke.
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const didInitialLoad = useRef(false);
@@ -117,74 +120,47 @@ function DataEditor({
       return;
     }
     let cancelled = false;
-    descriptor
-      .load()
-      .then((records) => {
-        if (cancelled) return;
-        const fetched = selectById(records, id);
-        const adopt = (record: { id: string } | null) => {
-          setLoaded(record);
-          reset(record); // re-seed the draft (dropping history) to the disk truth
-          setState(record ? { kind: "loaded" } : { kind: "notFound" });
-        };
-        switch (classifyExternalRecord(fetched, loadedRef.current, dirtyRef.current)) {
-          case "none":
-            return;
-          case "adopt":
-            adopt(fetched);
-            return;
-          case "conflict":
-            // Same clobber warning the script pane uses for external edits.
-            if (
-              window.confirm(
-                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
-              )
-            ) {
-              adopt(fetched);
-            }
-            return;
-          case "missing":
-            if (
-              dirtyRef.current &&
-              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
-            ) {
-              return; // keep editing; a later save re-creates the record
-            }
-            adopt(null);
-            return;
-        }
-      })
-      // A transient refresh error keeps the current record — the load effect
-      // above owns the pane's error state.
-      .catch(() => {});
+    (async () => {
+      const sig = await fetchDataMtimeSig(descriptor.kinds);
+      if (cancelled) return;
+      if (sig === mtimeSigRef.current) return; // own-save echo / nothing changed
+      if (dirtyRef.current) return; // unsaved edits: defer the conflict to save time
+      await seatFromDisk(() => cancelled); // clean + external change → adopt
+    })().catch(() => {}); // transient refresh error keeps the current record
     return () => {
       cancelled = true;
     };
-  }, [version, descriptor, id, reset]);
+  }, [version, descriptor, seatFromDisk]);
 
   // Ref so the bus `save` closure reads the latest draft without being recreated
   // on every keystroke (the bus re-registers a target when `save` identity
   // changes — see useSaveTarget deps). Same pattern as ScriptPane.
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const confirmConflict = useConflictPrompt();
 
   const save = useCallback(async () => {
     const current = draftRef.current;
     if (!current) return; // nothing loaded → nothing to persist
-    await descriptor.save(current);
-    // Persist succeeded → the draft is the new baseline; clears dirty.
-    setLoaded(current);
-  }, [descriptor]);
+    const outcome = await guardedWrite({
+      capturedSig: mtimeSigRef.current,
+      fetchSig: () => fetchDataMtimeSig(descriptor.kinds),
+      confirmConflict: () => confirmConflict(id),
+      reload: () => seatFromDisk(),
+      write: async () => {
+        await descriptor.save(current);
+        setLoaded(current); // draft is the new baseline; clears dirty
+      },
+    });
+    if (outcome.kind === "written") mtimeSigRef.current = outcome.sig;
+    else if (outcome.kind === "cancelled") throw new SaveCancelled();
+  }, [descriptor, id, confirmConflict, seatFromDisk]);
 
-  // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
-  // the same guarded write, and it also persists on its own as you edit.
-  const flush = useAutoSave({ draft, dirty, save });
   useSaveTarget({
     id: "data",
     order: 0, // DATA / pointer saves run BEFORE the script (order 10).
     dirty,
-    save: flush,
-    autoSave: true,
+    save,
   });
 
   // Undo/redo for the data form (Ctrl+Z), driven from the tab.

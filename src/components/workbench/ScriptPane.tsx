@@ -3,7 +3,10 @@ import { FilePlus2, FileWarning, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { Button } from "@/components/ui/button";
+import { fetchScriptMtimeSig } from "@/lib/entities/diskMtime";
 import { attachScript, canAttachScript } from "./attachScript";
+import { useConflictPrompt } from "./ConflictDialog";
+import { guardedWrite, SaveCancelled } from "./diskGuard";
 import type { GameObjectType } from "./gameObjects";
 import { useRequestSave, useSaveTarget } from "./saveBus";
 import { noteScriptSaved, onScriptsChanged, scriptBasename, wasScriptSavedByApp } from "./scriptDiskSync";
@@ -69,6 +72,11 @@ export function ScriptPane({
 
   const dirty = load.kind === "contents" && value !== loaded;
 
+  // The mtime signature of the script `.lua` as of the last disk read (load,
+  // save, or clean adopt). The save guard compares the current on-disk signature
+  // to this to detect an external edit before clobbering (see diskGuard).
+  const mtimeSigRef = useRef<string | null>(null);
+
   // Fetch the script whenever the tab points at a different file. An empty name
   // short-circuits to script-less WITHOUT calling get_script.
   useEffect(() => {
@@ -76,14 +84,19 @@ export function ScriptPane({
       setLoad({ kind: "scriptless" });
       setLoaded("");
       setValue("");
+      mtimeSigRef.current = null;
       return;
     }
 
     let cancelled = false;
     setLoad({ kind: "loading" });
-    invoke<string | null>("get_script", { name: scriptName })
-      .then((contents) => {
+    Promise.all([
+      invoke<string | null>("get_script", { name: scriptName }),
+      fetchScriptMtimeSig(scriptName),
+    ])
+      .then(([contents, sig]) => {
         if (cancelled) return;
+        mtimeSigRef.current = sig;
         if (contents == null) {
           // (a) registered-but-script-less: backend says no script for this name.
           setLoad({ kind: "scriptless" });
@@ -122,21 +135,39 @@ export function ScriptPane({
   const scriptNameRef = useRef(scriptName);
   scriptNameRef.current = scriptName;
 
+  const confirmConflict = useConflictPrompt();
   const save = useCallback(async () => {
     const name = scriptNameRef.current;
-    const draft = valueRef.current;
     if (name.trim().length === 0) return; // nothing to persist for a script-less tab
-    await invoke("save_script", { name, contents: draft });
-    // Record what we just wrote so the disk-sync listener recognizes (and ignores)
-    // this save echoing back through the filesystem watcher as a phantom "external"
-    // change (see scriptDiskSync).
-    noteScriptSaved(name, draft);
-    // Persist succeeded → the draft is the new baseline; clears dirty.
-    setLoaded(draft);
-    // Fan out to any SIBLING tab showing the same file so it refreshes to the
-    // just-saved contents (no re-fetch — the draft IS the new disk state).
-    sync.publish(name, draft, originId);
-  }, [sync, originId]);
+    const outcome = await guardedWrite({
+      capturedSig: mtimeSigRef.current,
+      fetchSig: () => fetchScriptMtimeSig(name),
+      confirmConflict: () => confirmConflict(name),
+      reload: async () => {
+        const [contents, sig] = await Promise.all([
+          invoke<string | null>("get_script", { name }),
+          fetchScriptMtimeSig(name),
+        ]);
+        mtimeSigRef.current = sig;
+        if (contents == null) return; // vanished / script-less — keep the buffer
+        setLoaded(contents);
+        setValue(contents);
+      },
+      write: async () => {
+        const draft = valueRef.current;
+        await invoke("save_script", { name, contents: draft });
+        // Record what we just wrote so the disk-sync listener recognizes (and
+        // ignores) this save echoing back through the watcher (see scriptDiskSync).
+        noteScriptSaved(name, draft);
+        setLoaded(draft); // draft is the new baseline; clears dirty
+        // Fan out to any SIBLING tab showing the same file so it refreshes to the
+        // just-saved contents (no re-fetch — the draft IS the new disk state).
+        sync.publish(name, draft, originId);
+      },
+    });
+    if (outcome.kind === "written") mtimeSigRef.current = outcome.sig;
+    else if (outcome.kind === "cancelled") throw new SaveCancelled();
+  }, [sync, originId, confirmConflict]);
 
   // Subscribe to sibling saves of THIS file. The listener reads live state via
   // refs so it never needs to re-subscribe per keystroke — only when the file
@@ -146,20 +177,15 @@ export function ScriptPane({
     const unsubscribe = sync.subscribe(scriptName, (contents, sourceId) => {
       if (sourceId === originId) return; // our own save — already applied locally
       if (contents === valueRef.current) return; // already in sync — no-op
-      const refresh = () => {
-        setLoaded(contents);
-        setValue(contents);
-      };
-      if (!dirtyRef.current) {
-        // Clean pane: silently adopt the sibling's saved contents.
-        refresh();
-        return;
-      }
-      // Dirty pane: never silently lose work — warn before clobbering.
-      const ok = window.confirm(
-        `${scriptName} was saved in another tab. Discard your unsaved edits and load the new version?`,
-      );
-      if (ok) refresh();
+      // Dirty pane: keep the user's edits; the save guard surfaces the conflict on
+      // Save. Clean pane: silently adopt the sibling's saved contents and refresh
+      // the mtime baseline so a later save doesn't false-conflict on this write.
+      if (dirtyRef.current) return;
+      setLoaded(contents);
+      setValue(contents);
+      void fetchScriptMtimeSig(scriptName).then((s) => {
+        mtimeSigRef.current = s;
+      });
     });
     return unsubscribe;
   }, [scriptName, sync, originId]);
@@ -186,20 +212,15 @@ export function ScriptPane({
           // our baseline: nothing changed externally.
           if (wasScriptSavedByApp(scriptNameRef.current, contents)) return;
           if (contents === loadedRef.current) return;
-          const refresh = () => {
-            setLoaded(contents);
-            setValue(contents);
-          };
-          if (!dirtyRef.current) {
-            // Clean pane: silently adopt the external contents.
-            refresh();
-            return;
-          }
-          // Dirty pane: never silently lose work — warn before clobbering.
-          const ok = window.confirm(
-            `${scriptName} changed on disk. Discard your unsaved edits and load the new version?`,
-          );
-          if (ok) refresh();
+          // Dirty pane: keep the user's edits; the save guard surfaces the conflict
+          // on Save. Clean pane: adopt the external contents and refresh the mtime
+          // baseline so a later save doesn't false-conflict on this same edit.
+          if (dirtyRef.current) return;
+          setLoaded(contents);
+          setValue(contents);
+          void fetchScriptMtimeSig(scriptNameRef.current).then((s) => {
+            mtimeSigRef.current = s;
+          });
         })
         .catch(() => {
           // Read failed (e.g. broken install mid-edit) — keep the current buffer.

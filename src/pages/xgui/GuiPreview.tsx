@@ -100,49 +100,35 @@ function isVisualTag(tag: GuiNode["tag"]): boolean {
 const DEFAULT_TEXT_COLOR = "185,178,165,255";
 
 /**
- * The engine renders all GUI text with vgaoem.fon (VGA OEM / DOS raster, CP437).
- * We mirror that in the preview with Web437 "IBM VGA 9x16" (a pixel-accurate open
- * reproduction; see src/assets/fonts/), falling back to a generic monospace if
- * the webfont hasn't loaded. Scoped to Text boxes only.
+ * The engine renders all GUI text with BaconSans.ttf, loaded through SDL_ttf
+ * (`worlds-cpp` `TextMetrics.cpp`: `TTF_OpenFont` at the authored pixel size). The
+ * preview bundles that same .ttf (src/assets/fonts/) and renders with it, so glyph
+ * shapes and proportions are 1:1 with the game — no stretch, no reproduction stand-in.
+ * Falls back to a generic sans if the webfont hasn't loaded. Scoped to Text boxes only.
  */
-const PREVIEW_TEXT_FONT = '"Web437 IBM VGA", monospace';
+const PREVIEW_TEXT_FONT = '"BaconSans", sans-serif';
 
 /**
- * The engine now renders vgaoem.fon at its native proportions — the old
- * horizontal-stretch bug (glyph cells drawn ~1.8x wider than the layout) is fixed,
- * and font scaling is 1:1 with the authored `fontSize`. So the preview draws the
- * Web437 face at the authored size with NO glyph stretch: native aspect ratio. If
- * the preview ever drifts from the game again, reintroduce a uniform size factor
- * here rather than a non-uniform stretch.
- */
-
-/**
- * Match the engine's LINE WRAPPING. `worlds-cpp` `TextMetrics.cpp` (script-kitties
- * branch) wraps with a greedy WORD wrap whose string width is the font's NATIVE
- * aspect ratio scaled to the authored size:
+ * Match the engine's LINE WRAPPING for free. `TextMetrics.cpp` wraps with a greedy
+ * WORD wrap whose string width is the REAL TTF measurement (`text::Width` =
+ * `TTF_SizeText` on BaconSans at the authored size):
  *
- *   text::Measure(str).x = str.length * (glyphW / glyphH) * fontSize   // monospace
  *   text::Wrap: append words; break BEFORE a word when the line would exceed the
  *               box width (a single over-long word is never split — it overflows).
  *
- * The game font is vgaoem.fon, whose FNT glyph cell is 8x12 (dfPixWidth 8,
- * dfPixHeight 12), so the engine's per-character advance FOR WRAPPING is
- * (8/12)·fontSize ≈ 0.667·fontSize. Our preview font, Web437 "IBM VGA 9x16", has a
- * narrower native advance (9/16 = 0.5625·fontSize), so the browser fits ~1.19x more
- * characters per line and wraps LATER than the game.
- *
- * We keep the Web437 face at its native proportions (no glyph stretch — see above)
- * and instead pad each character out to the engine's cell width with `letter-spacing`.
- * CSS's own greedy word-wrap (which matches text::Wrap) then breaks at the same
- * column the engine does, and the text block fills the box to the same footprint:
- *
- *   letter-spacing = (8/12 − 9/16)·fontSize ≈ 0.104·fontSize
- *
- * Tune WRAP_LETTER_SPACING if the preview's wrap drifts from the game.
+ * Because the preview now renders the SAME BaconSans.ttf at the SAME px size, the
+ * browser measures identical proportional advances, so CSS's own greedy word-wrap
+ * (which matches text::Wrap) breaks at the same words the engine does. No
+ * per-character letter-spacing correction is needed — that hack only existed to make
+ * a monospace stand-in font wrap like the old raster font.
  */
-const VGAOEM_GLYPH_ASPECT = 8 / 12;
-const WEB437_GLYPH_ASPECT = 9 / 16;
-const PREVIEW_TEXT_WRAP_LETTER_SPACING = VGAOEM_GLYPH_ASPECT - WEB437_GLYPH_ASPECT;
+
+/**
+ * The engine stacks wrapped lines at a fixed advance of `FontSize + 6` px
+ * (`XGUI.cpp`: `LineHeight = Child.FontSize + 6`). Mirror that as the CSS line
+ * height so multi-line text boxes fill the same vertical footprint as in-game.
+ */
+const PREVIEW_TEXT_LINE_GAP = 6;
 
 /** Map a resolved `textAlign` value to its CSS `text-align`. */
 function cssTextAlign(value: string | undefined): CSSProperties["textAlign"] {
@@ -362,20 +348,16 @@ const GuiBox = memo(function GuiBox({
       : undefined,
     color: textColor,
     fontFamily: isText ? PREVIEW_TEXT_FONT : undefined,
-    // The engine draws the face 1:1 with the authored size (no stretch), so the
-    // preview renders at the authored `fontSize` and native glyph proportions.
+    // Same BaconSans.ttf as the engine, rendered 1:1 with the authored size — the
+    // browser measures identical glyph advances, so text width and wrapping match.
     fontSize: isText && Number.isFinite(fontSize) ? `${fontSize}px` : undefined,
-    // Pad each glyph out to the engine's wrap cell (8/12·fontSize) so CSS word-wrap
-    // breaks at the same column the game does — see the WRAP_LETTER_SPACING note.
-    letterSpacing:
+    // The engine advances wrapped lines by `FontSize + 6` px (XGUI.cpp), and draws
+    // the first line's glyphs flush to the box origin. An explicit px line height
+    // reproduces that stacking while overriding the app's inherited 1.5 leading.
+    lineHeight:
       isText && Number.isFinite(fontSize)
-        ? `${fontSize * PREVIEW_TEXT_WRAP_LETTER_SPACING}px`
+        ? `${fontSize + PREVIEW_TEXT_LINE_GAP}px`
         : undefined,
-    // The engine draws each glyph flush to the element's top (DrawText renders at
-    // the box origin). Collapse the inherited leading (the app base is 1.5, which
-    // otherwise centers the glyph in a tall line box and drops it below where the
-    // game paints it) so preview text top-aligns like the runtime.
-    lineHeight: isText ? 1 : undefined,
     textAlign: isText ? cssTextAlign(attrs.textAlign) : undefined,
     // No `overflow` key at all → defaults to `visible` → overflow paints out.
     // Nested z-order: every box applies its sibling-rank z-index (a container's

@@ -110,34 +110,3 @@ export function hasDataPane(objectType: GameObjectType): boolean {
 export function selectById<T extends { id: string }>(records: readonly T[], id: string): T | null {
   return records.find((r) => r.id === id) ?? null;
 }
-
-/**
- * What a DATA editor should do with a freshly re-fetched record after a version
- * bump (an in-app save elsewhere, or an external disk edit). The same trust
- * model the script panes use (see `scriptDiskSync`):
- *
- *  - `"none"`     — the record matches the pane's baseline: either nothing about
- *                   THIS record changed, or the bump is the pane's own save
- *                   echoing back. Record-level content equality doubles as the
- *                   echo filter, so no last-write registry is needed.
- *  - `"adopt"`    — the record changed and the pane is clean: silently adopt.
- *  - `"conflict"` — the record changed under unsaved edits: warn before
- *                   clobbering (the caller confirms, then adopts or keeps).
- *  - `"missing"`  — the record no longer exists (deleted on disk). The caller
- *                   applies the same clean/dirty split before surfacing.
- *
- * Pure and extracted (mirroring the XGUI `liveReload` decision helpers) so the
- * decision table is unit-testable without React or Tauri.
- */
-export type ExternalRecordChange = "none" | "adopt" | "conflict" | "missing";
-
-export function classifyExternalRecord<T extends { id: string }>(
-  fetched: T | null,
-  baseline: T | null,
-  dirty: boolean,
-): ExternalRecordChange {
-  if (!fetched) return "missing";
-  // Same cheap structural compare the panes use for dirty-tracking.
-  if (baseline != null && JSON.stringify(fetched) === JSON.stringify(baseline)) return "none";
-  return dirty ? "conflict" : "adopt";
-}

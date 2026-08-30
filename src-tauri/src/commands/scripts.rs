@@ -28,6 +28,32 @@ pub fn create_script(name: String, contents: String, dal: State<Dal>) -> Result<
     dal.create_script(&name, contents)
 }
 
+/// The last-modified time (epoch millis) of a `.lua` script, resolved by logical
+/// name, or `null` when unregistered/unreadable. The Workbench captures this at
+/// load and re-checks it at save time to detect an external edit before clobbering.
+#[tauri::command]
+pub fn get_script_mtime(name: String, dal: State<Dal>) -> Option<i64> {
+    dal.script_mtime(&name)
+}
+
+/// The last-modified times (epoch millis) of one or more domains' `Data/*.json`
+/// files, keyed by the requested `EntityKind`. A missing/unreadable file maps to
+/// `null`. Batched so a joined record (items ⋈ itemDrops) checks both files in one
+/// call. The save guard compares these against the values captured at load.
+#[tauri::command]
+pub fn get_data_mtimes(
+    kinds: Vec<String>,
+    dal: State<Dal>,
+) -> std::collections::HashMap<String, Option<i64>> {
+    kinds
+        .into_iter()
+        .map(|kind| {
+            let mtime = dal.data_file_mtime(&kind);
+            (kind, mtime)
+        })
+        .collect()
+}
+
 /// Open a registered `.lua` script in VS Code. Resolves the logical `name` to its
 /// on-disk path through the asset manifest (the same resolution `get_script`
 /// uses), then launches the `code` CLI on it. Best-effort: errors if the name

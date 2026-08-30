@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SaveCancelled } from "./diskGuard";
 import {
   aggregateDirty,
   type SaveOutcome,
@@ -93,6 +94,26 @@ describe("saveAllTargets", () => {
     ]);
     expect(outcomes).toEqual([]);
   });
+
+  it("records a SaveCancelled throw as cancelled, not failed, and runs the rest", async () => {
+    const after = vi.fn(async () => {});
+    const outcomes = await saveAllTargets([
+      target({
+        id: "data",
+        order: 0,
+        save: async () => {
+          throw new SaveCancelled();
+        },
+      }),
+      target({ id: "script", order: 10, save: after }),
+    ]);
+
+    expect(after).toHaveBeenCalledOnce();
+    expect(outcomes).toEqual([
+      { id: "data", ok: false, cancelled: true },
+      { id: "script", ok: true },
+    ]);
+  });
 });
 
 describe("aggregateDirty", () => {
@@ -175,5 +196,17 @@ describe("summarizeOutcomes", () => {
   it("includes a failed target with no error message gracefully", () => {
     const summary = summarizeOutcomes([{ id: "script", ok: false }]);
     expect(summary).toEqual({ ok: false, message: "Save failed: script" });
+  });
+
+  it("excludes cancelled targets from the tally (all cancelled → no-op)", () => {
+    const cancelled = (id: string): SaveOutcome => ({ id, ok: false, cancelled: true });
+    expect(summarizeOutcomes([cancelled("data")])).toEqual({ ok: true, message: "" });
+    // A cancel alongside a real save reports only the save.
+    expect(summarizeOutcomes([ok("data"), cancelled("script")])).toEqual({
+      ok: true,
+      message: "Saved",
+    });
+    // A cancel never masks a real failure.
+    expect(summarizeOutcomes([cancelled("data"), fail("script", "boom")]).ok).toBe(false);
   });
 });

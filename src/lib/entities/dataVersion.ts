@@ -44,20 +44,20 @@
  *  2. `useAnyEntityVersion` AMPLIFIES. The Workbench object list re-fetches
  *     `get_game_objects` (ALL domains) on ANY single entity change anywhere. It's
  *     the most expensive consumer and hits the ceiling first.
- *  3. DOUBLE-BUMP PER AUTO-SAVE. An auto-save fires TWO refresh waves: the in-app
+ *  3. DOUBLE-BUMP PER SAVE. A save fires TWO refresh waves: the in-app
  *     {@link bumpEntityVersion}, then the disk write echoes back through the
  *     watcher → `data-changed` → a second bump. A disk round-trip separates them,
- *     so they do NOT coalesce. The echo is a CORRECTNESS no-op (content equality
- *     via `classifyExternalRecord` catches it) but still pays a full
- *     fetch + parse + `JSON.stringify` compare to DISCOVER it's a no-op. This is
- *     the conscious trade-off vs. `scriptDiskSync`, which suppresses echoes BEFORE
- *     re-fetching via a last-write map: simpler here (no registry), more redundant
- *     work under active editing. Fine at small data; the scripts' pattern wins at
- *     large data.
- *  4. `window.confirm` (the dirty-editor conflict/deletion prompts in the panes)
- *     is BLOCKING. A burst of external edits landing while several tabs are dirty
- *     stacks sequential modal dialogs. Annoying, not broken — and identical to how
- *     the existing script / GUI live-reload already behave, so it's consistent.
+ *     so they do NOT coalesce. The Workbench panes treat the version bump only as
+ *     a "something may have changed" nudge and reconcile against the backing
+ *     file's MTIME (see `lib/entities/diskMtime`): an equal signature (the app's
+ *     own save echo, or any unrelated-domain bump) is discovered cheaply and
+ *     ignored. Fine at small data; a per-record payload (below) would remove the
+ *     re-fetch entirely.
+ *  4. LIVE-RELOAD is clean-only. On a version bump the panes adopt an external
+ *     change only when the pane is CLEAN; a dirty pane is left untouched and the
+ *     conflict is surfaced at SAVE time by the mtime guard (Reload/Overwrite/
+ *     Cancel), so a burst of external edits never stacks blocking prompts on a
+ *     pane the user is actively editing.
  *
  *  THE LEVER (do NOT build preemptively — reach for it the day a domain file gets
  *  big enough to notice): carry the CHANGED IDS in the `data-changed` payload (the

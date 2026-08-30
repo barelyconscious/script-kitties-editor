@@ -257,6 +257,56 @@ impl Dal {
     pub(crate) fn data_dir(&self) -> PathBuf {
         Path::new(&self.config.read().unwrap().game_install_path).join("Data")
     }
+
+    /// The last-modified time (epoch millis) of a domain's `Data/*.json` file, or
+    /// `None` when the file is absent/unreadable. The Workbench captures this when
+    /// it loads a record and re-checks it at SAVE time: a changed mtime means the
+    /// file was edited on disk since load, so the save must warn before clobbering.
+    /// `kind` is an `EntityKind` string (see the watcher's invalidator table).
+    pub fn data_file_mtime(&self, kind: &str) -> Option<i64> {
+        let file = data_file_for_kind(kind)?;
+        mtime_ms(&self.data_dir().join(file))
+    }
+
+    /// The last-modified time (epoch millis) of a `.lua` script resolved by logical
+    /// name through the asset manifest, or `None` when unregistered/unreadable. The
+    /// script sibling of {@link data_file_mtime}, used for the same save-time guard.
+    pub fn script_mtime(&self, name: &str) -> Option<i64> {
+        let path = self.resolve_asset(name).ok()??;
+        mtime_ms(&path)
+    }
+}
+
+/// Map an `EntityKind` string to its `Data/` filename. The write-side pair of the
+/// watcher's invalidator table (which maps the same files back to kinds); kept
+/// here so the mtime lookups above resolve a kind the identical way the watcher
+/// does. `itemDrops` and `arenaSurfaces` are the only non-`<kind>.json` names.
+fn data_file_for_kind(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "abilities" => "abilities.json",
+        "biograms" => "biograms.json",
+        "charms" => "charms.json",
+        "creatures" => "creatures.json",
+        "dlc" => "dlc.json",
+        "effects" => "effects.json",
+        "items" => "items.json",
+        "itemDrops" => "itemDropTable.json",
+        "seasons" => "seasons.json",
+        "packs" => "packs.json",
+        "arenaSurfaces" => "arena_surfaces.json",
+        "palette" => "palette.json",
+        _ => return None,
+    })
+}
+
+/// A file's modified time as epoch millis, or `None` when the file is missing or
+/// its metadata/time is unreadable (all treated the same by callers: "no known
+/// mtime"). Millis are precise enough to detect any real external edit and map
+/// cleanly to a JS `number`.
+fn mtime_ms(path: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let dur = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(dur.as_millis() as i64)
 }
 
 #[allow(clippy::too_many_arguments)]

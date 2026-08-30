@@ -8,11 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { type Creature, loadCreatures, sameCreature } from "@/lib/creature";
+import { type Creature, loadCreatures } from "@/lib/creature";
 import { type EntityKind, useEntityVersions } from "@/lib/entities/dataVersion";
+import { fetchDataMtimeSig } from "@/lib/entities/diskMtime";
 import { useCreatureDraft } from "@/lib/useCreatureDraft";
 import type { AbilityOption } from "@/pages/creature-editor/AbilityPicker";
-import { useAutoSave } from "./autoSave";
+import { useConflictPrompt } from "./ConflictDialog";
+import { guardedWrite, SaveCancelled } from "./diskGuard";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
 
@@ -23,6 +25,11 @@ type Ability = { id: string; name: string };
 // an in-app save elsewhere or an external disk edit routed through
 // `data-changed` — re-fetches both. Module scope = stable reference.
 const CREATURE_TAB_KINDS: readonly EntityKind[] = ["creatures", "abilities"];
+
+// The draft's conflict source is ONLY the creatures file — abilities are read for
+// the pickers but aren't part of this tab's draft, so the save guard watches just
+// this file's mtime.
+const CREATURE_FILE_KINDS: readonly EntityKind[] = ["creatures"];
 
 export type CreatureTabLoadState =
   | { kind: "loading" }
@@ -75,19 +82,28 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
   // The chart's stat, driven by focusing a stat box (or the chart's own select).
   // Reset when the creature changes so a stale stat doesn't carry across tabs.
   const [activeStat, setActiveStat] = useState<string | null>(null);
+  // The mtime signature of creatures.json as of the last disk read (load, save,
+  // or clean adopt). The save guard compares the current on-disk signature to
+  // this to detect an external edit before clobbering (see diskGuard).
+  const mtimeSigRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
     setActiveStat(null);
-    Promise.all([loadCreatures(), invoke<Ability[]>("get_abilities")])
-      .then(([creatures, abil]) => {
+    Promise.all([
+      loadCreatures(),
+      invoke<Ability[]>("get_abilities"),
+      fetchDataMtimeSig(CREATURE_FILE_KINDS),
+    ])
+      .then(([creatures, abil, sig]) => {
         if (cancelled) return;
         const found = creatures.find((c) => c.id === id) ?? null;
         if (!found) {
           setState({ kind: "notFound" });
           return;
         }
+        mtimeSigRef.current = sig;
         setPopulation(creatures);
         setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
         setSaved(found);
@@ -125,19 +141,16 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
     commitHistory,
   } = useCreatureDraft(saved, onSaved);
 
-  // Re-fetch the population + ability list when either domain changes anywhere —
-  // an in-app save in another surface, or an external disk edit routed through
-  // `data-changed` — and reconcile THIS creature against the fresh data using the
-  // shared trust model (see DataPane): unchanged/own-echo → no-op, clean → adopt
-  // silently, dirty → confirm before clobbering. The mount run is skipped — the
-  // load effect above owns the first fetch and the loading state.
+  // Live-reload: when either domain bumps (an in-app save elsewhere or an external
+  // disk edit routed through `data-changed`), refresh the population + pickers and
+  // reconcile THIS creature via the creatures-file mtime — the single conflict
+  // signal. Equal signature ⇒ our own save echo / no real change. Changed while we
+  // have unsaved edits ⇒ leave it; the save guard surfaces the conflict on Save.
+  // Changed while clean ⇒ adopt the disk truth. The mount run is skipped — the
+  // load effect owns the first fetch and the loading state.
   const version = useEntityVersions(CREATURE_TAB_KINDS);
-  // Refs so the version-keyed effect reads the latest baseline/dirty without
-  // re-running on every keystroke.
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
-  const savedRef = useRef(saved);
-  savedRef.current = saved;
   // Adopting an external change must RE-SEED the draft: useCreatureDraft only
   // reseeds on an id change (so post-save baseline advances preserve history),
   // so the adopt path raises this flag and the effect below runs one revert()
@@ -151,35 +164,25 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
       return;
     }
     let cancelled = false;
-    Promise.all([loadCreatures(), invoke<Ability[]>("get_abilities")])
-      .then(([creatures, abil]) => {
+    Promise.all([
+      loadCreatures(),
+      invoke<Ability[]>("get_abilities"),
+      fetchDataMtimeSig(CREATURE_FILE_KINDS),
+    ])
+      .then(([creatures, abil, sig]) => {
         if (cancelled) return;
         // The pickers and the chart's population always follow the fresh data —
         // they aren't part of this tab's draft, so no reconcile is needed.
         setPopulation(creatures);
         setAbilities(abil.map((a) => ({ id: a.id, name: a.name })));
+        if (sig === mtimeSigRef.current) return; // own-save echo / nothing changed
+        if (dirtyRef.current) return; // unsaved edits: defer the conflict to save time
+        // Clean + external change → adopt the disk truth for THIS creature.
         const found = creatures.find((c) => c.id === id) ?? null;
-        const baseline = savedRef.current;
+        mtimeSigRef.current = sig;
         if (!found) {
-          if (
-            !dirtyRef.current ||
-            window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
-          ) {
-            setState({ kind: "notFound" });
-          }
+          setState({ kind: "notFound" });
           return;
-        }
-        // Unchanged record — nothing about THIS creature changed, or our own
-        // save echoing back through the watcher. Content equality is the echo
-        // filter; no last-write registry needed.
-        if (baseline && sameCreature(found, baseline)) return;
-        if (
-          dirtyRef.current &&
-          !window.confirm(
-            `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
-          )
-        ) {
-          return; // keep editing; a later save clobbers the disk version
         }
         pendingAdopt.current = true;
         setSaved(found);
@@ -205,15 +208,44 @@ export function CreatureTabProvider({ id, children }: { id: string; children: Re
     revertRef.current();
   }, [saved]);
 
-  // Data auto-saves: register the debounced `flush` so the bus (⌘S / close) runs
-  // the same guarded write, and it also persists on its own as you edit.
-  const flush = useAutoSave({ draft, dirty, save });
+  // Manual save behind the disk-change guard: re-check the creatures-file mtime
+  // and, if it moved since load, prompt Reload/Overwrite/Cancel before writing.
+  // The write itself is useCreatureDraft's `save` (normalize + persist + advance
+  // the baseline); read via a ref so this callback stays stable per keystroke.
+  const confirmConflict = useConflictPrompt();
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const guardedSave = useCallback(async () => {
+    const outcome = await guardedWrite({
+      capturedSig: mtimeSigRef.current,
+      fetchSig: () => fetchDataMtimeSig(CREATURE_FILE_KINDS),
+      confirmConflict: () => confirmConflict(id),
+      reload: async () => {
+        const [creatures, sig] = await Promise.all([
+          loadCreatures(),
+          fetchDataMtimeSig(CREATURE_FILE_KINDS),
+        ]);
+        const found = creatures.find((c) => c.id === id) ?? null;
+        mtimeSigRef.current = sig;
+        setPopulation(creatures);
+        if (!found) {
+          setState({ kind: "notFound" });
+          return;
+        }
+        pendingAdopt.current = true;
+        setSaved(found);
+        setState({ kind: "loaded" });
+      },
+      write: () => saveRef.current(),
+    });
+    if (outcome.kind === "written") mtimeSigRef.current = outcome.sig;
+    else if (outcome.kind === "cancelled") throw new SaveCancelled();
+  }, [confirmConflict, id]);
   useSaveTarget({
     id: "data",
     order: 0, // DATA saves run BEFORE the script (order 10).
     dirty,
-    save: flush,
-    autoSave: true,
+    save: guardedSave,
   });
 
   // Undo/redo for the creature draft (Ctrl+Z), driven from the tab.

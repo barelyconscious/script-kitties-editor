@@ -10,7 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { type Creature, loadCreatures } from "@/lib/creature";
 import { type Biogram, loadBiograms } from "@/lib/entities/biograms";
-import { useEntityVersion } from "@/lib/entities/dataVersion";
+import { type EntityKind, useEntityVersion } from "@/lib/entities/dataVersion";
+import { fetchDataMtimeSig } from "@/lib/entities/diskMtime";
 import {
   loadSeasons,
   type Season,
@@ -21,11 +22,15 @@ import {
 } from "@/lib/entities/seasons";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { type AbilityOption, AbilityPicker } from "@/pages/creature-editor/AbilityPicker";
-import { useAutoSave } from "./autoSave";
-import { classifyExternalRecord } from "./dataRegistry";
+import { useConflictPrompt } from "./ConflictDialog";
+import { guardedWrite, SaveCancelled } from "./diskGuard";
 import { StatOverridesGrid } from "./StatOverridesGrid";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
+
+// The draft's conflict source is only the seasons file — the creature/ability/
+// biogram populations feed the pickers but aren't part of this tab's draft.
+const SEASON_FILE_KINDS: readonly EntityKind[] = ["seasons"];
 
 /**
  * The bespoke, full-width DATA editor for a SEASON tab. A season groups creatures
@@ -90,6 +95,10 @@ function SeasonEditor({ id }: { id: string }) {
   // pane rather than overflowing it — same pattern as CreatureIdentityFields.
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
+  // The mtime signature of seasons.json as of the last disk read; the save guard
+  // compares the current on-disk signature to this to detect an external edit.
+  const mtimeSigRef = useRef<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
@@ -98,14 +107,16 @@ function SeasonEditor({ id }: { id: string }) {
       loadCreatures(),
       invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
       loadBiograms(),
+      fetchDataMtimeSig(SEASON_FILE_KINDS),
     ])
-      .then(([seasons, creatures, abil, biog]) => {
+      .then(([seasons, creatures, abil, biog, sig]) => {
         if (cancelled) return;
         const found = seasons.find((b) => b.id === id) ?? null;
         if (!found) {
           setState({ kind: "notFound" });
           return;
         }
+        mtimeSigRef.current = sig;
         setPopulation(creatures);
         setAbilities(
           abil.map((a) => ({
@@ -130,19 +141,16 @@ function SeasonEditor({ id }: { id: string }) {
   }, [id, reset]);
 
   // Refresh the picker populations when a watched entity is saved anywhere, and
-  // reconcile THIS season against a fresh read of its own domain. Kept separate
-  // from the load effect above so a bump never blindly re-runs `reset` and
-  // discards unsaved season edits — the reconcile below decides, using the
-  // shared trust model (see `classifyExternalRecord`): an unchanged/echoed
-  // record is a no-op, a clean pane silently adopts, a dirty pane is warned.
-  // The mount run is skipped — the effect above already did the first load;
-  // this fires only on subsequent version bumps.
+  // reconcile THIS season via the seasons-file mtime (the single conflict signal).
+  // Kept separate from the load effect above so a bump never blindly re-runs
+  // `reset` and discards unsaved edits: equal signature ⇒ own-save echo / no real
+  // change; changed while dirty ⇒ defer the conflict to save time; changed while
+  // clean ⇒ adopt disk truth. The mount run is skipped — the effect above already
+  // did the first load; this fires only on subsequent version bumps.
   const didInitialLoad = useRef(false);
-  // Refs so the version-keyed effect reads the latest baseline/dirtiness
-  // without re-running on every keystroke. (`dirty` is derived below; the ref
-  // assignment there keeps this effect's read fresh.)
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
+  // Ref so the version-keyed effect reads the latest dirtiness without re-running
+  // on every keystroke. (`dirty` is derived below; the ref assignment there keeps
+  // this effect's read fresh.)
   const dirtyRef = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: versions are re-run triggers, not read in the body.
   useEffect(() => {
@@ -156,8 +164,9 @@ function SeasonEditor({ id }: { id: string }) {
       loadCreatures(),
       invoke<{ id: string; name: string; sprite: string; description: string }[]>("get_abilities"),
       loadBiograms(),
+      fetchDataMtimeSig(SEASON_FILE_KINDS),
     ])
-      .then(([seasons, creatures, abil, biog]) => {
+      .then(([seasons, creatures, abil, biog, sig]) => {
         if (cancelled) return;
         setPopulation(creatures);
         setAbilities(
@@ -169,37 +178,14 @@ function SeasonEditor({ id }: { id: string }) {
           })),
         );
         setBiograms(biog);
+        if (sig === mtimeSigRef.current) return; // own-save echo / nothing changed
+        if (dirtyRef.current) return; // unsaved edits: defer the conflict to save time
+        // Clean + external change → adopt the disk truth for THIS season.
         const found = seasons.find((s) => s.id === id) ?? null;
-        const adopt = (record: Season | null) => {
-          setLoaded(record);
-          reset(record); // re-seed the draft (dropping history) to the disk truth
-          setState(record ? { kind: "loaded" } : { kind: "notFound" });
-        };
-        switch (classifyExternalRecord(found, loadedRef.current, dirtyRef.current)) {
-          case "none":
-            return;
-          case "adopt":
-            adopt(found);
-            return;
-          case "conflict":
-            if (
-              window.confirm(
-                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
-              )
-            ) {
-              adopt(found);
-            }
-            return;
-          case "missing":
-            if (
-              dirtyRef.current &&
-              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
-            ) {
-              return; // keep editing; a later save re-creates the record
-            }
-            adopt(null);
-            return;
-        }
+        mtimeSigRef.current = sig;
+        setLoaded(found);
+        reset(found);
+        setState(found ? { kind: "loaded" } : { kind: "notFound" });
       })
       // A transient refresh error just keeps the current lists — the load effect
       // owns the pane's error state.
@@ -213,19 +199,38 @@ function SeasonEditor({ id }: { id: string }) {
   // Feed the refresh effect's ref (declared above the effect, derived here).
   dirtyRef.current = dirty;
 
+  // Re-read seasons.json and reseat the baseline + draft to disk truth. Shared by
+  // the conflict "Reload" choice.
+  const reloadFromDisk = useCallback(async () => {
+    const [seasons, sig] = await Promise.all([loadSeasons(), fetchDataMtimeSig(SEASON_FILE_KINDS)]);
+    const found = seasons.find((s) => s.id === id) ?? null;
+    mtimeSigRef.current = sig;
+    setLoaded(found);
+    reset(found);
+    setState(found ? { kind: "loaded" } : { kind: "notFound" });
+  }, [id, reset]);
+
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const confirmConflict = useConflictPrompt();
   const save = useCallback(async () => {
     const current = draftRef.current;
     if (!current) return;
-    await saveSeason(current);
-    setLoaded(current);
-  }, []);
+    const outcome = await guardedWrite({
+      capturedSig: mtimeSigRef.current,
+      fetchSig: () => fetchDataMtimeSig(SEASON_FILE_KINDS),
+      confirmConflict: () => confirmConflict(id),
+      reload: reloadFromDisk,
+      write: async () => {
+        await saveSeason(current);
+        setLoaded(current);
+      },
+    });
+    if (outcome.kind === "written") mtimeSigRef.current = outcome.sig;
+    else if (outcome.kind === "cancelled") throw new SaveCancelled();
+  }, [confirmConflict, id, reloadFromDisk]);
 
-  // Seasons auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
-  // run the same guarded write), and it persists on its own as you edit.
-  const flush = useAutoSave({ draft, dirty, save });
-  useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
+  useSaveTarget({ id: "data", order: 0, dirty, save });
 
   // Undo/redo for the season draft (Ctrl+Z), driven from the tab.
   useUndoTarget({

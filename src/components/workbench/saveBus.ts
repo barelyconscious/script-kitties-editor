@@ -1,18 +1,19 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { SaveCancelled } from "./diskGuard";
 
 /**
  * THE WORKBENCH SAVE BUS CONTRACT.
  *
  * A tab is a workspace over a single game object made of several panes (DATA,
- * SCRIPT, …). Each pane that can be edited owns a slice of save state and
- * REGISTERS a {@link SaveTarget} with its tab. The tab aggregates dirtiness
- * across targets and exposes a {@link saveAllTargets} router so a single ⌘S can
- * persist everything in the right order.
+ * SCRIPT, …). Each editable pane owns a slice of save state and REGISTERS a
+ * {@link SaveTarget} with its tab. The tab aggregates dirtiness across targets
+ * and exposes a {@link saveAllTargets} router so a single ⌘S (or the toolbar
+ * Save button) persists everything in the right order.
  *
- * Panes are placeholder slots today; the real DATA/SCRIPT/API panes plug into
- * this contract in later tasks. The contract is intentionally tiny and stable —
- * downstream tasks import these types and the {@link useSaveTarget} hook without
- * needing to understand the shell internals.
+ * NOTHING auto-saves — every target is manual. Each target's `save` runs behind
+ * the disk-change guard (see `diskGuard`): if the backing file changed on disk
+ * since it was loaded, the user is prompted (Reload / Overwrite / Cancel) before
+ * anything is written.
  */
 
 /** A single saveable unit within a tab — typically one pane. */
@@ -26,14 +27,11 @@ export type SaveTarget = {
   order: number;
   /** Whether this target has unsaved changes. */
   dirty: boolean;
-  /** Persist this target. Individually atomic; throws on failure. */
-  save: () => Promise<void>;
   /**
-   * Whether this target persists itself (debounced) on change. Auto targets
-   * (data) are written without a button; manual targets (scripts) only save via
-   * the tab's "Save Script" action. Defaults to manual when omitted.
+   * Persist this target. Individually atomic; throws on failure, or throws
+   * {@link SaveCancelled} when the user cancels at the disk-change prompt.
    */
-  autoSave?: boolean;
+  save: () => Promise<void>;
 };
 
 /** The result of attempting to save one target. */
@@ -41,18 +39,18 @@ export type SaveOutcome = {
   id: string;
   ok: boolean;
   error?: string;
+  /** The user cancelled at the disk-change prompt — neither saved nor failed. */
+  cancelled?: boolean;
 };
 
 /**
  * Run every DIRTY target in ascending `order`, collecting a per-target outcome.
  *
- * v1 semantics (kept deliberately simple): every dirty target runs, each save
- * is wrapped so one failure does not abort the rest, and ALL outcomes are
- * returned. Dependency-aware short-circuiting (skip the script save if the data
- * save it depends on failed) is a later refinement — see task 427.
+ * Every dirty target runs, each save is wrapped so one failure does not abort the
+ * rest, and ALL outcomes are returned. A {@link SaveCancelled} is recorded as a
+ * CANCELLED outcome (not a failure) so a declined write never reads as an error.
  *
- * Extracted as a pure function so the ordering / outcome-collection logic is
- * testable without React.
+ * Pure of React so the ordering / outcome-collection logic is testable.
  */
 export async function saveAllTargets(targets: readonly SaveTarget[]): Promise<SaveOutcome[]> {
   const dirty = targets.filter((t) => t.dirty).sort((a, b) => a.order - b.order);
@@ -63,7 +61,11 @@ export async function saveAllTargets(targets: readonly SaveTarget[]): Promise<Sa
       await target.save();
       outcomes.push({ id: target.id, ok: true });
     } catch (err) {
-      outcomes.push({ id: target.id, ok: false, error: errorMessage(err) });
+      if (err instanceof SaveCancelled) {
+        outcomes.push({ id: target.id, ok: false, cancelled: true });
+      } else {
+        outcomes.push({ id: target.id, ok: false, error: errorMessage(err) });
+      }
     }
   }
   return outcomes;
@@ -76,12 +78,12 @@ export function aggregateDirty(targets: readonly SaveTarget[]): boolean {
 
 /** A human summary of a save attempt, suitable for inline status UI. */
 export type SaveSummary = {
-  /** True only when EVERY attempted save succeeded (or nothing was attempted). */
+  /** True only when EVERY attempted save succeeded (or nothing landed). */
   ok: boolean;
   /**
-   * Status text. Empty string for the no-op case (nothing was dirty) so callers
-   * can treat it as "show nothing". On full success this is "Saved"; on any
-   * failure it NAMES which target(s) failed precisely.
+   * Status text. Empty string for the no-op case (nothing was dirty, or every
+   * write was cancelled) so callers can treat it as "show nothing". On full
+   * success this is "Saved"; on any failure it NAMES which target(s) failed.
    */
   message: string;
 };
@@ -101,30 +103,28 @@ function targetLabel(id: string): string {
 /**
  * Collapse per-target outcomes into a single ok/message summary for the toolbar.
  *
- * The TRUST-CRITICAL rule: a PARTIAL failure must never read as success. If any
- * target failed, `ok` is false and the message names what saved AND what failed
- * (e.g. "Data saved, but script failed: <error>") so the user is never told
- * "Saved" while a write is actually on the floor.
+ * CANCELLED targets are excluded from both the success and failure tallies: a
+ * write the user declined is neither. If nothing actually landed (all cancelled
+ * or nothing dirty), the message is empty.
  *
- * Cases:
- *  - empty            → { ok: true,  message: "" }   (nothing was dirty; no-op)
- *  - all succeeded    → { ok: true,  message: "Saved" }
- *  - some succeeded   → { ok: false, message: "<X> saved, but <y> failed: …" }
- *  - none succeeded   → { ok: false, message: "Save failed: …" }
+ * The TRUST-CRITICAL rule holds: a PARTIAL failure never reads as success — if
+ * any non-cancelled target failed, `ok` is false and the message names what
+ * saved AND what failed.
  *
  * Pure — unit-tested without React.
  */
 export function summarizeOutcomes(outcomes: readonly SaveOutcome[]): SaveSummary {
-  if (outcomes.length === 0) {
+  const active = outcomes.filter((o) => !o.cancelled);
+  if (active.length === 0) {
     return { ok: true, message: "" };
   }
 
-  const failed = outcomes.filter((o) => !o.ok);
+  const failed = active.filter((o) => !o.ok);
   if (failed.length === 0) {
     return { ok: true, message: "Saved" };
   }
 
-  const succeeded = outcomes.filter((o) => o.ok);
+  const succeeded = active.filter((o) => o.ok);
   const failedDetail = failed
     .map((o) => `${targetLabel(o.id).toLowerCase()}${o.error ? `: ${o.error}` : ""}`)
     .join("; ");
@@ -179,8 +179,7 @@ export const RequestSaveProvider = RequestSaveContext.Provider;
 
 /**
  * Pane-side hook returning a callback that triggers the tab's unified save, or a
- * no-op when used outside a provider. Lets a pane (e.g. the script editor's ⌘S)
- * save EVERYTHING dirty in the tab, not just its own target.
+ * no-op when used outside a provider.
  */
 export function useRequestSave(): () => void {
   const requestSave = useContext(RequestSaveContext);
@@ -202,12 +201,12 @@ export function useSaveTarget(target: SaveTarget): void {
     throw new Error("useSaveTarget must be used within a SaveBusProvider");
   }
 
-  const { id, order, dirty, save, autoSave } = target;
+  const { id, order, dirty, save } = target;
   // Re-register whenever any field changes; unregister on unmount or id change.
   useEffect(() => {
-    registry.register({ id, order, dirty, save, autoSave });
+    registry.register({ id, order, dirty, save });
     return () => registry.unregister(id);
-  }, [registry, id, order, dirty, save, autoSave]);
+  }, [registry, id, order, dirty, save]);
 }
 
 /**
@@ -218,19 +217,9 @@ export function useSaveTarget(target: SaveTarget): void {
 export function useSaveBus(): {
   registry: SaveBusRegistry;
   targets: SaveTarget[];
-  /** Any target dirty (auto or manual). */
+  /** Any target dirty. */
   dirty: boolean;
-  /** A manual (script) target is dirty — what the Save Script button gates on. */
-  manualDirty: boolean;
-  /** An auto (data) target is dirty — a write is pending/in-flight. */
-  autoDirty: boolean;
-  /** Whether the tab has any manual (script) target at all. */
-  hasManualTarget: boolean;
   saveAll: () => Promise<SaveOutcome[]>;
-  /** Save only the manual (script) targets. */
-  saveManual: () => Promise<SaveOutcome[]>;
-  /** Flush the auto (data) targets immediately (used by ⌘S / close). */
-  saveAuto: () => Promise<SaveOutcome[]>;
 } {
   const [targets, setTargets] = useState<SaveTarget[]>([]);
   // Mirror the current targets in a ref so saveAll always sees the latest set
@@ -258,11 +247,6 @@ export function useSaveBus(): {
     registry: registryRef.current,
     targets,
     dirty: aggregateDirty(targets),
-    manualDirty: targets.some((t) => !t.autoSave && t.dirty),
-    autoDirty: targets.some((t) => t.autoSave && t.dirty),
-    hasManualTarget: targets.some((t) => !t.autoSave),
     saveAll: () => saveAllTargets(targetsRef.current),
-    saveManual: () => saveAllTargets(targetsRef.current.filter((t) => !t.autoSave)),
-    saveAuto: () => saveAllTargets(targetsRef.current.filter((t) => t.autoSave)),
   };
 }

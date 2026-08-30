@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { type EntityKind, useEntityVersions } from "@/lib/entities/dataVersion";
+import { fetchDataMtimeSig } from "@/lib/entities/diskMtime";
 import {
   type DrawRules,
   loadPacks,
@@ -25,10 +26,14 @@ import { loadSeasons, type Season } from "@/lib/entities/seasons";
 import { useEnumValues } from "@/lib/registry";
 import { useHistoryState } from "@/lib/useHistoryState";
 import { cn } from "@/lib/utils";
-import { useAutoSave } from "./autoSave";
-import { classifyExternalRecord } from "./dataRegistry";
+import { useConflictPrompt } from "./ConflictDialog";
+import { guardedWrite, SaveCancelled } from "./diskGuard";
 import { useSaveTarget } from "./saveBus";
 import { useUndoTarget } from "./undo";
+
+// The draft's conflict source is only the packs file — the season list feeds the
+// slot pickers but isn't part of this tab's draft.
+const PACK_FILE_KINDS: readonly EntityKind[] = ["packs"];
 
 /**
  * The bespoke, full-width DATA editor for a PACK tab. A pack is a card pack whose
@@ -80,17 +85,22 @@ function PackEditor({ id }: { id: string }) {
   const flashToken = useRef(0);
   const [flash, setFlash] = useState<{ index: number; token: number } | null>(null);
 
+  // The mtime signature of packs.json as of the last disk read; the save guard
+  // compares the current on-disk signature to this to detect an external edit.
+  const mtimeSigRef = useRef<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    Promise.all([loadPacks(), loadSeasons()])
-      .then(([packs, seasonList]) => {
+    Promise.all([loadPacks(), loadSeasons(), fetchDataMtimeSig(PACK_FILE_KINDS)])
+      .then(([packs, seasonList, sig]) => {
         if (cancelled) return;
         const found = packs.find((p) => p.id === id) ?? null;
         if (!found) {
           setState({ kind: "notFound" });
           return;
         }
+        mtimeSigRef.current = sig;
         setSeasons(seasonList);
         setLoaded(found);
         reset(found); // seed the draft, dropping any prior history
@@ -107,15 +117,12 @@ function PackEditor({ id }: { id: string }) {
 
   const dirty = state.kind === "loaded" && draft != null && loaded != null && !equal(draft, loaded);
 
-  // Re-fetch the season options and reconcile THIS pack when either watched
-  // domain changes anywhere — an in-app save in another surface, or an external
-  // disk edit routed through `data-changed`. Same two-effect + trust-model
-  // wiring as SeasonEditorPane: the mount run is skipped (the load effect above
-  // owns the first fetch), season options always follow the fresh data, and the
-  // open record adopts silently when clean / warns when dirty.
+  // Re-fetch the season options and reconcile THIS pack via the packs-file mtime
+  // (the single conflict signal) when either watched domain changes. Same wiring
+  // as SeasonEditorPane: the mount run is skipped, season options always follow
+  // fresh data, and the open record adopts silently when clean while a dirty pane
+  // defers the conflict to save time.
   const version = useEntityVersions(PACK_TAB_KINDS);
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const didInitialLoad = useRef(false);
@@ -126,41 +133,18 @@ function PackEditor({ id }: { id: string }) {
       return;
     }
     let cancelled = false;
-    Promise.all([loadPacks(), loadSeasons()])
-      .then(([packs, seasonList]) => {
+    Promise.all([loadPacks(), loadSeasons(), fetchDataMtimeSig(PACK_FILE_KINDS)])
+      .then(([packs, seasonList, sig]) => {
         if (cancelled) return;
         setSeasons(seasonList);
+        if (sig === mtimeSigRef.current) return; // own-save echo / nothing changed
+        if (dirtyRef.current) return; // unsaved edits: defer the conflict to save time
+        // Clean + external change → adopt the disk truth for THIS pack.
         const found = packs.find((p) => p.id === id) ?? null;
-        const adopt = (record: Pack | null) => {
-          setLoaded(record);
-          reset(record); // re-seed the draft (dropping history) to the disk truth
-          setState(record ? { kind: "loaded" } : { kind: "notFound" });
-        };
-        switch (classifyExternalRecord(found, loadedRef.current, dirtyRef.current)) {
-          case "none":
-            return;
-          case "adopt":
-            adopt(found);
-            return;
-          case "conflict":
-            if (
-              window.confirm(
-                `“${id}” changed outside this editor. Load the new contents and discard your unsaved edits?`,
-              )
-            ) {
-              adopt(found);
-            }
-            return;
-          case "missing":
-            if (
-              dirtyRef.current &&
-              !window.confirm(`“${id}” was removed on disk. Discard your unsaved edits?`)
-            ) {
-              return; // keep editing; a later save re-creates the record
-            }
-            adopt(null);
-            return;
-        }
+        mtimeSigRef.current = sig;
+        setLoaded(found);
+        reset(found);
+        setState(found ? { kind: "loaded" } : { kind: "notFound" });
       })
       // A transient refresh error keeps the current data — the load effect owns
       // the pane's error state.
@@ -170,19 +154,38 @@ function PackEditor({ id }: { id: string }) {
     };
   }, [version, id, reset]);
 
+  // Re-read packs.json and reseat the baseline + draft to disk truth. Shared by
+  // the conflict "Reload" choice.
+  const reloadFromDisk = useCallback(async () => {
+    const [packs, sig] = await Promise.all([loadPacks(), fetchDataMtimeSig(PACK_FILE_KINDS)]);
+    const found = packs.find((p) => p.id === id) ?? null;
+    mtimeSigRef.current = sig;
+    setLoaded(found);
+    reset(found);
+    setState(found ? { kind: "loaded" } : { kind: "notFound" });
+  }, [id, reset]);
+
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const confirmConflict = useConflictPrompt();
   const save = useCallback(async () => {
     const current = draftRef.current;
     if (!current) return;
-    await savePack(current);
-    setLoaded(current);
-  }, []);
+    const outcome = await guardedWrite({
+      capturedSig: mtimeSigRef.current,
+      fetchSig: () => fetchDataMtimeSig(PACK_FILE_KINDS),
+      confirmConflict: () => confirmConflict(id),
+      reload: reloadFromDisk,
+      write: async () => {
+        await savePack(current);
+        setLoaded(current);
+      },
+    });
+    if (outcome.kind === "written") mtimeSigRef.current = outcome.sig;
+    else if (outcome.kind === "cancelled") throw new SaveCancelled();
+  }, [confirmConflict, id, reloadFromDisk]);
 
-  // Packs auto-save: the debounced `flush` is what the bus saves (so ⌘S / close
-  // run the same guarded write), and it persists on its own as you edit.
-  const flush = useAutoSave({ draft, dirty, save });
-  useSaveTarget({ id: "data", order: 0, dirty, save: flush, autoSave: true });
+  useSaveTarget({ id: "data", order: 0, dirty, save });
 
   // Undo/redo for the pack draft (Ctrl+Z), driven from the tab.
   useUndoTarget({

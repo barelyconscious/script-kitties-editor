@@ -1,8 +1,6 @@
 import {
-  CircleAlert,
   FileCode2,
   LineChart,
-  Loader2,
   type LucideIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -14,11 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  type AutoSaveController,
-  AutoSaveControllerProvider,
-  type AutoSaveStatus,
-} from "./autoSave";
+import { ConflictDialogProvider } from "./ConflictDialog";
 import { CreatureChartPane } from "./CreatureChartPane";
 import { CreatureDataPane } from "./CreatureDataPane";
 import { CreatureTabProvider } from "./creatureTab";
@@ -75,21 +69,17 @@ export interface TabWorkspaceProps {
 /** How long a "Saved" confirmation lingers before auto-clearing. */
 const SAVED_CLEAR_MS = 2500;
 
-/** Debounce from the last data edit before an auto-save fires. */
-const DATA_AUTOSAVE_MS = 700;
-
 /**
  * The workspace for ONE open tab: a collapsible 2-pane layout (DATA left, SCRIPT
  * center). Owns its own save bus so panes register against this tab instance and
  * nothing leaks across tabs.
  *
- * SAVE MODEL: DATA persists itself — data targets auto-save (debounced) and show
- * a quiet "Saving…/Saved" indicator. SCRIPTS are manual: the "Save Script"
- * button, the window-level ⌘S (active tab only), or Monaco's in-editor ⌘S
- * persist the script — and flush any pending data write first so a forced save
- * never races the debounce. The unsaved dot + leave/close guards track the
- * SCRIPT (the only thing needing a conscious save). The API reference is a single
- * static pane lifted to the shell, not here.
+ * SAVE MODEL: nothing auto-saves. A single "Save" button (and the window-level
+ * ⌘S / Monaco's in-editor ⌘S) persists EVERYTHING dirty in the tab — data first,
+ * then script — through the disk-change guard (each write re-checks the file's
+ * mtime and prompts Reload/Overwrite/Cancel if it changed since load). The
+ * unsaved dot + leave/close guards track ALL unsaved edits. The API reference is
+ * a single static pane lifted to the shell, not here.
  */
 export function TabWorkspace({
   tab,
@@ -132,62 +122,43 @@ export function TabWorkspace({
   const undoRegistry = useMemo(() => ({ set: setUndoTarget }), []);
   const commitUndoStep = useCallback(() => undoTargetRef.current?.commit(), []);
 
-  // The SCRIPT (manual) save summary: a quiet "Saved" on success (auto-clears)
-  // or a persistent error (cleared on the next script edit/save).
+  // The save summary: a quiet "Saved" on success (auto-clears) or a persistent
+  // error (cleared on the next edit/save).
   const [status, setStatus] = useState<SaveSummary | null>(null);
-  // The DATA auto-save indicator — quiet "Saving…/Saved", persistent on error.
-  const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>({ kind: "idle" });
 
-  // Report SCRIPT dirtiness up: the unsaved dot + close/leave/unload guards track
-  // the script (data auto-saves, so it isn't unsaved work needing a conscious
-  // Save). Fire only on transitions to avoid redundant parent setState churn.
+  // Report dirtiness up: the unsaved dot + close/leave/unload guards track ALL
+  // unsaved edits (data + script) now that nothing auto-saves. Fire only on
+  // transitions to avoid redundant parent setState churn.
   const lastDirtyRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (lastDirtyRef.current === bus.manualDirty) return;
-    lastDirtyRef.current = bus.manualDirty;
-    onDirtyChange?.(bus.manualDirty);
-  }, [bus.manualDirty, onDirtyChange]);
+    if (lastDirtyRef.current === bus.dirty) return;
+    lastDirtyRef.current = bus.dirty;
+    onDirtyChange?.(bus.dirty);
+  }, [bus.dirty, onDirtyChange]);
 
-  // A fresh SCRIPT edit invalidates any lingering script status (esp. an error).
+  // A fresh edit invalidates any lingering status (esp. an error).
   useEffect(() => {
-    if (bus.manualDirty) setStatus(null);
-  }, [bus.manualDirty]);
+    if (bus.dirty) setStatus(null);
+  }, [bus.dirty]);
 
-  // Auto-clear the script success confirmation after a couple seconds. Errors persist.
+  // Auto-clear the success confirmation after a couple seconds. Errors persist.
   useEffect(() => {
     if (!status?.ok || status.message.length === 0) return;
     const timer = setTimeout(() => setStatus(null), SAVED_CLEAR_MS);
     return () => clearTimeout(timer);
   }, [status]);
 
-  // Auto-clear the data "Saved" tick; "saving"/"error" persist.
-  useEffect(() => {
-    if (autoStatus.kind !== "saved") return;
-    const timer = setTimeout(() => setAutoStatus({ kind: "idle" }), SAVED_CLEAR_MS);
-    return () => clearTimeout(timer);
-  }, [autoStatus]);
-
-  // Shared with the data panes: debounce delay, the quiet status report, and the
-  // post-save object-list refresh. Stable identity so consumers don't churn.
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
-  const refresh = useCallback(() => onSavedRef.current?.(), []);
-  const autoSaveController = useMemo<AutoSaveController>(
-    () => ({ delayMs: DATA_AUTOSAVE_MS, report: setAutoStatus, onSaved: refresh }),
-    [refresh],
-  );
 
-  // "Save Script": flush any pending DATA write first (so a forced save never
-  // races the debounce), then persist the manual (script) targets and summarize.
-  const saveAutoRef = useRef(bus.saveAuto);
-  saveAutoRef.current = bus.saveAuto;
-  const saveManualRef = useRef(bus.saveManual);
-  saveManualRef.current = bus.saveManual;
-  const handleSaveScript = useCallback(async () => {
-    await saveAutoRef.current();
-    const outcomes = await saveManualRef.current();
+  // "Save": persist EVERYTHING dirty in the tab (data first, then script), each
+  // write behind the disk-change guard. Summarize for the toolbar status.
+  const saveAllRef = useRef(bus.saveAll);
+  saveAllRef.current = bus.saveAll;
+  const handleSave = useCallback(async () => {
+    const outcomes = await saveAllRef.current();
     const summary = summarizeOutcomes(outcomes);
-    if (summary.message.length === 0) return; // no-op (script wasn't dirty)
+    if (summary.message.length === 0) return; // no-op (nothing dirty / all cancelled)
     setStatus(summary);
     if (summary.ok) onSavedRef.current?.();
   }, []);
@@ -211,7 +182,7 @@ export function TabWorkspace({
         // ⌘S doing nothing. Mirrors the XGUI editor's capture-phase Cmd+S.
         e.preventDefault();
         e.stopPropagation();
-        void handleSaveScript();
+        void handleSave();
         return;
       }
       if (key === "z" || key === "y") {
@@ -232,12 +203,12 @@ export function TabWorkspace({
     // (undo/redo below still defer to Monaco via the `.monaco-editor` check).
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [handleSaveScript]);
+  }, [handleSave]);
 
   return (
     <SaveBusProvider value={bus.registry}>
-      <AutoSaveControllerProvider value={autoSaveController}>
-        <RequestSaveProvider value={handleSaveScript}>
+      <ConflictDialogProvider>
+        <RequestSaveProvider value={handleSave}>
           <UndoRegistryProvider value={undoRegistry}>
             {/* onBlur bubbles (focusout): leaving any data field closes the
                 current undo step, so one Ctrl+Z reverts one field's change. */}
@@ -343,7 +314,6 @@ export function TabWorkspace({
                         />
                       </div>
                     )}
-                    <AutoSaveIndicator status={autoStatus} />
                     {/* Undo/redo for the data draft (Ctrl+Z). Present whenever a data
                     editor is mounted; scripts undo inside Monaco, not here. */}
                     {undoTarget && (
@@ -368,19 +338,17 @@ export function TabWorkspace({
                         </Button>
                       </div>
                     )}
-                    {/* Scripts save manually; seasons/packs are script-less, so the
-                    button only appears when the tab actually has a script. */}
-                    {bus.hasManualTarget && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!bus.manualDirty}
-                        onClick={() => void handleSaveScript()}
-                      >
-                        <Save />
-                        Save Script
-                      </Button>
-                    )}
+                    {/* One unified Save: persists all dirty targets (data + script).
+                    Nothing auto-saves, so it's the sole write path (with ⌘S). */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!bus.dirty}
+                      onClick={() => void handleSave()}
+                    >
+                      <Save />
+                      Save
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -469,33 +437,8 @@ export function TabWorkspace({
             </div>
           </UndoRegistryProvider>
         </RequestSaveProvider>
-      </AutoSaveControllerProvider>
+      </ConflictDialogProvider>
     </SaveBusProvider>
-  );
-}
-
-/** Quiet data auto-save indicator: a spinner while saving, a persistent error. */
-function AutoSaveIndicator({ status }: { status: AutoSaveStatus }) {
-  if (status.kind === "idle") return null;
-  if (status.kind === "saving") {
-    return (
-      <span className="flex items-center gap-1 text-muted-foreground text-xs">
-        <Loader2 className="size-3 animate-spin" />
-        Saving…
-      </span>
-    );
-  }
-  if (status.kind === "saved") {
-    return <span className="text-muted-foreground text-xs">Saved</span>;
-  }
-  return (
-    <span
-      className="flex items-center gap-1 font-medium text-destructive text-xs"
-      title={status.message}
-    >
-      <CircleAlert className="size-3" />
-      Couldn’t save
-    </span>
   );
 }
 

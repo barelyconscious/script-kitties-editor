@@ -99,10 +99,10 @@ export function TabWorkspace({
   // with this tab's bus, so the shared Save button / ⌘S work unchanged.
   const isBespoke = tab.objectType === "Season" || tab.objectType === "Pack";
   const [dataOpen, setDataOpen] = useState(true);
-  // Creatures can flip the center region between the aiController SCRIPT (the
-  // default, editable) and a read-only STATS graph. Per-tab state, defaults to
-  // the script so the tab opens as a code lens.
-  const [creatureView, setCreatureView] = useState<"script" | "chart">("script");
+  // Creatures can flip the center region between the aiController SCRIPT
+  // (editable) and a read-only STATS graph. Per-tab state, defaults to the stats
+  // graph so the tab opens on the progression chart.
+  const [creatureView, setCreatureView] = useState<"script" | "chart">("chart");
 
   // The data column's width — matched by the toolbar's data header so "Data" sits
   // over the pane and the divider continues the column border. Creatures get a

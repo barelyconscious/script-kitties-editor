@@ -2,23 +2,30 @@ import type { Creature } from "@/lib/creature";
 import { AbilitiesByLevelEditor } from "./AbilitiesByLevelEditor";
 import { type AbilityOption, AbilityPicker } from "./AbilityPicker";
 import { ProgressionChart } from "./ProgressionChart";
+import { RollStatsButton } from "./RollStatsButton";
 import { StatGrowthTable } from "./StatGrowthTable";
 import { StatGrowthTableSingle } from "./StatGrowthTableSingle";
 
 function Section({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description?: string;
+  /** Optional right-aligned control shown beside the title (e.g. a button). */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <div>
-        <h3 className="font-medium text-sm">{title}</h3>
-        {description && <p className="text-muted-foreground text-xs">{description}</p>}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-medium text-sm">{title}</h3>
+          {description && <p className="text-muted-foreground text-xs">{description}</p>}
+        </div>
+        {action}
       </div>
       {children}
     </section>
@@ -92,6 +99,7 @@ export function CreatureForm({
         <Section
           title="Stats & growth"
           description="Level-1 base value and the flat amount each stat gains per level."
+          action={<RollStatsButton creature={creature} onChange={onChange} disabled={disabled} />}
         >
           {singleColumnStats ? (
             <StatGrowthTableSingle

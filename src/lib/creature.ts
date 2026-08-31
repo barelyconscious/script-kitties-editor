@@ -12,6 +12,9 @@ export type Creature = {
   id: string;
   name: string;
   sprite: string;
+  /** Aseprite animation-group file (e.g. `javaline_test.json`) driving the in-battle
+   *  flipbook. Empty when the creature has no animation. */
+  animationGroup: string;
   description: string;
   /** Mislabelled in the data — it's the creature's script, not an "ai controller". */
   aiController: string;

@@ -6,6 +6,7 @@ function creature(id: string, attack: number): Creature {
     id,
     name: id,
     sprite: "",
+    animationGroup: "",
     description: "",
     aiController: "",
     rarity: "",

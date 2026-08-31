@@ -174,6 +174,13 @@ pub struct Creature {
     pub id: String,
     pub name: String,
     pub sprite: String,
+    // Aseprite animation group file (e.g. `javaline_test.json`) that drives the
+    // creature's in-battle flipbook. Optional and skipped when empty so creatures
+    // without an animation round-trip unchanged — and, critically, so editing ANY
+    // creature no longer wipes this field off the others (the DAL rewrites the
+    // whole file on every save; an untracked key would be silently dropped).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub animation_group: String,
     pub description: String,
     pub ai_controller: String, // shoulda been script
     // Gacha rarity (a Registry `rarities` value). Optional so pre-existing
@@ -397,4 +404,52 @@ pub struct Dlc {
     #[serde(default)]
     pub dungeons: Vec<String>,
     pub script: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Minimal creature JSON as the engine's data files write it, with an
+    // animationGroup present.
+    fn javaline_json() -> serde_json::Value {
+        serde_json::json!({
+            "id": "javaline",
+            "name": "Javaline",
+            "sprite": "javaline",
+            "animationGroup": "javaline_test.json",
+            "description": "A small, feline creature with a sharp bite.",
+            "aiController": "ai_default.lua",
+            "baseStats": { "attack": 7, "defense": 70, "health": 10, "speed": 1 },
+            "baseAbilities": ["pounce"],
+            "statGainsPerLevel": { "attack": 2, "health": 4 },
+            "abilitiesByLevel": []
+        })
+    }
+
+    // Regression guard for the flipbook-animation bug: the DAL rewrites the whole
+    // creatures.json through this struct on every save, so if `animation_group`
+    // isn't a modeled field it gets silently dropped and creatures stop animating.
+    #[test]
+    fn animation_group_survives_a_load_save_round_trip() {
+        let creature: Creature = serde_json::from_value(javaline_json()).unwrap();
+        assert_eq!(creature.animation_group, "javaline_test.json");
+
+        let reserialized = serde_json::to_value(&creature).unwrap();
+        assert_eq!(reserialized["animationGroup"], "javaline_test.json");
+    }
+
+    // A creature with no animation must not gain an empty `animationGroup` key on
+    // save — otherwise every animation-less creature churns the file.
+    #[test]
+    fn absent_animation_group_stays_absent_on_save() {
+        let mut json = javaline_json();
+        json.as_object_mut().unwrap().remove("animationGroup");
+
+        let creature: Creature = serde_json::from_value(json).unwrap();
+        assert_eq!(creature.animation_group, "");
+
+        let reserialized = serde_json::to_value(&creature).unwrap();
+        assert!(reserialized.get("animationGroup").is_none());
+    }
 }

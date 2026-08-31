@@ -67,7 +67,7 @@ export function StatGrowthTable({
     // narrow pane stays single-column no matter the window size.
     <div className="@container">
       <div className="grid @3xl:grid-cols-2 gap-4">
-        {columns.map((stats) => (
+        {columns.map((stats, colIdx) => (
           <div key={stats[0]} className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
               <thead>
@@ -138,6 +138,45 @@ export function StatGrowthTable({
                     </tr>
                   );
                 })}
+                {/* The core-stat column (health…luck) gets a Total row summing
+                    base, gain, and the @MAX_LEVEL projection — a quick read on
+                    a creature's overall stat budget. The element column, whose
+                    stats aren't meaningfully additive, gets none. */}
+                {colIdx === 0 &&
+                  (() => {
+                    const totalBase = stats.reduce(
+                      (sum, stat) => sum + (creature.baseStats[stat] ?? 0),
+                      0,
+                    );
+                    const totalGain = stats.reduce(
+                      (sum, stat) => sum + (creature.statGainsPerLevel[stat] ?? 0),
+                      0,
+                    );
+                    const totalAtMax = stats.reduce(
+                      (sum, stat) =>
+                        sum +
+                        projectStat(
+                          creature.baseStats[stat] ?? 0,
+                          creature.statGainsPerLevel[stat] ?? 0,
+                          MAX_LEVEL,
+                        ),
+                      0,
+                    );
+                    return (
+                      <tr className="border-t-2 bg-muted/40 font-medium">
+                        <td className="px-3 py-1.5">Total</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {formatStat(totalBase)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {formatStat(totalGain)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {formatStat(totalAtMax)}
+                        </td>
+                      </tr>
+                    );
+                  })()}
               </tbody>
             </table>
           </div>

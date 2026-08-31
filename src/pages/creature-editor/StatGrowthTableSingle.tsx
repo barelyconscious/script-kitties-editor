@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { DecimalInput } from "@/components/DecimalInput";
 import { type Creature, MAX_LEVEL, projectStat } from "@/lib/creature";
 import { CREATURE_STATS, STAT_META } from "@/lib/stats";
@@ -7,6 +8,14 @@ import { cn } from "@/lib/utils";
 function formatStat(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
+
+/**
+ * The core stats (health…luck) — everything before the element block. Their
+ * Total row summarizes a creature's overall stat budget; the element stats that
+ * follow aren't meaningfully additive, so they get no total.
+ */
+const CORE_STATS = CREATURE_STATS.slice(0, CREATURE_STATS.indexOf("fireDamage"));
+const LAST_CORE_STAT = CORE_STATS[CORE_STATS.length - 1];
 
 /**
  * Single-column variant of {@link StatGrowthTable} for NARROW containers — the
@@ -61,7 +70,8 @@ export function StatGrowthTableSingle({
             const gain = creature.statGainsPerLevel[stat] ?? 0;
             const atMax = projectStat(base, gain, MAX_LEVEL);
             return (
-              <tr key={stat} className="border-b last:border-b-0 hover:bg-muted/30">
+              <Fragment key={stat}>
+              <tr className="border-b last:border-b-0 hover:bg-muted/30">
                 <td className="px-3 py-1.5">
                   <span className="flex items-center gap-2">
                     {Icon && <Icon className={cn("size-4 shrink-0", meta.color)} />}
@@ -97,6 +107,40 @@ export function StatGrowthTableSingle({
                   {formatStat(atMax)}
                 </td>
               </tr>
+              {/* Total of the core stats, slotted in right after Luck. */}
+              {stat === LAST_CORE_STAT && (
+                <tr className="border-b bg-muted/40 font-medium">
+                  <td className="px-3 py-1.5">Total</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">
+                    {formatStat(
+                      CORE_STATS.reduce((sum, s) => sum + (creature.baseStats[s] ?? 0), 0),
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">
+                    {formatStat(
+                      CORE_STATS.reduce(
+                        (sum, s) => sum + (creature.statGainsPerLevel[s] ?? 0),
+                        0,
+                      ),
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatStat(
+                      CORE_STATS.reduce(
+                        (sum, s) =>
+                          sum +
+                          projectStat(
+                            creature.baseStats[s] ?? 0,
+                            creature.statGainsPerLevel[s] ?? 0,
+                            MAX_LEVEL,
+                          ),
+                        0,
+                      ),
+                    )}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>

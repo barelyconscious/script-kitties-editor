@@ -2,6 +2,7 @@ import { FileWarning, Loader2 } from "lucide-react";
 import { populationWithDraft } from "@/lib/creature";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { ProgressionChart } from "@/pages/creature-editor/ProgressionChart";
+import { RollStatsButton } from "@/pages/creature-editor/RollStatsButton";
 import { StatGrowthTable } from "@/pages/creature-editor/StatGrowthTable";
 import { useCreatureTab } from "./creatureTab";
 
@@ -71,12 +72,15 @@ export function CreatureChartPane() {
                 the chart's own select uses, so the two stay linked; the active row
                 highlights. On wide screens the grid splits into two columns. */}
             <section className="flex flex-col gap-2">
-              <div>
-                <h3 className="font-medium text-sm">Stats &amp; growth</h3>
-                <p className="text-muted-foreground text-xs">
-                  Level-1 base value and the flat amount each stat gains per level. Click a row to
-                  plot that stat above.
-                </p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-medium text-sm">Stats &amp; growth</h3>
+                  <p className="text-muted-foreground text-xs">
+                    Level-1 base value and the flat amount each stat gains per level. Click a row to
+                    plot that stat above.
+                  </p>
+                </div>
+                <RollStatsButton creature={draft} onChange={setDraft} />
               </div>
               <StatGrowthTable
                 creature={draft}

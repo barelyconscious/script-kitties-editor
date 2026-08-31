@@ -312,6 +312,7 @@ const CREATURE_DESCRIPTOR: CreationDescriptor<Creature> = {
     name,
     // Creatures store the BARE sprite stem (no extension), unlike the flat types.
     sprite: id,
+    animationGroup: "",
     description: "",
     // Empty when no script was attached; createObject resolves the shared default when one is.
     aiController: script ?? "",

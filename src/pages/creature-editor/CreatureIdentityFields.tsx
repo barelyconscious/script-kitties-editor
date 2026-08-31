@@ -85,6 +85,18 @@ export function CreatureIdentityFields({
             </SelectContent>
           </Select>
         </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="creature-animation-group" className="text-xs">
+            Animation
+          </Label>
+          <Input
+            id="creature-animation-group"
+            value={creature.animationGroup ?? ""}
+            placeholder="e.g. javaline_test.json"
+            disabled={disabled}
+            onChange={(e) => set("animationGroup", e.currentTarget.value)}
+          />
+        </div>
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label htmlFor="creature-description" className="text-xs">
             Description

@@ -205,6 +205,8 @@ describe("makeDefault shapes", () => {
       name: "Bitlynx",
       // bare stem — no .png extension, per the creature sprite convention.
       sprite: "bitlynx",
+      // No animation by default; set to an aseprite group file to animate.
+      animationGroup: "",
       description: "",
       // Optional script: empty when none is attached.
       aiController: "",

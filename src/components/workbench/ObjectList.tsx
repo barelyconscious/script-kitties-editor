@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Plus, SearchIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, SearchIcon, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CollapseRail } from "@/components/CollapseRail";
 import { Sprite } from "@/components/Sprite";
@@ -84,8 +84,19 @@ export function ObjectList({
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search objects…"
-            className="pl-8"
+            className="pl-8 pr-8"
           />
+          {query && (
+            <button
+              type="button"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -24,6 +24,7 @@ import {
   MonitorPlay,
   Plus,
   SearchIcon,
+  X,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { CollapseRail } from "@/components/CollapseRail";
@@ -248,8 +249,19 @@ export function ComponentList({ collapsed, onCollapse, className }: ComponentLis
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search components…"
-            className="pl-8"
+            className="pl-8 pr-8"
           />
+          {query && (
+            <button
+              type="button"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>

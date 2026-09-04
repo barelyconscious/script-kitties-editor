@@ -33,7 +33,12 @@ export function TabBar({ tabs, activeKey, dirtyByTab, onSelect, onClose, classNa
                 : "text-muted-foreground hover:bg-background/60",
             )}
             // Middle-click anywhere on the tab closes it (browser-tab convention).
-            // preventDefault suppresses the webview's middle-click autoscroll.
+            // Suppress the webview's middle-click autoscroll on mousedown so it
+            // can't claim the gesture when the strip overflows (is scrollable);
+            // otherwise the close on onAuxClick (mouseup) never fires.
+            onMouseDown={(e) => {
+              if (e.button === 1) e.preventDefault();
+            }}
             onAuxClick={(e) => {
               if (e.button !== 1) return;
               e.preventDefault();

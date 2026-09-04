@@ -79,6 +79,19 @@ export const DEFAULT_REGISTRY: Registry = {
   surfaces: ["BURNING", "WET", "ELECTRIFIED", "POISONED", "FROZEN"].map(v),
 };
 
+/**
+ * Normalize free text into the registry's `UPPER_SNAKE_CASE` token form — the
+ * shape every enum value uses. `"on fire!"` → `"ON_FIRE"`, `"fire-damage"` →
+ * `"FIRE_DAMAGE"`. Returns "" for input with no usable characters.
+ */
+export function normalizeToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "_") // non-alphanumeric runs → a single underscore
+    .replace(/^_+|_+$/g, "") // no leading/trailing underscores
+    .toUpperCase();
+}
+
 export function loadRegistry(): Promise<Registry> {
   return invoke<Registry>("get_registry");
 }
@@ -93,6 +106,13 @@ type RegistryContextValue = {
   loading: boolean;
   /** Persist a new registry; on success the context (and every dropdown) updates. */
   save: (next: Registry) => Promise<void>;
+  /**
+   * Append a value to one enum and persist, so a tag/option created inline (e.g.
+   * from a tags field) becomes a first-class Registry entry everywhere. The
+   * value is normalized to `UPPER_SNAKE_CASE`; adding an existing token is a
+   * no-op. Returns the normalized token so the caller can store the same form.
+   */
+  addEnumValue: (key: RegistryEnumKey, value: string) => Promise<string>;
   reload: () => Promise<void>;
 };
 
@@ -100,6 +120,7 @@ const RegistryContext = createContext<RegistryContextValue>({
   registry: DEFAULT_REGISTRY,
   loading: false,
   save: async () => {},
+  addEnumValue: async (_key, value) => normalizeToken(value),
   reload: async () => {},
 });
 
@@ -132,9 +153,20 @@ export function RegistryProvider({ children }: { children: ReactNode }) {
     setRegistry(next);
   }, []);
 
+  const addEnumValue = useCallback(
+    async (key: RegistryEnumKey, rawValue: string): Promise<string> => {
+      const token = normalizeToken(rawValue);
+      if (token && !registry[key].some((e) => e.value === token)) {
+        await save({ ...registry, [key]: [...registry[key], { value: token, description: "" }] });
+      }
+      return token;
+    },
+    [registry, save],
+  );
+
   const value = useMemo<RegistryContextValue>(
-    () => ({ registry, loading, save, reload }),
-    [registry, loading, save, reload],
+    () => ({ registry, loading, save, addEnumValue, reload }),
+    [registry, loading, save, addEnumValue, reload],
   );
 
   return <RegistryContext.Provider value={value}>{children}</RegistryContext.Provider>;

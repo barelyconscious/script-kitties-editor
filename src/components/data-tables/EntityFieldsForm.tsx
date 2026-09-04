@@ -142,7 +142,7 @@ function FieldControl<T extends { id: string }>({
 
   // `optionsFrom` (a Registry enum) wins over a hardcoded `options` list, so a
   // field's choices track the live registry.
-  const { registry } = useRegistry();
+  const { registry, addEnumValue } = useRegistry();
   const resolvedOptions = field.optionsFrom
     ? registry[field.optionsFrom].map((o) => o.value)
     : field.options;
@@ -205,12 +205,17 @@ function FieldControl<T extends { id: string }>({
           </SelectContent>
         </Select>
       );
-    case "tags":
+    case "tags": {
+      // Registry-backed tag fields can create a new option inline: the tag is
+      // added to this record AND persisted to the enum it draws from.
+      const enumKey = field.optionsFrom;
       return resolvedOptions ? (
         <TagsSelect
           value={value as string[]}
           options={resolvedOptions}
           disabled={readOnly}
+          container={container}
+          onCreateOption={enumKey ? (tag) => void addEnumValue(enumKey, tag) : undefined}
           onChange={(next) => setValue(next as V)}
         />
       ) : (
@@ -220,6 +225,7 @@ function FieldControl<T extends { id: string }>({
           onChange={(next) => setValue(next as V)}
         />
       );
+    }
     case "sprite":
       return (
         <SpritePicker

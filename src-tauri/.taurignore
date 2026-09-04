@@ -1,0 +1,5 @@
+# Files the `tauri dev` watcher should NOT restart the app for. These are
+# runtime-written data files that live inside the crate dir but aren't source.
+# (git-ignored files are already skipped by the watcher; editor.registry.json
+# is committed, so it needs to be listed here explicitly.)
+editor.registry.json

@@ -59,6 +59,10 @@
     {
       "value": "SET_LOCATION",
       "description": "Targets a chosen location."
+    },
+    {
+      "value": "FIRE",
+      "description": ""
     }
   ],
   "itemTags": [

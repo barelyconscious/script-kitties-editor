@@ -37,10 +37,6 @@
       "description": "Weakens the target's stats."
     },
     {
-      "value": "ELECTRIFIED",
-      "description": "Applies an electric effect."
-    },
-    {
       "value": "HARMFUL",
       "description": "Can hurt the target."
     },
@@ -62,6 +58,14 @@
     },
     {
       "value": "FIRE",
+      "description": ""
+    },
+    {
+      "value": "ELECTRIC",
+      "description": ""
+    },
+    {
+      "value": "FROST",
       "description": ""
     }
   ],

@@ -72,7 +72,7 @@ export function typeStem(type: GameObjectType, id: string): string {
 export const ABILITY_SCRIPT_TEMPLATE = `return function()
     return {
         actions = {
-            doDamage(1.0, SpellSchool.PHYSICAL)
+            DoDamage(1.0, SpellSchool.PHYSICAL)
         }
     }
 end\r\n`;

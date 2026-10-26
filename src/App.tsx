@@ -9,6 +9,7 @@ import { RegistryProvider } from "./lib/registry";
 import { cn } from "./lib/utils";
 import DataTables from "./pages/DataTables";
 import Registry from "./pages/Registry";
+import TalentTrees from "./pages/TalentTrees";
 import Workbench from "./pages/Workbench";
 import Xgui from "./pages/Xgui";
 
@@ -32,6 +33,9 @@ function App() {
   const [objectListCollapsed, setObjectListCollapsed] = usePreference(
     "workbench.objectListCollapsed",
   );
+
+  // ...and for the Talent Trees list pane.
+  const [talentListCollapsed, setTalentListCollapsed] = usePreference("talents.listCollapsed");
 
   // Same pattern for the XGUI editor's component-list pane: its collapse state
   // lives in the preferences layer so it survives tool switches, and the XGUI
@@ -57,7 +61,7 @@ function App() {
     return () => window.removeEventListener("keydown", swallowCloseWindow, { capture: true });
   }, []);
 
-  // Cmd/Ctrl+1..4 jump straight to the Nth NavRail tool (1 = the topmost rail
+  // Cmd/Ctrl+1..5 jump straight to the Nth NavRail tool (1 = the topmost rail
   // button). This is pure NAVIGATION — it sets the active tool directly rather
   // than routing through `handleSelectTool`, so hitting the shortcut for the tool
   // you're already on is a no-op, not a list-pane toggle. The digit→tool mapping
@@ -94,9 +98,13 @@ function App() {
         setComponentListCollapsed((v) => !v);
         return;
       }
+      if (tool === "talents" && activeTool === "talents") {
+        setTalentListCollapsed((v) => !v);
+        return;
+      }
       setActiveTool(tool);
     },
-    [activeTool, setObjectListCollapsed, setComponentListCollapsed],
+    [activeTool, setObjectListCollapsed, setComponentListCollapsed, setTalentListCollapsed],
   );
 
   return (
@@ -109,7 +117,10 @@ function App() {
               "flex h-screen min-w-0 flex-1 flex-col overflow-hidden overscroll-none",
               // The Workbench and GUI Editor are full-bleed; the form-first tools
               // keep their padding.
-              activeTool !== "workbench" && activeTool !== "xgui" && "p-4",
+              activeTool !== "workbench" &&
+                activeTool !== "xgui" &&
+                activeTool !== "talents" &&
+                "p-4",
             )}
           >
             {/* The Workbench stays mounted (hidden when inactive) so its open tabs
@@ -129,6 +140,13 @@ function App() {
                 componentListCollapsed={componentListCollapsed}
                 active={activeTool === "xgui"}
               />
+            </div>
+            {/* Talent Trees likewise stays mounted: its document, undo history and
+              unsaved edits survive leaving and returning. */}
+            <div
+              className={cn("flex min-h-0 flex-1 flex-col", activeTool !== "talents" && "hidden")}
+            >
+              <TalentTrees active={activeTool === "talents"} listCollapsed={talentListCollapsed} />
             </div>
             {activeTool === "data-tables" && <DataTables />}
             {activeTool === "registry" && <Registry />}

@@ -3,3 +3,4 @@
 # (git-ignored files are already skipped by the watcher; editor.registry.json
 # is committed, so it needs to be listed here explicitly.)
 editor.registry.json
+editor.talents.json

@@ -16,6 +16,7 @@ use crate::commands::items::{get_items, save_item};
 use crate::commands::packs::{get_packs, save_pack};
 use crate::commands::palette::{get_palette, save_palette};
 use crate::commands::registry::{get_registry, save_registry};
+use crate::commands::talents::{get_talents, save_talents};
 use crate::commands::scripts::{
     create_script, get_data_mtimes, get_script, get_script_mtime, open_script_in_vscode,
     save_script,
@@ -31,6 +32,7 @@ mod config;
 mod dal;
 mod model;
 mod registry;
+mod talents;
 
 // macOS owns Cmd+W via the default menu's "Close Window" item, and that native
 // accelerator fires before the webview ever sees the keystroke — so the only way
@@ -237,6 +239,8 @@ pub fn run() {
             save_palette,
             get_registry,
             save_registry,
+            get_talents,
+            save_talents,
             get_sprite,
             list_sprites,
             update_asset_manifest,

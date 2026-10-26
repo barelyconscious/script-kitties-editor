@@ -1,0 +1,357 @@
+/* Talent-tree canvas: the dark "star chart" look ported from the Talent Forge
+   prototype. Always dark, independent of the app theme (the inspector and
+   toolbar around it follow the theme). Scoped under .talent-stage. */
+.talent-stage {
+  --tt-bg: #0b0d12;
+  --tt-fg: #ece4d0;
+  --tt-muted: #9d968a;
+  --tt-brass: #b08a52;
+  --tt-brass-dim: #6b5534;
+  --tt-gold: #f2c66d;
+  --tt-select: #86d2ff;
+  --tt-path: #cfe3f7;
+  --tt-danger: #e26a5c;
+  --tt-display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --tt-body: "Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 45%, #161b26 0%, var(--tt-bg) 70%);
+  color: var(--tt-fg);
+  font-family: var(--tt-body);
+}
+.talent-stage svg.tt-cv {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+.talent-stage svg.tt-cv.panning {
+  cursor: grabbing;
+}
+.talent-stage svg.tt-cv.overnode {
+  cursor: pointer;
+}
+
+.talent-stage .eu {
+  stroke: #000;
+  stroke-opacity: 0.55;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+.talent-stage .e {
+  stroke: var(--tt-brass-dim);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.talent-stage .e.placed {
+  stroke-opacity: 0.75;
+}
+.talent-stage .e.on {
+  stroke: var(--tt-gold);
+  stroke-width: 4;
+}
+.talent-stage .eg {
+  stroke: var(--tt-gold);
+  stroke-opacity: 0.28;
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+.talent-stage .e.path {
+  stroke: var(--tt-path);
+  stroke-width: 3;
+  stroke-dasharray: 7 6;
+}
+.talent-stage .e.sel {
+  stroke: var(--tt-select);
+  stroke-width: 4;
+}
+
+.talent-stage .n .body {
+  stroke: var(--tt-brass);
+  stroke-width: 2.5;
+}
+.talent-stage .n.notable .body {
+  stroke-width: 3.5;
+}
+.talent-stage .n.keystone .body {
+  stroke-width: 4;
+}
+.talent-stage .n .inner {
+  fill: none;
+  stroke: var(--tt-brass-dim);
+  stroke-width: 1.3;
+}
+.talent-stage .n .orn {
+  fill: none;
+  stroke: var(--tt-brass);
+  stroke-width: 2.2;
+  stroke-dasharray: 2 5;
+}
+.talent-stage .n.on .body {
+  stroke: var(--tt-gold);
+  filter: url(#tt-glow);
+}
+.talent-stage .n.on .inner,
+.talent-stage .n.on .orn {
+  stroke: var(--tt-gold);
+}
+.talent-stage .n.path .body {
+  stroke: var(--tt-path);
+}
+.talent-stage .n.dim {
+  opacity: 0.5;
+}
+.talent-stage .startring {
+  fill: none;
+  stroke: var(--tt-gold);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+.talent-stage .startring2 {
+  fill: none;
+  stroke: var(--tt-brass-dim);
+  stroke-width: 1;
+}
+.talent-stage .selring {
+  fill: none;
+  stroke: var(--tt-select);
+  stroke-width: 2.5;
+}
+.talent-stage .dropring {
+  fill: none;
+  stroke: var(--tt-select);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.talent-stage .hlring {
+  fill: none;
+  stroke: var(--tt-path);
+  stroke-width: 2.5;
+}
+.talent-stage .brokenring {
+  fill: none;
+  stroke: var(--tt-danger);
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+}
+.talent-stage .label {
+  font-family: var(--tt-display);
+  font-size: 11px;
+  fill: var(--tt-fg);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--tt-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.talent-stage .label.keystone {
+  font-size: 14px;
+  fill: var(--tt-gold);
+  font-weight: 700;
+}
+.talent-stage .slabel {
+  font-family: var(--tt-display);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  fill: var(--tt-gold);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--tt-bg);
+  stroke-width: 3px;
+  font-weight: 700;
+}
+.talent-stage .boxsel {
+  fill: var(--tt-select);
+  fill-opacity: 0.08;
+  stroke: var(--tt-select);
+  stroke-dasharray: 4 3;
+}
+.talent-stage .gridline {
+  stroke: #fff;
+  stroke-opacity: 0.035;
+}
+
+.talent-stage .frame {
+  fill: #86d2ff;
+  fill-opacity: 0.02;
+  stroke: var(--tt-muted);
+  stroke-opacity: 0.35;
+  stroke-dasharray: 6 6;
+}
+.talent-stage .frame.sel {
+  stroke: var(--tt-select);
+  stroke-opacity: 0.9;
+  fill-opacity: 0.05;
+}
+.talent-stage .frame.missing {
+  stroke: var(--tt-danger);
+  stroke-opacity: 0.9;
+}
+.talent-stage .phandle {
+  cursor: move;
+}
+.talent-stage .phandle .phbg {
+  fill: #1b202a;
+  stroke: var(--tt-muted);
+  stroke-opacity: 0.6;
+  stroke-width: 1.2;
+}
+.talent-stage .phandle .phicon {
+  fill: none;
+  stroke: var(--tt-fg);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.talent-stage .phandle:hover .phbg,
+.talent-stage .phandle.sel .phbg {
+  stroke: var(--tt-select);
+  stroke-opacity: 1;
+}
+.talent-stage .phandle.sel .phicon {
+  stroke: var(--tt-select);
+}
+.talent-stage .flabel {
+  font-family: var(--tt-display);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  fill: var(--tt-muted);
+  paint-order: stroke;
+  stroke: var(--tt-bg);
+  stroke-width: 3px;
+}
+
+.talent-stage .note .nbg {
+  fill: #141821;
+  fill-opacity: 0.72;
+  stroke: var(--tt-brass-dim);
+  stroke-dasharray: 5 4;
+}
+.talent-stage .note .ntext {
+  font-family: var(--tt-body);
+  font-style: italic;
+  fill: #d9cba6;
+}
+.talent-stage .note .ntext.empty {
+  fill: var(--tt-muted);
+}
+.talent-stage .note.sel .nbg {
+  stroke: var(--tt-select);
+  stroke-dasharray: none;
+  stroke-width: 2;
+}
+
+.talent-stage .tt-tip {
+  position: absolute;
+  pointer-events: none;
+  max-width: 280px;
+  background: rgba(14, 16, 22, 0.97);
+  border: 1px solid var(--tt-brass-dim);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+}
+.talent-stage .tt-tip h4 {
+  margin: 0;
+  padding: 7px 12px;
+  font-family: var(--tt-display);
+  font-size: 14px;
+  text-align: center;
+  border-bottom: 1px solid #2a313e;
+  background: linear-gradient(#211c14, #15120d);
+}
+.talent-stage .tt-tip h4.keystone {
+  color: var(--tt-gold);
+}
+.talent-stage .tt-tip h4.notable {
+  color: #e9d7ad;
+}
+.talent-stage .tt-tip .kind {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tt-muted);
+  text-align: center;
+  padding-top: 6px;
+}
+.talent-stage .tt-tip p {
+  margin: 0;
+  padding: 6px 12px 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #c9d4e6;
+  white-space: pre-wrap;
+  text-align: center;
+}
+.talent-stage .tt-tip .hint {
+  font-size: 12px;
+  color: var(--tt-gold);
+  padding: 0 12px 9px;
+  text-align: center;
+}
+
+.talent-stage .tt-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  background: #1b202a;
+  border: 1px solid var(--tt-brass-dim);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 14px;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.2s;
+}
+
+.talent-stage .tt-zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 6px;
+}
+.talent-stage .tt-btn {
+  min-width: 34px;
+  background: rgba(20, 24, 33, 0.9);
+  border: 1px solid #2a313e;
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--tt-fg);
+}
+.talent-stage .tt-btn:hover {
+  border-color: var(--tt-brass);
+}
+.talent-stage .tt-btn.on {
+  border-color: var(--tt-select);
+  color: var(--tt-select);
+}
+
+.talent-stage .tt-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  padding-inline: 16px;
+}
+.talent-stage .tt-empty div {
+  max-width: 380px;
+  text-align: center;
+  color: var(--tt-muted);
+  line-height: 1.5;
+}
+.talent-stage .tt-empty h2 {
+  font-family: var(--tt-display);
+  color: var(--tt-fg);
+  font-size: 20px;
+  margin: 0 0 8px;
+}

@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "seq": 2,
+  "trees": [
+    {
+      "id": "t1",
+      "name": "New tree 1",
+      "kind": "tree",
+      "seq": 10,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": -123,
+          "y": -197,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n2",
+          "x": -10,
+          "y": -235,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n3",
+          "x": 80,
+          "y": -140,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n4",
+          "x": -40,
+          "y": -80,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n5",
+          "x": -149,
+          "y": 98,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n6",
+          "x": -160,
+          "y": -140,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n7",
+          "x": 56,
+          "y": 41,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n8",
+          "x": 19,
+          "y": 118,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n9",
+          "x": -61,
+          "y": 98,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        }
+      ],
+      "edges": [
+        [
+          "n1",
+          "n2"
+        ],
+        [
+          "n1",
+          "n6"
+        ],
+        [
+          "n1",
+          "p10/n3"
+        ],
+        [
+          "n2",
+          "n3"
+        ],
+        [
+          "n3",
+          "n4"
+        ],
+        [
+          "n4",
+          "n5"
+        ],
+        [
+          "n4",
+          "n7"
+        ],
+        [
+          "n4",
+          "n9"
+        ],
+        [
+          "n5",
+          "n6"
+        ],
+        [
+          "n7",
+          "n8"
+        ],
+        [
+          "n8",
+          "n9"
+        ]
+      ],
+      "notes": [],
+      "placements": [
+        {
+          "id": "p10",
+          "treeId": "t2",
+          "x": -400,
+          "y": -280
+        }
+      ]
+    },
+    {
+      "id": "t2",
+      "name": "Rogue",
+      "kind": "cluster",
+      "seq": 7,
+      "nodes": [
+        {
+          "id": "n1",
+          "x": -126,
+          "y": -167,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n2",
+          "x": 77,
+          "y": -225,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n3",
+          "x": 151,
+          "y": -59,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n4",
+          "x": -18,
+          "y": 127,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n5",
+          "x": -207,
+          "y": -18,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n6",
+          "x": -27,
+          "y": -68,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n7",
+          "x": -128,
+          "y": -113,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        }
+      ],
+      "edges": [
+        [
+          "n1",
+          "n2"
+        ],
+        [
+          "n1",
+          "n7"
+        ],
+        [
+          "n2",
+          "n3"
+        ],
+        [
+          "n3",
+          "n4"
+        ],
+        [
+          "n4",
+          "n5"
+        ],
+        [
+          "n5",
+          "n6"
+        ],
+        [
+          "n6",
+          "n7"
+        ]
+      ],
+      "notes": [],
+      "placements": []
+    }
+  ]
+}

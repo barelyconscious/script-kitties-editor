@@ -17,3 +17,4 @@ pub mod registry;
 pub mod scripts;
 pub mod seasons;
 pub mod sprites;
+pub mod talents;

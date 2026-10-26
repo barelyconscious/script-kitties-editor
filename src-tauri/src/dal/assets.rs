@@ -20,7 +20,9 @@ use crate::{
 /// so an unfound key is treated as removed). The editor's register-on-save handles
 /// immediate registration; tracking `.xml` here keeps a full rescan consistent with
 /// it instead of clobbering it.
-const ASSET_EXTENSIONS: &[&str] = &["lua", "png", "json", "xml"];
+///
+/// `tmj` (Tiled JSON maps) is included so map files are catalogued too.
+const ASSET_EXTENSIONS: &[&str] = &["lua", "png", "json", "xml", "tmj"];
 
 /// Files that show up in the install tree but must never be catalogued: C++
 /// `std`-module build artifacts that share the `.json` extension but aren't game
@@ -146,7 +148,8 @@ impl Dal {
     /// added sprites, scripts, data files, and GUI component layouts become
     /// resolvable. Ported from the game's Electron `assetUpdater`, with the
     /// extension filter widened to include `.xml` (so GUI components are
-    /// catalogued, not dropped — see [`ASSET_EXTENSIONS`]); same ignore rules
+    /// catalogued, not dropped — see [`ASSET_EXTENSIONS`]) and `.tmj` (Tiled
+    /// maps); same ignore rules
     /// (Visual Studio `x64` build output and the `std.*` module artifacts), and the
     /// same "a `Tiles\` path wins over a duplicate basename" override.
     ///

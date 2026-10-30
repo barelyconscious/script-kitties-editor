@@ -34,6 +34,7 @@ import {
   link,
   NODE_TYPES,
   NOTE_FONT,
+  type PlacementInfo,
   type Point,
   type PreviewState,
   shortestPath,
@@ -137,6 +138,29 @@ const DRAG_PX = 4;
 const TYPE_ORDER = { minor: 0, notable: 1, keystone: 2 } as const;
 const FRAME_PAD = 44;
 const isLocal = (n: FlatNode) => !n.placementId;
+
+/** A placed cluster's frame in world units: its nodes' bounds plus padding, or a
+ *  stub box at its origin when it has no nodes (or is missing). */
+function frameRect(p: PlacementInfo) {
+  const b = p.bounds;
+  return b
+    ? {
+        x: b.x0 - FRAME_PAD,
+        y: b.y0 - FRAME_PAD,
+        w: b.x1 - b.x0 + FRAME_PAD * 2,
+        h: b.y1 - b.y0 + FRAME_PAD * 2,
+      }
+    : { x: p.x, y: p.y, w: 120, h: 60 };
+}
+
+/** The topmost placed-cluster frame containing a world point (frames drawn later win). */
+function hitFrame(g: FlatGraph, w: Point): PlacementInfo | undefined {
+  for (let i = g.placements.length - 1; i >= 0; i--) {
+    const r = frameRect(g.placements[i]);
+    if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h) return g.placements[i];
+  }
+  return undefined;
+}
 
 // Per-tree cameras, so switching trees returns you to where you were looking
 // instead of re-fitting. A per-viewer convenience (not design data), kept in
@@ -346,8 +370,8 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
       svgRef.current?.setPointerCapture(e.pointerId);
       setTipAt(null);
       const w = toWorld(e.clientX, e.clientY);
-      // Build mode only clicks the tree's OWN nodes; placed cluster nodes are
-      // hover-only and their placement moves by its handle.
+      // Build mode only clicks the tree's OWN nodes; a press anywhere else inside a
+      // placed cluster's frame (its nodes included) grabs the whole placement.
       const n = hitNode(graph, w, view.scale, mode === "build" ? isLocal : undefined);
       const panDrag = (node: string | null): Drag => ({
         type: "pan",
@@ -365,28 +389,6 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
       if (e.button !== 0) return;
       if (mode === "preview") {
         dragRef.current = panDrag(n?.id ?? null);
-        return;
-      }
-      const handle = (e.target as Element)
-        .closest?.("[data-placement]")
-        ?.getAttribute("data-placement");
-      const placement = handle ? graph.placements.find((p) => p.id === handle) : undefined;
-      if (placement) {
-        onSelect(selectPlacement(placement.id));
-        dragRef.current = {
-          type: "move",
-          sx: e.clientX,
-          sy: e.clientY,
-          w0: w,
-          base: tree,
-          nodes: [],
-          placements: [placement.id],
-          anchor: placement.id,
-          anchorPos: { x: placement.x, y: placement.y },
-          single: false,
-          collapse: false,
-          moved: false,
-        };
         return;
       }
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -439,6 +441,25 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
       const ed = hitEdge(graph, w, view.scale);
       if (ed?.owned && !additive) {
         onSelect(selectEdge(ed.key));
+        return;
+      }
+      const placement = !additive ? hitFrame(graph, w) : undefined;
+      if (placement) {
+        onSelect(selectPlacement(placement.id));
+        dragRef.current = {
+          type: "move",
+          sx: e.clientX,
+          sy: e.clientY,
+          w0: w,
+          base: tree,
+          nodes: [],
+          placements: [placement.id],
+          anchor: placement.id,
+          anchorPos: { x: placement.x, y: placement.y },
+          single: false,
+          collapse: false,
+          moved: false,
+        };
         return;
       }
       if (additive) {
@@ -500,6 +521,10 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
       const n = hitNode(graph, w, view.scale);
       const clickable = mode === "preview" ? !!n : (!!n && isLocal(n)) || !!hitNote(w);
       svgRef.current?.classList.toggle("overnode", clickable);
+      svgRef.current?.classList.toggle(
+        "overframe",
+        mode === "build" && !clickable && !!hitFrame(graph, w),
+      );
       if ((n?.id ?? null) !== (hover?.id ?? null)) setHover(n);
       const r = stageRef.current?.getBoundingClientRect();
       setTipAt(n && r ? { x: e.clientX - r.left, y: e.clientY - r.top } : null);
@@ -580,18 +605,9 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
 
     const onDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
       if (mode !== "build") return;
-      const handle = (e.target as Element)
-        .closest?.("[data-placement]")
-        ?.getAttribute("data-placement");
-      const placement = handle ? graph.placements.find((p) => p.id === handle) : undefined;
-      if (placement) {
-        if (placement.name) onOpenTree(placement.treeId);
-        return;
-      }
       const w = toWorld(e.clientX, e.clientY);
-      const n = hitNode(graph, w, view.scale);
+      const n = hitNode(graph, w, view.scale, isLocal);
       if (n) {
-        if (!isLocal(n)) return;
         onSelect(selectNodes([n.id]));
         onFocusField("title");
         return;
@@ -600,6 +616,11 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
       if (nt) {
         onSelect(selectNote(nt));
         onFocusField("note");
+        return;
+      }
+      const placement = hitFrame(graph, w);
+      if (placement) {
+        if (placement.name) onOpenTree(placement.treeId);
         return;
       }
       onAddNode(snapToGrid(w.x, grid), snapToGrid(w.y, grid));
@@ -683,11 +704,7 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
           <g transform={`translate(${panX} ${panY}) scale(${scale})`}>
             {mode === "build" &&
               graph.placements.map((p) => {
-                const b = p.bounds;
-                const x = b ? b.x0 - FRAME_PAD : p.x;
-                const y = b ? b.y0 - FRAME_PAD : p.y;
-                const w = b ? b.x1 - b.x0 + FRAME_PAD * 2 : 120;
-                const h = b ? b.y1 - b.y0 + FRAME_PAD * 2 : 60;
+                const { x, y, w, h } = frameRect(p);
                 const sel = selection.placement === p.id;
                 return (
                   <g key={p.id}>
@@ -700,23 +717,13 @@ export const TalentCanvas = forwardRef<TalentCanvasHandle, Props>(
                       rx={18}
                       vectorEffect="non-scaling-stroke"
                     />
-                    {/* The move handle: the ONLY grab point for a placed cluster. Kept
-                    a constant on-screen size by undoing the zoom. */}
-                    <g
-                      className={cn("phandle", sel && "sel")}
-                      data-placement={p.id}
-                      transform={`translate(${x} ${y}) scale(${1 / scale})`}
+                    {/* The cluster's name, kept a constant on-screen size by undoing the zoom. */}
+                    <text
+                      className={cn("flabel", sel && "sel")}
+                      transform={`translate(${x + 4} ${y - 6}) scale(${1 / scale})`}
                     >
-                      <title>{`${p.name ?? "Missing cluster"} — drag to move · double-click to edit`}</title>
-                      <rect className="phbg" x={-13} y={-13} width={26} height={26} rx={6} />
-                      <path
-                        className="phicon"
-                        d="M0 -8v16M-8 0h16M0 -8l-3 3M0 -8l3 3M0 8l-3 -3M0 8l3 -3M-8 0l3 -3M-8 0l3 3M8 0l-3 -3M8 0l-3 3"
-                      />
-                      <text className="flabel" x={18} y={-6}>
-                        {(p.name ?? "Missing cluster").toUpperCase()}
-                      </text>
-                    </g>
+                      {(p.name ?? "Missing cluster").toUpperCase()}
+                    </text>
                   </g>
                 );
               })}

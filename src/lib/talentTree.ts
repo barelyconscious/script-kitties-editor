@@ -441,12 +441,22 @@ export function adjacency(g: FlatGraph): Map<string, string[]> {
   return adj;
 }
 
+/** True for a start point that isn't part of the current allocation: another
+ *  cat's start. Paths can't be taken through (or into) one, so a cat can't hop
+ *  across into another cat's region via its start node. */
+function isForeignStart(g: FlatGraph, allocated: ReadonlySet<string>, id: string): boolean {
+  return !!g.nodes.get(id)?.start && !allocated.has(id);
+}
+
 /** Cheapest path from any allocated node to `target` (BFS), inclusive of the
- *  allocated start of the path. Null if unreachable or nothing allocated. */
+ *  allocated start of the path. Other cats' start points are walls unless
+ *  `throughStarts` (used only to explain why a node is unreachable). Null if
+ *  unreachable or nothing allocated. */
 export function shortestPath(
   g: FlatGraph,
   allocated: Set<string>,
   target: string,
+  { throughStarts = false }: { throughStarts?: boolean } = {},
 ): string[] | null {
   if (!allocated.size || !g.nodes.has(target)) return null;
   const adj = adjacency(g);
@@ -461,7 +471,7 @@ export function shortestPath(
     const c = q[i];
     if (c === target) break;
     for (const nb of adj.get(c) ?? []) {
-      if (!prev.has(nb)) {
+      if (!prev.has(nb) && (throughStarts || !isForeignStart(g, allocated, nb))) {
         prev.set(nb, c);
         q.push(nb);
       }
@@ -478,11 +488,12 @@ export type PreviewState = { start: string | null; order: string[]; budget: numb
 export const DEFAULT_PREVIEW: PreviewState = { start: null, order: [], budget: 20 };
 
 /** Drop allocations that no longer connect back to the start (after a refund or
- *  a graph change), keeping allocation order. */
+ *  a graph change), keeping allocation order. Other start points are never
+ *  allocatable, so a node that became a start drops out with what relied on it. */
 export function prunePreview(g: FlatGraph, p: PreviewState): PreviewState {
   if (!p.start || !g.nodes.has(p.start)) return { ...p, start: null, order: [] };
   const adj = adjacency(g);
-  const allowed = new Set(p.order.filter((id) => g.nodes.has(id)));
+  const allowed = new Set(p.order.filter((id) => g.nodes.has(id) && !g.nodes.get(id)?.start));
   const seen = new Set([p.start]);
   const q = [p.start];
   for (let i = 0; i < q.length; i++) {
@@ -527,8 +538,17 @@ export function previewClick(g: FlatGraph, p: PreviewState, nodeId: string): Pre
     const next = prunePreview(g, { ...p, order: p.order.filter((id) => id !== n.id) });
     return { kind: "refund", state: next, refunded: p.order.length - next.order.length };
   }
-  const path = shortestPath(g, allocatedSet(p), n.id);
-  if (!path) return { kind: "noop", message: "That node is not connected to your allocated nodes" };
+  const allocated = allocatedSet(p);
+  const path = shortestPath(g, allocated, n.id);
+  if (!path) {
+    const blocked = shortestPath(g, allocated, n.id, { throughStarts: true });
+    return {
+      kind: "noop",
+      message: blocked
+        ? "Paths can't go through another start point"
+        : "That node is not connected to your allocated nodes",
+    };
+  }
   const add = path.slice(1);
   return { kind: "allocate", state: { ...p, order: [...p.order, ...add] }, added: add.length };
 }

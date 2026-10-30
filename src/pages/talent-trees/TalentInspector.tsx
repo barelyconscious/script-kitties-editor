@@ -260,7 +260,7 @@ function NodePanel({ node, graph, actions }: Props & { node: FlatNode }) {
             />
           </div>
         ) : (
-          <Muted>A start point is where a cat begins. It is free in Preview.</Muted>
+          <Muted>A start point is where a cat begins. It is free in Preview, and other cats can't path through it.</Muted>
         )}
       </Section>
       {links}
@@ -298,7 +298,7 @@ function PlacementPanel(props: Props & { placementId: string }) {
         </div>
         <Muted>
           {count("minor")} minor · {count("notable")} notable · {count("keystone")} keystone. Drag
-          the handle at the frame's top-left to move it. Its nodes are edited in the cluster, and
+          anywhere inside its frame to move it. Its nodes are edited in the cluster, and
           every tree that places it updates.
         </Muted>
         <div className="flex flex-wrap gap-2">
@@ -480,7 +480,7 @@ const KEYS: [string, string][] = [
     "Add a node at the cursor linked to the selection; over another node, link to it; with a link selected, insert a node",
   ],
   ["Drag onto node", "Link the dragged node to the one under it (including a placed cluster's nodes)"],
-  ["Cluster handle", "Drag the ✥ at a placed cluster's corner to move it; double-click it to edit the cluster"],
+  ["Placed cluster", "Drag anywhere inside its frame to move it; double-click it to edit the cluster"],
   ["L", "Link or unlink two selected nodes; 3+ link in order"],
   ["Shift", "Click to add to the selection, drag for a box"],
   ["1 · 2 · 3", "Minor · Notable · Keystone"],

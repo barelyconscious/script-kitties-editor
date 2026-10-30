@@ -37,6 +37,10 @@ cluster and the trees that link into it consistent on every save.
 Writes are normalized for minimal diffs: integer coordinates, records sorted by
 id, each edge's endpoints sorted, the edge list sorted.
 
+**Start points are walls.** In Preview, a cat's paths can never pass through (or
+end on) another cat's start point, so regions meeting at a start node stay
+separate. Only the chosen start is ever allocated.
+
 Preview state (chosen start, allocation order, point budget) is play-test state.
 It lives in localStorage per tree, not in the file.
 
@@ -53,9 +57,11 @@ copied nodes.
 - **Host links** are ordinary edges in the host tree whose endpoints may be
   qualified ids (`["n1", "p4/n7"]`).
 - **Placed nodes are locked** in the host. In Build they are hover-only: they
-  highlight and show their tooltip, but clicks pass through (as if on empty
-  canvas). A placement moves and is selected ONLY by the move handle at its
-  frame's top-left (double-click the handle to open the cluster). Link to a placed
+  highlight and show their tooltip, but they can't be selected or edited. A press
+  anywhere inside a placement's frame (on its nodes or empty space) selects and
+  drags the whole placement; the host's own nodes, notes and links inside the
+  frame still take the click first. Double-click inside the frame to open the
+  cluster. Link to a placed
   node by dropping one of the host's own nodes onto it, or with `N` while hovering
   it. Two nodes inside the same placement can't be linked from the host, because
   that would be a cluster-internal link. In Preview every node is clickable.
@@ -82,6 +88,8 @@ star-chart canvas, and an inspector on the right.
 - **Interactions** are ported from the forge: double-click to add or edit,
   `N`, drag-onto-node to link, `L`, shift-select/box, `1`/`2`/`3`, `S`, `T`,
   `Del`, `Ctrl+D`, `G`, `F`, `P`, and pan/zoom.
+- **Snap to grid** (`G`) is on by default and remembered across sessions
+  (localStorage `talents.grid`).
 - **Saving** is manual (`Ctrl+S` / Save), per the editor's no-auto-save
   convention.
 - **Undo** has one history over the whole document.

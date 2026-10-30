@@ -254,6 +254,40 @@ describe("preview", () => {
     expect(r).toMatchObject({ kind: "refund", refunded: 3 });
   });
 
+  // Two start points: n2 (linked to the cluster's n1) and n3 (between the
+  // cluster's n3 and a far node n4). n4 is only reachable through start n3.
+  function twoStarts() {
+    let { doc } = must(placeTree(setup(), "t2", "t1", 0, 0));
+    doc = updateTree(doc, "t2", (t) => {
+      let r = addNode(t, -100, 0);
+      r = addNode(r.tree, 300, 0);
+      r = addNode(r.tree, 400, 0);
+      const nodes = r.tree.nodes.map((n) => ({ ...n, start: n.id !== "n4" }));
+      return { ...r.tree, nodes, edges: [["n2", "p1/n1"], ["n3", "p1/n3"], ["n3", "n4"]] };
+    });
+    return flattenTree(doc, "t2");
+  }
+
+  it("never paths through another cat's start point", () => {
+    const g = twoStarts();
+    expect(shortestPath(g, new Set(["n2"]), "n4")).toBeNull();
+    expect(shortestPath(g, new Set(["n3"]), "n4")).toEqual(["n3", "n4"]);
+    const r = previewClick(g, { ...DEFAULT_PREVIEW, start: "n2" }, "n4");
+    expect(r).toMatchObject({ kind: "noop", message: expect.stringMatching(/start point/) });
+    // Its own region still allocates up to the wall.
+    expect(previewClick(g, { ...DEFAULT_PREVIEW, start: "n2" }, "p1/n3")).toMatchObject({
+      kind: "allocate",
+      added: 3,
+    });
+  });
+
+  it("drops a node that became another start point, with its dependents", () => {
+    const g = twoStarts();
+    const order = ["p1/n1", "p1/n2", "p1/n3", "n3", "n4"];
+    const s = prunePreview(g, { start: "n2", order, budget: 0 });
+    expect(s.order).toEqual(["p1/n1", "p1/n2", "p1/n3"]);
+  });
+
   it("prunes allocations a graph change disconnected", () => {
     const g = graph();
     const s = prunePreview(g, { start: "n2", order: ["p1/n1", "missing", "p1/n3"], budget: 0 });

@@ -34,6 +34,9 @@
 .talent-stage svg.tt-cv.overnode {
   cursor: pointer;
 }
+.talent-stage svg.tt-cv.overframe {
+  cursor: move;
+}
 
 .talent-stage .eu {
   stroke: #000;
@@ -190,29 +193,6 @@
   stroke: var(--tt-danger);
   stroke-opacity: 0.9;
 }
-.talent-stage .phandle {
-  cursor: move;
-}
-.talent-stage .phandle .phbg {
-  fill: #1b202a;
-  stroke: var(--tt-muted);
-  stroke-opacity: 0.6;
-  stroke-width: 1.2;
-}
-.talent-stage .phandle .phicon {
-  fill: none;
-  stroke: var(--tt-fg);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-.talent-stage .phandle:hover .phbg,
-.talent-stage .phandle.sel .phbg {
-  stroke: var(--tt-select);
-  stroke-opacity: 1;
-}
-.talent-stage .phandle.sel .phicon {
-  stroke: var(--tt-select);
-}
 .talent-stage .flabel {
   font-family: var(--tt-display);
   font-size: 12px;
@@ -221,6 +201,9 @@
   paint-order: stroke;
   stroke: var(--tt-bg);
   stroke-width: 3px;
+}
+.talent-stage .flabel.sel {
+  fill: var(--tt-select);
 }
 
 .talent-stage .note .nbg {

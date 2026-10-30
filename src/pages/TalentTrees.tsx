@@ -90,6 +90,7 @@ import {
 // Preview allocation. Guarded — storage can be unavailable.
 const LS_LAST = "talents.lastTree";
 const LS_PREVIEW = "talents.preview";
+const LS_GRID = "talents.grid";
 function lsGet<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(key);
@@ -133,7 +134,8 @@ export default function TalentTrees({ active = false, listCollapsed = false }: T
 
   const [treeId, setTreeIdState] = useState<string | null>(null);
   const [mode, setMode] = useState<TalentMode>("build");
-  const [grid, setGrid] = useState(false);
+  // Snap-to-grid defaults on and is remembered across sessions.
+  const [grid, setGrid] = useState(() => lsGet(LS_GRID, true));
   const [selection, setSelection] = useState<TalentSelection>(EMPTY_SELECTION);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [transient, setTransient] = useState<TalentTree | null>(null);
@@ -397,7 +399,7 @@ export default function TalentTrees({ active = false, listCollapsed = false }: T
     applyDoc(r.doc);
     setMode("build");
     setSelection(selectPlacement(r.id));
-    toast(`Placed ${child.name}. Drag its handle to position it.`);
+    toast(`Placed ${child.name}. Drag its frame to position it.`);
   };
 
   const newTree = (kind: TreeKind) => {
@@ -537,6 +539,7 @@ export default function TalentTrees({ active = false, listCollapsed = false }: T
   const toggleGrid = () => {
     setGrid((g) => {
       toast(g ? "Snap to grid off" : "Snap to grid on");
+      lsSet(LS_GRID, !g);
       return !g;
     });
   };

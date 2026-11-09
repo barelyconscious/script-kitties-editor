@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "seq": 2,
+  "seq": 4,
   "trees": [
     {
       "id": "t1",
       "name": "New tree 1",
       "kind": "tree",
-      "seq": 10,
+      "seq": 37,
       "nodes": [
         {
-          "id": "n1",
-          "x": -123,
-          "y": -197,
+          "id": "n11",
+          "x": -20,
+          "y": -100,
           "type": "minor",
           "title": "",
           "text": "",
@@ -20,9 +20,9 @@
           "startName": ""
         },
         {
-          "id": "n2",
-          "x": -10,
-          "y": -235,
+          "id": "n12",
+          "x": 120,
+          "y": -180,
           "type": "minor",
           "title": "",
           "text": "",
@@ -31,9 +31,9 @@
           "startName": ""
         },
         {
-          "id": "n3",
-          "x": 80,
-          "y": -140,
+          "id": "n13",
+          "x": 260,
+          "y": -100,
           "type": "minor",
           "title": "",
           "text": "",
@@ -42,9 +42,9 @@
           "startName": ""
         },
         {
-          "id": "n4",
-          "x": -40,
-          "y": -80,
+          "id": "n14",
+          "x": 260,
+          "y": 40,
           "type": "minor",
           "title": "",
           "text": "",
@@ -53,9 +53,9 @@
           "startName": ""
         },
         {
-          "id": "n5",
-          "x": -149,
-          "y": 98,
+          "id": "n15",
+          "x": 120,
+          "y": 100,
           "type": "minor",
           "title": "",
           "text": "",
@@ -64,9 +64,9 @@
           "startName": ""
         },
         {
-          "id": "n6",
-          "x": -160,
-          "y": -140,
+          "id": "n16",
+          "x": -20,
+          "y": 40,
           "type": "minor",
           "title": "",
           "text": "",
@@ -75,9 +75,20 @@
           "startName": ""
         },
         {
-          "id": "n7",
-          "x": 56,
-          "y": 41,
+          "id": "n17",
+          "x": 120,
+          "y": -40,
+          "type": "keystone",
+          "title": "",
+          "text": "",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n24",
+          "x": 260,
+          "y": 180,
           "type": "minor",
           "title": "",
           "text": "",
@@ -86,9 +97,9 @@
           "startName": ""
         },
         {
-          "id": "n8",
-          "x": 19,
-          "y": 118,
+          "id": "n25",
+          "x": -20,
+          "y": 180,
           "type": "minor",
           "title": "",
           "text": "",
@@ -97,9 +108,20 @@
           "startName": ""
         },
         {
-          "id": "n9",
-          "x": -61,
-          "y": 98,
+          "id": "n28",
+          "x": -20,
+          "y": -260,
+          "type": "minor",
+          "title": "",
+          "text": "",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n29",
+          "x": 260,
+          "y": -258,
           "type": "minor",
           "title": "",
           "text": "",
@@ -110,139 +132,2307 @@
       ],
       "edges": [
         [
-          "n1",
-          "n2"
+          "n11",
+          "n12"
         ],
         [
-          "n1",
-          "n6"
+          "n11",
+          "n16"
         ],
         [
-          "n1",
-          "p10/n3"
+          "n11",
+          "n17"
         ],
         [
-          "n2",
-          "n3"
+          "n11",
+          "n28"
         ],
         [
-          "n3",
-          "n4"
+          "n12",
+          "n13"
         ],
         [
-          "n4",
-          "n5"
+          "n12",
+          "n17"
         ],
         [
-          "n4",
-          "n7"
+          "n12",
+          "n28"
         ],
         [
-          "n4",
-          "n9"
+          "n12",
+          "n29"
         ],
         [
-          "n5",
-          "n6"
+          "n13",
+          "n14"
         ],
         [
-          "n7",
-          "n8"
+          "n13",
+          "n17"
         ],
         [
-          "n8",
-          "n9"
+          "n13",
+          "n29"
+        ],
+        [
+          "n14",
+          "n15"
+        ],
+        [
+          "n14",
+          "n17"
+        ],
+        [
+          "n14",
+          "n24"
+        ],
+        [
+          "n15",
+          "n16"
+        ],
+        [
+          "n15",
+          "n17"
+        ],
+        [
+          "n15",
+          "n24"
+        ],
+        [
+          "n15",
+          "n25"
+        ],
+        [
+          "n16",
+          "n17"
+        ],
+        [
+          "n16",
+          "n25"
         ]
       ],
-      "notes": [],
-      "placements": [
+      "notes": [
         {
-          "id": "p10",
-          "treeId": "t2",
-          "x": -400,
-          "y": -280
+          "id": "m18",
+          "x": 280,
+          "y": -80,
+          "text": "Cleric",
+          "size": "m"
+        },
+        {
+          "id": "m19",
+          "x": 280,
+          "y": 60,
+          "text": "Diviner",
+          "size": "m"
+        },
+        {
+          "id": "m20",
+          "x": 80,
+          "y": 120,
+          "text": "Sorcerer",
+          "size": "m"
+        },
+        {
+          "id": "m21",
+          "x": -120,
+          "y": 60,
+          "text": "Trickster",
+          "size": "m"
+        },
+        {
+          "id": "m22",
+          "x": -100,
+          "y": -80,
+          "text": "Rogue",
+          "size": "m"
+        },
+        {
+          "id": "m23",
+          "x": 80,
+          "y": -220,
+          "text": "Crusader",
+          "size": "m"
+        },
+        {
+          "id": "m26",
+          "x": -120,
+          "y": 200,
+          "text": "Warlock",
+          "size": "m"
+        },
+        {
+          "id": "m27",
+          "x": 280,
+          "y": 200,
+          "text": "Necromancer",
+          "size": "m"
+        },
+        {
+          "id": "m30",
+          "x": -140,
+          "y": -300,
+          "text": "Mercenary",
+          "size": "m"
+        },
+        {
+          "id": "m31",
+          "x": 282,
+          "y": -295,
+          "text": "Paladin",
+          "size": "m"
         }
-      ]
+      ],
+      "placements": []
     },
     {
-      "id": "t2",
-      "name": "Rogue",
-      "kind": "cluster",
-      "seq": 7,
+      "id": "t4",
+      "name": "Full tree draft",
+      "kind": "tree",
+      "seq": 233,
       "nodes": [
         {
-          "id": "n1",
-          "x": -126,
-          "y": -167,
+          "id": "n11",
+          "x": -20,
+          "y": -100,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Rogue Gate",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n12",
+          "x": 120,
+          "y": -180,
+          "type": "minor",
+          "title": "Crusader Gate",
+          "text": "+2 Defense, +2 Health.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n13",
+          "x": 260,
+          "y": -100,
+          "type": "minor",
+          "title": "Cleric Gate",
+          "text": "+2 Health, +2 Defense.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n14",
+          "x": 260,
+          "y": 40,
+          "type": "minor",
+          "title": "Diviner Gate",
+          "text": "+2 Luck, +2 Speed.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n15",
+          "x": 120,
+          "y": 100,
+          "type": "minor",
+          "title": "Sorcerer Gate",
+          "text": "+2 Elemental Damage, +2 Attack.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n16",
+          "x": -20,
+          "y": 40,
+          "type": "minor",
+          "title": "Trickster Gate",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n17",
+          "x": 120,
+          "y": -40,
+          "type": "keystone",
+          "title": "Root Access",
+          "text": "Every ability you use counts as your home discipline for node bonuses. You can't allocate any other keystone.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n2",
-          "x": 77,
-          "y": -225,
+          "id": "n24",
+          "x": 260,
+          "y": 180,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Necromancer Gate",
+          "text": "+2 Poison Damage, +2 Health.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n25",
+          "x": -20,
+          "y": 180,
+          "type": "minor",
+          "title": "Warlock Gate",
+          "text": "+2 Technical Damage, +2 Attack.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n28",
+          "x": -20,
+          "y": -260,
+          "type": "minor",
+          "title": "Mercenary Gate",
+          "text": "+2 Attack, +2 Health.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n29",
+          "x": 260,
+          "y": -258,
+          "type": "minor",
+          "title": "Paladin Gate",
+          "text": "+2 Defense, +2 Attack.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n38",
+          "x": -60,
+          "y": -340,
+          "type": "minor",
+          "title": "Mercenary Damage",
+          "text": "+4% Mercenary damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n39",
+          "x": -120,
+          "y": -420,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n40",
+          "x": -160,
+          "y": -480,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n41",
+          "x": -220,
+          "y": -560,
+          "type": "minor",
+          "title": "Mercenary Damage",
+          "text": "+4% Mercenary damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n42",
+          "x": -260,
+          "y": -640,
+          "type": "notable",
+          "title": "Hired Muscle",
+          "text": "+15% Mercenary damage. Mercenary CONTACT abilities cost 1 less AP (min 1).",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n43",
+          "x": -300,
+          "y": -720,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n44",
+          "x": -360,
+          "y": -800,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n45",
+          "x": -400,
+          "y": -860,
+          "type": "notable",
+          "title": "Hazard Pay",
+          "text": "+20% Mercenary damage while below 50% health.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n46",
+          "x": -460,
+          "y": -940,
+          "type": "minor",
+          "title": "Mercenary Damage",
+          "text": "+4% Mercenary damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n47",
+          "x": -520,
+          "y": -1040,
+          "type": "keystone",
+          "title": "Contract Killer",
+          "text": "Knocking out an enemy refunds 3 AP. -15% maximum health.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n48",
+          "x": -300,
+          "y": -560,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n49",
+          "x": -360,
+          "y": -620,
+          "type": "minor",
+          "title": "Mercenary Damage",
+          "text": "+4% Mercenary damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n50",
+          "x": -400,
+          "y": -680,
+          "type": "notable",
+          "title": "Hard Bargain",
+          "text": "+6 Attack, +6 Defense.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n51",
+          "x": -320,
+          "y": -860,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n52",
+          "x": -340,
+          "y": -940,
+          "type": "notable",
+          "title": "Collateral",
+          "text": "Mercenary abilities also hit 1 adjacent enemy for 30% damage.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n53",
+          "x": -100,
+          "y": -540,
+          "type": "minor",
+          "title": "Mercenary start",
+          "text": "Home discipline: Mercenary.",
+          "tint": "red",
+          "start": true,
+          "startName": "CaliGO"
+        },
+        {
+          "id": "n54",
+          "x": -180,
+          "y": -360,
+          "type": "minor",
+          "title": "Mercenary start",
+          "text": "Home discipline: Mercenary.",
+          "tint": "red",
+          "start": true,
+          "startName": "Cobolynx"
+        },
+        {
+          "id": "n56",
+          "x": -100,
+          "y": -140,
+          "type": "minor",
+          "title": "Rogue Damage",
+          "text": "+4% Rogue damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n57",
+          "x": -180,
+          "y": -180,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n58",
+          "x": -260,
+          "y": -200,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n59",
+          "x": -360,
+          "y": -240,
+          "type": "minor",
+          "title": "Rogue Damage",
+          "text": "+4% Rogue damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n60",
+          "x": -440,
+          "y": -280,
+          "type": "notable",
+          "title": "Backstab",
+          "text": "+30% Rogue damage against enemies that can't see you.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n61",
+          "x": -520,
+          "y": -320,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n62",
+          "x": -600,
+          "y": -340,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n63",
+          "x": -680,
+          "y": -380,
+          "type": "notable",
+          "title": "Light Fingers",
+          "text": "+5 Luck. +1 range on Rogue abilities.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n64",
+          "x": -760,
+          "y": -420,
+          "type": "minor",
+          "title": "Rogue Damage",
+          "text": "+4% Rogue damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n65",
+          "x": -860,
+          "y": -460,
+          "type": "keystone",
+          "title": "Shadowstep",
+          "text": "Rogue abilities used from stealth deal double damage and don't break stealth on a KO. -20% Defense.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n66",
+          "x": -420,
+          "y": -200,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n67",
+          "x": -500,
+          "y": -200,
+          "type": "minor",
+          "title": "Rogue Damage",
+          "text": "+4% Rogue damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n68",
+          "x": -580,
+          "y": -240,
+          "type": "notable",
+          "title": "Slip Away",
+          "text": "Moving costs 20% less AP while in stealth.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n69",
+          "x": -600,
+          "y": -440,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n70",
+          "x": -680,
+          "y": -480,
+          "type": "notable",
+          "title": "Opportunist",
+          "text": "+20% Rogue damage against enemies below 50% health.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n71",
+          "x": -240,
+          "y": -280,
+          "type": "minor",
+          "title": "Rogue start",
+          "text": "Home discipline: Rogue.",
+          "tint": "violet",
+          "start": true,
+          "startName": "Adaline"
+        },
+        {
+          "id": "n72",
+          "x": -220,
+          "y": -100,
+          "type": "minor",
+          "title": "Rogue start",
+          "text": "Home discipline: Rogue.",
+          "tint": "violet",
+          "start": true,
+          "startName": "Keycat"
+        },
+        {
+          "id": "n74",
+          "x": -100,
+          "y": 80,
+          "type": "minor",
+          "title": "Trickster Damage",
+          "text": "+4% Trickster damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n75",
+          "x": -180,
+          "y": 120,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n76",
+          "x": -260,
+          "y": 180,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n77",
+          "x": -340,
+          "y": 220,
+          "type": "minor",
+          "title": "Trickster Damage",
+          "text": "+4% Trickster damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n78",
+          "x": -420,
+          "y": 260,
+          "type": "notable",
+          "title": "Sleight of Hand",
+          "text": "Trickster effects last 1 turn longer.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n79",
+          "x": -480,
+          "y": 300,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n80",
+          "x": -560,
+          "y": 360,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n81",
+          "x": -640,
+          "y": 400,
+          "type": "notable",
+          "title": "Bait and Switch",
+          "text": "+2 range on Trickster SET_LOCATION abilities.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n82",
+          "x": -720,
+          "y": 440,
+          "type": "minor",
+          "title": "Trickster Damage",
+          "text": "+4% Trickster damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n83",
+          "x": -820,
+          "y": 500,
+          "type": "keystone",
+          "title": "Glitch in the Matrix",
+          "text": "After using a Trickster ability, teleport up to 2 tiles for free. Trickster abilities cost +1 AP.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n84",
+          "x": -320,
+          "y": 300,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n85",
+          "x": -380,
+          "y": 360,
+          "type": "minor",
+          "title": "Trickster Damage",
+          "text": "+4% Trickster damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n86",
+          "x": -460,
+          "y": 400,
+          "type": "notable",
+          "title": "Misdirect",
+          "text": "Confused enemies take +15% damage from you.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n87",
+          "x": -640,
+          "y": 300,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n88",
+          "x": -720,
+          "y": 340,
+          "type": "notable",
+          "title": "Slippery Floor",
+          "text": "Surfaces you create last 1 turn longer.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n89",
+          "x": -300,
+          "y": 100,
+          "type": "minor",
+          "title": "Trickster start",
+          "text": "Home discipline: Trickster.",
+          "tint": "teal",
+          "start": true,
+          "startName": "Cattrix"
+        },
+        {
+          "id": "n90",
+          "x": -140,
+          "y": 200,
+          "type": "minor",
+          "title": "Trickster start",
+          "text": "Home discipline: Trickster.",
+          "tint": "teal",
+          "start": true,
+          "startName": "Lualux"
+        },
+        {
+          "id": "n92",
+          "x": 120,
+          "y": -280,
+          "type": "minor",
+          "title": "Damage reduction",
+          "text": "+3% damage reduction",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n93",
+          "x": 120,
+          "y": -360,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n94",
+          "x": 120,
+          "y": -440,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n95",
+          "x": 120,
+          "y": -540,
+          "type": "minor",
+          "title": "Damage reduction",
+          "text": "+3% damage reduction",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n96",
+          "x": 120,
+          "y": -640,
+          "type": "notable",
+          "title": "Shield Wall",
+          "text": "+15% Defense. Adjacent allies take 10% less damage.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n97",
+          "x": 120,
+          "y": -720,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n98",
+          "x": 120,
+          "y": -800,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n99",
+          "x": 120,
+          "y": -900,
+          "type": "notable",
+          "title": "Hold the Line",
+          "text": "Take 20% less damage if you didn't move this turn.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n100",
+          "x": 120,
+          "y": -1000,
+          "type": "minor",
+          "title": "Damage reduction",
+          "text": "+3% damage reduction",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n101",
+          "x": 120,
+          "y": -1100,
+          "type": "keystone",
+          "title": "Bulwark",
+          "text": "Take 30% of the damage dealt to adjacent allies in their place. +30% maximum health. Moving costs 50% more AP.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n102",
+          "x": 40,
+          "y": -580,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n103",
+          "x": 40,
+          "y": -660,
+          "type": "minor",
+          "title": "Damage reduction",
+          "text": "+3% damage reduction",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n104",
+          "x": 20,
+          "y": -740,
+          "type": "notable",
+          "title": "Thick Fur",
+          "text": "+12 Health.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n105",
+          "x": 200,
+          "y": -840,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n106",
+          "x": 220,
+          "y": -940,
+          "type": "notable",
+          "title": "Challenge",
+          "text": "Crusader abilities taunt the target for 1 turn.",
+          "tint": "amber",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n107",
+          "x": 200,
+          "y": -440,
+          "type": "minor",
+          "title": "Crusader start",
+          "text": "Home discipline: Crusader.",
+          "tint": "amber",
+          "start": true,
+          "startName": "Crylox"
+        },
+        {
+          "id": "n108",
+          "x": 40,
+          "y": -360,
+          "type": "minor",
+          "title": "Crusader start",
+          "text": "Home discipline: Crusader.",
+          "tint": "amber",
+          "start": true,
+          "startName": "Javaline"
+        },
+        {
+          "id": "n110",
+          "x": 300,
+          "y": -340,
+          "type": "minor",
+          "title": "Paladin Damage",
+          "text": "+4% Paladin damage",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n111",
+          "x": 360,
+          "y": -400,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n112",
+          "x": 400,
+          "y": -480,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n113",
+          "x": 460,
+          "y": -560,
+          "type": "minor",
+          "title": "Paladin Damage",
+          "text": "+4% Paladin damage",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n114",
+          "x": 500,
+          "y": -640,
+          "type": "notable",
+          "title": "Righteous Charge",
+          "text": "+15% Paladin damage. Paladin HELPFUL abilities also grant +5 Defense for 2 turns.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n115",
+          "x": 560,
+          "y": -720,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n116",
+          "x": 600,
+          "y": -780,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n117",
+          "x": 640,
+          "y": -860,
+          "type": "notable",
+          "title": "Aura of Resolve",
+          "text": "Allies within 2 tiles gain +5 Defense.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n118",
+          "x": 700,
+          "y": -940,
+          "type": "minor",
+          "title": "Paladin Damage",
+          "text": "+4% Paladin damage",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n119",
+          "x": 760,
+          "y": -1040,
+          "type": "keystone",
+          "title": "Aegis Protocol",
+          "text": "Once per battle, the first ally reduced to 0 health is left at 1 instead. Paladin abilities cost +1 AP.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n120",
+          "x": 420,
+          "y": -620,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n121",
+          "x": 440,
+          "y": -700,
+          "type": "minor",
+          "title": "Paladin Damage",
+          "text": "+4% Paladin damage",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n122",
+          "x": 480,
+          "y": -780,
+          "type": "notable",
+          "title": "Steadfast",
+          "text": "+8 Defense, +6 Health.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n123",
+          "x": 680,
+          "y": -780,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n124",
+          "x": 740,
+          "y": -840,
+          "type": "notable",
+          "title": "Smite",
+          "text": "Paladin HARMFUL abilities heal you for 15% of damage dealt.",
+          "tint": "rose",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n125",
+          "x": 480,
+          "y": -440,
+          "type": "minor",
+          "title": "Paladin start",
+          "text": "Home discipline: Paladin.",
+          "tint": "rose",
+          "start": true,
+          "startName": "Cybercoon"
+        },
+        {
+          "id": "n126",
+          "x": 280,
+          "y": -460,
+          "type": "minor",
+          "title": "Paladin start",
+          "text": "Home discipline: Paladin.",
+          "tint": "rose",
+          "start": true,
+          "startName": "Frosthylite"
+        },
+        {
+          "id": "n128",
+          "x": 340,
+          "y": -140,
+          "type": "minor",
+          "title": "Healing done",
+          "text": "+5% healing done",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n129",
+          "x": 420,
+          "y": -180,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n130",
+          "x": 500,
+          "y": -200,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n131",
+          "x": 600,
+          "y": -240,
+          "type": "minor",
+          "title": "Healing done",
+          "text": "+5% healing done",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n132",
+          "x": 680,
+          "y": -280,
+          "type": "notable",
+          "title": "Patch Notes",
+          "text": "+20% healing done.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n133",
+          "x": 760,
+          "y": -320,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n134",
+          "x": 840,
+          "y": -340,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n135",
+          "x": 920,
+          "y": -380,
+          "type": "notable",
+          "title": "Hotfix",
+          "text": "Cleric healing abilities also remove 1 harmful effect.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n136",
+          "x": 1000,
+          "y": -420,
+          "type": "minor",
+          "title": "Healing done",
+          "text": "+5% healing done",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n137",
+          "x": 1100,
+          "y": -460,
+          "type": "keystone",
+          "title": "Restore Point",
+          "text": "Overhealing becomes a shield (up to 25% of maximum health). Cleric HARMFUL abilities deal 30% less damage.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n138",
+          "x": 600,
+          "y": -320,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n139",
+          "x": 660,
+          "y": -380,
+          "type": "minor",
+          "title": "Healing done",
+          "text": "+5% healing done",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n140",
+          "x": 740,
+          "y": -420,
+          "type": "notable",
+          "title": "Bedside Manner",
+          "text": "+10 Health. +10% healing received.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n141",
+          "x": 900,
+          "y": -300,
+          "type": "minor",
+          "title": "Defense",
+          "text": "+3 Defense",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n142",
+          "x": 1000,
+          "y": -320,
+          "type": "notable",
+          "title": "Triage",
+          "text": "+40% healing on allies below 30% health.",
+          "tint": "green",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n143",
+          "x": 540,
+          "y": -140,
+          "type": "minor",
+          "title": "Cleric start",
+          "text": "Home discipline: Cleric.",
+          "tint": "green",
+          "start": true,
+          "startName": "Bitlynx"
+        },
+        {
+          "id": "n144",
+          "x": 400,
+          "y": -240,
+          "type": "minor",
+          "title": "Cleric start",
+          "text": "Home discipline: Cleric.",
+          "tint": "green",
+          "start": true,
+          "startName": "Mossy Kitty"
+        },
+        {
+          "id": "n146",
+          "x": 340,
+          "y": 80,
+          "type": "minor",
+          "title": "Diviner Damage",
+          "text": "+4% Diviner damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n147",
+          "x": 420,
+          "y": 120,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n148",
+          "x": 500,
+          "y": 180,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n149",
+          "x": 580,
+          "y": 220,
+          "type": "minor",
+          "title": "Diviner Damage",
+          "text": "+4% Diviner damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n150",
+          "x": 660,
+          "y": 260,
+          "type": "notable",
+          "title": "Far Sight",
+          "text": "+1 range on Diviner abilities.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n151",
+          "x": 720,
+          "y": 300,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n152",
+          "x": 800,
+          "y": 360,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n153",
+          "x": 880,
+          "y": 400,
+          "type": "notable",
+          "title": "Read the Logs",
+          "text": "Diviner abilities reveal stealthed enemies in their area.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n154",
+          "x": 960,
+          "y": 440,
+          "type": "minor",
+          "title": "Diviner Damage",
+          "text": "+4% Diviner damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n155",
+          "x": 1060,
+          "y": 500,
+          "type": "keystone",
+          "title": "Long Range",
+          "text": "+2 range on all abilities. -25% damage against adjacent enemies.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n156",
+          "x": 640,
+          "y": 180,
+          "type": "minor",
+          "title": "Luck",
+          "text": "+3 Luck",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n157",
+          "x": 720,
+          "y": 200,
+          "type": "minor",
+          "title": "Diviner Damage",
+          "text": "+4% Diviner damage",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n158",
+          "x": 800,
+          "y": 240,
+          "type": "notable",
+          "title": "Lucky Star",
+          "text": "+8 Luck.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n159",
+          "x": 800,
+          "y": 440,
+          "type": "minor",
+          "title": "Speed",
+          "text": "+3 Speed",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n160",
+          "x": 860,
+          "y": 500,
+          "type": "notable",
+          "title": "Prophecy",
+          "text": "Diviner buffs last 1 turn longer.",
+          "tint": "teal",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n161",
+          "x": 460,
+          "y": 240,
+          "type": "minor",
+          "title": "Diviner start",
+          "text": "Home discipline: Diviner.",
+          "tint": "teal",
+          "start": true,
+          "startName": "Odinther"
+        },
+        {
+          "id": "n162",
+          "x": 460,
+          "y": 60,
+          "type": "minor",
+          "title": "Diviner start",
+          "text": "Home discipline: Diviner.",
+          "tint": "teal",
+          "start": true,
+          "startName": "Megalos"
+        },
+        {
+          "id": "n164",
+          "x": 120,
+          "y": 200,
+          "type": "minor",
+          "title": "Sorcerer Damage",
+          "text": "+4% Sorcerer damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n165",
+          "x": 120,
+          "y": 280,
+          "type": "minor",
+          "title": "Elemental Damage",
+          "text": "+3 Elemental Damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n166",
+          "x": 120,
+          "y": 360,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n167",
+          "x": 120,
+          "y": 460,
+          "type": "minor",
+          "title": "Sorcerer Damage",
+          "text": "+4% Sorcerer damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n168",
+          "x": 120,
+          "y": 560,
+          "type": "notable",
+          "title": "Kindling",
+          "text": "+15% fire, frost, water and electric damage.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n169",
+          "x": 120,
+          "y": 640,
+          "type": "minor",
+          "title": "Elemental Damage",
+          "text": "+3 Elemental Damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n170",
+          "x": 120,
+          "y": 720,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n171",
+          "x": 120,
+          "y": 820,
+          "type": "notable",
+          "title": "Chain Reaction",
+          "text": "+1 radius on Sorcerer AREA abilities.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n172",
+          "x": 120,
+          "y": 920,
+          "type": "minor",
+          "title": "Sorcerer Damage",
+          "text": "+4% Sorcerer damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n173",
+          "x": 120,
+          "y": 1020,
+          "type": "keystone",
+          "title": "Overclock",
+          "text": "+40% Sorcerer damage. Sorcerer abilities cost +1 AP and cost 5% of your maximum health.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n174",
+          "x": 200,
+          "y": 500,
+          "type": "minor",
+          "title": "Elemental Damage",
+          "text": "+3 Elemental Damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n175",
+          "x": 200,
+          "y": 580,
+          "type": "minor",
+          "title": "Sorcerer Damage",
+          "text": "+4% Sorcerer damage",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n176",
+          "x": 220,
+          "y": 660,
+          "type": "notable",
+          "title": "Element Affinity",
+          "text": "+5 to each elemental damage stat.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n177",
+          "x": 40,
+          "y": 760,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n178",
+          "x": 20,
+          "y": 860,
+          "type": "notable",
+          "title": "Conductor",
+          "text": "Sorcerer abilities that hit a surface spread it 1 tile.",
+          "tint": "blue",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n179",
+          "x": 40,
+          "y": 360,
+          "type": "minor",
+          "title": "Sorcerer start",
+          "text": "Home discipline: Sorcerer.",
+          "tint": "blue",
+          "start": true,
+          "startName": "Pythamese"
+        },
+        {
+          "id": "n180",
+          "x": 200,
+          "y": 280,
+          "type": "minor",
+          "title": "Sorcerer start",
+          "text": "Home discipline: Sorcerer.",
+          "tint": "blue",
+          "start": true,
+          "startName": "Shockitty · Frosthlyne"
+        },
+        {
+          "id": "n182",
+          "x": 300,
+          "y": 260,
+          "type": "minor",
+          "title": "Necromancer Damage",
+          "text": "+4% Necromancer damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n183",
+          "x": 360,
+          "y": 340,
+          "type": "minor",
+          "title": "Poison Damage",
+          "text": "+3 Poison Damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n184",
+          "x": 400,
+          "y": 400,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n185",
+          "x": 460,
+          "y": 480,
+          "type": "minor",
+          "title": "Necromancer Damage",
+          "text": "+4% Necromancer damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n186",
+          "x": 500,
+          "y": 560,
+          "type": "notable",
+          "title": "Rot",
+          "text": "+20% damage from Necromancer damage-over-time effects.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n187",
+          "x": 540,
+          "y": 640,
+          "type": "minor",
+          "title": "Poison Damage",
+          "text": "+3 Poison Damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n188",
+          "x": 600,
+          "y": 720,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n189",
+          "x": 640,
+          "y": 780,
+          "type": "notable",
+          "title": "Leech",
+          "text": "Heal for 10% of Necromancer damage dealt.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n190",
+          "x": 700,
+          "y": 860,
+          "type": "minor",
+          "title": "Necromancer Damage",
+          "text": "+4% Necromancer damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n191",
+          "x": 760,
+          "y": 960,
+          "type": "keystone",
+          "title": "Garbage Collector",
+          "text": "When any creature is knocked out within 3 tiles, heal 20% of maximum health and gain 2 AP. You can't be healed by allies.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n192",
+          "x": 540,
+          "y": 480,
+          "type": "minor",
+          "title": "Poison Damage",
+          "text": "+3 Poison Damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n193",
+          "x": 600,
+          "y": 540,
+          "type": "minor",
+          "title": "Necromancer Damage",
+          "text": "+4% Necromancer damage",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n194",
+          "x": 640,
+          "y": 600,
+          "type": "notable",
+          "title": "Toxic Load",
+          "text": "+8 Poison Damage, +8 Poison Defense.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n195",
+          "x": 560,
+          "y": 780,
+          "type": "minor",
+          "title": "Health",
+          "text": "+3 Health",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n196",
+          "x": 580,
+          "y": 860,
+          "type": "notable",
+          "title": "Undying Process",
+          "text": "Conjured entities have +30% health.",
+          "tint": "violet",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n197",
+          "x": 340,
+          "y": 460,
+          "type": "minor",
+          "title": "Necromancer start",
+          "text": "Home discipline: Necromancer.",
+          "tint": "violet",
+          "start": true,
+          "startName": "Nybble"
+        },
+        {
+          "id": "n199",
+          "x": -60,
+          "y": 260,
+          "type": "minor",
+          "title": "Warlock Damage",
+          "text": "+4% Warlock damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n200",
+          "x": -120,
+          "y": 340,
+          "type": "minor",
+          "title": "Technical Damage",
+          "text": "+3 Technical Damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n201",
+          "x": -160,
+          "y": 400,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n202",
+          "x": -220,
+          "y": 480,
+          "type": "minor",
+          "title": "Warlock Damage",
+          "text": "+4% Warlock damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n203",
+          "x": -260,
+          "y": 560,
+          "type": "notable",
+          "title": "Malware",
+          "text": "+15% technical damage.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n204",
+          "x": -300,
+          "y": 640,
+          "type": "minor",
+          "title": "Technical Damage",
+          "text": "+3 Technical Damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n205",
+          "x": -360,
+          "y": 720,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n206",
+          "x": -400,
+          "y": 780,
+          "type": "notable",
+          "title": "Blood Price",
+          "text": "Warlock abilities can be paid with health instead of AP (10% of maximum health per AP).",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n207",
+          "x": -460,
+          "y": 860,
+          "type": "minor",
+          "title": "Warlock Damage",
+          "text": "+4% Warlock damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n208",
+          "x": -520,
+          "y": 960,
+          "type": "keystone",
+          "title": "Forbidden Pact",
+          "text": "+50% Warlock damage. Lose 5% of maximum health at the start of each of your turns.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n209",
+          "x": -180,
+          "y": 560,
+          "type": "minor",
+          "title": "Technical Damage",
+          "text": "+3 Technical Damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n210",
+          "x": -200,
+          "y": 640,
+          "type": "minor",
+          "title": "Warlock Damage",
+          "text": "+4% Warlock damage",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n211",
+          "x": -240,
+          "y": 700,
+          "type": "notable",
+          "title": "Firewall",
+          "text": "+8 Technical Defense, +6 Defense.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n212",
+          "x": -440,
+          "y": 700,
+          "type": "minor",
+          "title": "Attack",
+          "text": "+3 Attack",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n213",
+          "x": -500,
+          "y": 760,
+          "type": "notable",
+          "title": "Exploit",
+          "text": "Warlock HARMFUL effects also reduce the target's Defense by 5 for 2 turns.",
+          "tint": "red",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n214",
+          "x": -240,
+          "y": 360,
+          "type": "minor",
+          "title": "Warlock start",
+          "text": "Home discipline: Warlock.",
+          "tint": "red",
+          "start": true,
+          "startName": "Hasketty"
+        },
+        {
+          "id": "n215",
+          "x": -40,
+          "y": 380,
+          "type": "minor",
+          "title": "Warlock start",
+          "text": "Home discipline: Warlock.",
+          "tint": "red",
+          "start": true,
+          "startName": "Perlsian"
+        },
+        {
+          "id": "n217",
+          "x": -440,
+          "y": 0,
+          "type": "minor",
+          "title": "Rogue/Trickster start",
+          "text": "Hybrid start between Rogue and Trickster.",
+          "tint": "none",
+          "start": true,
+          "startName": "Mogue"
+        },
+        {
+          "id": "n218",
+          "x": -420,
+          "y": -80,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n3",
-          "x": 151,
-          "y": -59,
+          "id": "n219",
+          "x": -380,
+          "y": -160,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n4",
-          "x": -18,
-          "y": 127,
+          "id": "n220",
+          "x": -400,
+          "y": 60,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n5",
-          "x": -207,
-          "y": -18,
+          "id": "n221",
+          "x": -380,
+          "y": 140,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n6",
-          "x": -27,
-          "y": -68,
+          "id": "n222",
+          "x": -340,
+          "y": -440,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Rogue/Mercenary start",
+          "text": "Hybrid start between Rogue and Mercenary.",
+          "tint": "none",
+          "start": true,
+          "startName": "Zigion"
+        },
+        {
+          "id": "n223",
+          "x": -360,
+          "y": -380,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
         },
         {
-          "id": "n7",
-          "x": -128,
-          "y": -113,
+          "id": "n224",
+          "x": -360,
+          "y": -300,
           "type": "minor",
-          "title": "",
-          "text": "",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n225",
+          "x": -300,
+          "y": -480,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n226",
+          "x": -260,
+          "y": -520,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n227",
+          "x": -40,
+          "y": 540,
+          "type": "minor",
+          "title": "Sorcerer/Warlock start",
+          "text": "Hybrid start between Sorcerer and Warlock.",
+          "tint": "none",
+          "start": true,
+          "startName": "Sparkline"
+        },
+        {
+          "id": "n228",
+          "x": 0,
+          "y": 520,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n229",
+          "x": 60,
+          "y": 480,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n230",
+          "x": -100,
+          "y": 520,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
+          "tint": "none",
+          "start": false,
+          "startName": ""
+        },
+        {
+          "id": "n231",
+          "x": -160,
+          "y": 500,
+          "type": "minor",
+          "title": "Crossroads",
+          "text": "+2 Speed, +2 Luck.",
           "tint": "none",
           "start": false,
           "startName": ""
@@ -250,35 +2440,990 @@
       ],
       "edges": [
         [
-          "n1",
-          "n2"
+          "n11",
+          "n12"
         ],
         [
-          "n1",
-          "n7"
+          "n11",
+          "n16"
         ],
         [
-          "n2",
-          "n3"
+          "n11",
+          "n17"
         ],
         [
-          "n3",
-          "n4"
+          "n11",
+          "n28"
         ],
         [
-          "n4",
-          "n5"
+          "n11",
+          "n56"
         ],
         [
-          "n5",
-          "n6"
+          "n12",
+          "n13"
         ],
         [
-          "n6",
-          "n7"
+          "n12",
+          "n17"
+        ],
+        [
+          "n12",
+          "n28"
+        ],
+        [
+          "n12",
+          "n29"
+        ],
+        [
+          "n12",
+          "n92"
+        ],
+        [
+          "n13",
+          "n14"
+        ],
+        [
+          "n13",
+          "n17"
+        ],
+        [
+          "n13",
+          "n29"
+        ],
+        [
+          "n13",
+          "n128"
+        ],
+        [
+          "n14",
+          "n15"
+        ],
+        [
+          "n14",
+          "n17"
+        ],
+        [
+          "n14",
+          "n24"
+        ],
+        [
+          "n14",
+          "n146"
+        ],
+        [
+          "n15",
+          "n16"
+        ],
+        [
+          "n15",
+          "n17"
+        ],
+        [
+          "n15",
+          "n24"
+        ],
+        [
+          "n15",
+          "n25"
+        ],
+        [
+          "n15",
+          "n164"
+        ],
+        [
+          "n16",
+          "n17"
+        ],
+        [
+          "n16",
+          "n25"
+        ],
+        [
+          "n16",
+          "n74"
+        ],
+        [
+          "n24",
+          "n182"
+        ],
+        [
+          "n25",
+          "n199"
+        ],
+        [
+          "n28",
+          "n38"
+        ],
+        [
+          "n29",
+          "n110"
+        ],
+        [
+          "n38",
+          "n39"
+        ],
+        [
+          "n39",
+          "n40"
+        ],
+        [
+          "n39",
+          "n54"
+        ],
+        [
+          "n40",
+          "n41"
+        ],
+        [
+          "n40",
+          "n53"
+        ],
+        [
+          "n41",
+          "n42"
+        ],
+        [
+          "n41",
+          "n48"
+        ],
+        [
+          "n41",
+          "n226"
+        ],
+        [
+          "n42",
+          "n43"
+        ],
+        [
+          "n43",
+          "n44"
+        ],
+        [
+          "n44",
+          "n45"
+        ],
+        [
+          "n44",
+          "n51"
+        ],
+        [
+          "n45",
+          "n46"
+        ],
+        [
+          "n46",
+          "n47"
+        ],
+        [
+          "n48",
+          "n49"
+        ],
+        [
+          "n49",
+          "n50"
+        ],
+        [
+          "n51",
+          "n52"
+        ],
+        [
+          "n56",
+          "n57"
+        ],
+        [
+          "n57",
+          "n58"
+        ],
+        [
+          "n57",
+          "n72"
+        ],
+        [
+          "n58",
+          "n59"
+        ],
+        [
+          "n58",
+          "n71"
+        ],
+        [
+          "n59",
+          "n60"
+        ],
+        [
+          "n59",
+          "n66"
+        ],
+        [
+          "n59",
+          "n219"
+        ],
+        [
+          "n59",
+          "n224"
+        ],
+        [
+          "n60",
+          "n61"
+        ],
+        [
+          "n61",
+          "n62"
+        ],
+        [
+          "n62",
+          "n63"
+        ],
+        [
+          "n62",
+          "n69"
+        ],
+        [
+          "n63",
+          "n64"
+        ],
+        [
+          "n64",
+          "n65"
+        ],
+        [
+          "n66",
+          "n67"
+        ],
+        [
+          "n67",
+          "n68"
+        ],
+        [
+          "n69",
+          "n70"
+        ],
+        [
+          "n74",
+          "n75"
+        ],
+        [
+          "n75",
+          "n76"
+        ],
+        [
+          "n75",
+          "n90"
+        ],
+        [
+          "n76",
+          "n77"
+        ],
+        [
+          "n76",
+          "n89"
+        ],
+        [
+          "n77",
+          "n78"
+        ],
+        [
+          "n77",
+          "n84"
+        ],
+        [
+          "n77",
+          "n221"
+        ],
+        [
+          "n78",
+          "n79"
+        ],
+        [
+          "n79",
+          "n80"
+        ],
+        [
+          "n80",
+          "n81"
+        ],
+        [
+          "n80",
+          "n87"
+        ],
+        [
+          "n81",
+          "n82"
+        ],
+        [
+          "n82",
+          "n83"
+        ],
+        [
+          "n84",
+          "n85"
+        ],
+        [
+          "n85",
+          "n86"
+        ],
+        [
+          "n87",
+          "n88"
+        ],
+        [
+          "n92",
+          "n93"
+        ],
+        [
+          "n93",
+          "n94"
+        ],
+        [
+          "n93",
+          "n108"
+        ],
+        [
+          "n94",
+          "n95"
+        ],
+        [
+          "n94",
+          "n107"
+        ],
+        [
+          "n95",
+          "n96"
+        ],
+        [
+          "n95",
+          "n102"
+        ],
+        [
+          "n96",
+          "n97"
+        ],
+        [
+          "n97",
+          "n98"
+        ],
+        [
+          "n98",
+          "n99"
+        ],
+        [
+          "n98",
+          "n105"
+        ],
+        [
+          "n99",
+          "n100"
+        ],
+        [
+          "n100",
+          "n101"
+        ],
+        [
+          "n102",
+          "n103"
+        ],
+        [
+          "n103",
+          "n104"
+        ],
+        [
+          "n105",
+          "n106"
+        ],
+        [
+          "n110",
+          "n111"
+        ],
+        [
+          "n111",
+          "n112"
+        ],
+        [
+          "n111",
+          "n126"
+        ],
+        [
+          "n112",
+          "n113"
+        ],
+        [
+          "n112",
+          "n125"
+        ],
+        [
+          "n113",
+          "n114"
+        ],
+        [
+          "n113",
+          "n120"
+        ],
+        [
+          "n114",
+          "n115"
+        ],
+        [
+          "n115",
+          "n116"
+        ],
+        [
+          "n116",
+          "n117"
+        ],
+        [
+          "n116",
+          "n123"
+        ],
+        [
+          "n117",
+          "n118"
+        ],
+        [
+          "n118",
+          "n119"
+        ],
+        [
+          "n120",
+          "n121"
+        ],
+        [
+          "n121",
+          "n122"
+        ],
+        [
+          "n123",
+          "n124"
+        ],
+        [
+          "n128",
+          "n129"
+        ],
+        [
+          "n129",
+          "n130"
+        ],
+        [
+          "n129",
+          "n144"
+        ],
+        [
+          "n130",
+          "n131"
+        ],
+        [
+          "n130",
+          "n143"
+        ],
+        [
+          "n131",
+          "n132"
+        ],
+        [
+          "n131",
+          "n138"
+        ],
+        [
+          "n132",
+          "n133"
+        ],
+        [
+          "n133",
+          "n134"
+        ],
+        [
+          "n134",
+          "n135"
+        ],
+        [
+          "n134",
+          "n141"
+        ],
+        [
+          "n135",
+          "n136"
+        ],
+        [
+          "n136",
+          "n137"
+        ],
+        [
+          "n138",
+          "n139"
+        ],
+        [
+          "n139",
+          "n140"
+        ],
+        [
+          "n141",
+          "n142"
+        ],
+        [
+          "n146",
+          "n147"
+        ],
+        [
+          "n147",
+          "n148"
+        ],
+        [
+          "n147",
+          "n162"
+        ],
+        [
+          "n148",
+          "n149"
+        ],
+        [
+          "n148",
+          "n161"
+        ],
+        [
+          "n149",
+          "n150"
+        ],
+        [
+          "n149",
+          "n156"
+        ],
+        [
+          "n150",
+          "n151"
+        ],
+        [
+          "n151",
+          "n152"
+        ],
+        [
+          "n152",
+          "n153"
+        ],
+        [
+          "n152",
+          "n159"
+        ],
+        [
+          "n153",
+          "n154"
+        ],
+        [
+          "n154",
+          "n155"
+        ],
+        [
+          "n156",
+          "n157"
+        ],
+        [
+          "n157",
+          "n158"
+        ],
+        [
+          "n159",
+          "n160"
+        ],
+        [
+          "n164",
+          "n165"
+        ],
+        [
+          "n165",
+          "n166"
+        ],
+        [
+          "n165",
+          "n180"
+        ],
+        [
+          "n166",
+          "n167"
+        ],
+        [
+          "n166",
+          "n179"
+        ],
+        [
+          "n167",
+          "n168"
+        ],
+        [
+          "n167",
+          "n174"
+        ],
+        [
+          "n167",
+          "n229"
+        ],
+        [
+          "n168",
+          "n169"
+        ],
+        [
+          "n169",
+          "n170"
+        ],
+        [
+          "n170",
+          "n171"
+        ],
+        [
+          "n170",
+          "n177"
+        ],
+        [
+          "n171",
+          "n172"
+        ],
+        [
+          "n172",
+          "n173"
+        ],
+        [
+          "n174",
+          "n175"
+        ],
+        [
+          "n175",
+          "n176"
+        ],
+        [
+          "n177",
+          "n178"
+        ],
+        [
+          "n182",
+          "n183"
+        ],
+        [
+          "n183",
+          "n184"
+        ],
+        [
+          "n184",
+          "n185"
+        ],
+        [
+          "n184",
+          "n197"
+        ],
+        [
+          "n185",
+          "n186"
+        ],
+        [
+          "n185",
+          "n192"
+        ],
+        [
+          "n186",
+          "n187"
+        ],
+        [
+          "n187",
+          "n188"
+        ],
+        [
+          "n188",
+          "n189"
+        ],
+        [
+          "n188",
+          "n195"
+        ],
+        [
+          "n189",
+          "n190"
+        ],
+        [
+          "n190",
+          "n191"
+        ],
+        [
+          "n192",
+          "n193"
+        ],
+        [
+          "n193",
+          "n194"
+        ],
+        [
+          "n195",
+          "n196"
+        ],
+        [
+          "n199",
+          "n200"
+        ],
+        [
+          "n200",
+          "n201"
+        ],
+        [
+          "n200",
+          "n215"
+        ],
+        [
+          "n201",
+          "n202"
+        ],
+        [
+          "n201",
+          "n214"
+        ],
+        [
+          "n202",
+          "n203"
+        ],
+        [
+          "n202",
+          "n209"
+        ],
+        [
+          "n202",
+          "n231"
+        ],
+        [
+          "n203",
+          "n204"
+        ],
+        [
+          "n204",
+          "n205"
+        ],
+        [
+          "n205",
+          "n206"
+        ],
+        [
+          "n205",
+          "n212"
+        ],
+        [
+          "n206",
+          "n207"
+        ],
+        [
+          "n207",
+          "n208"
+        ],
+        [
+          "n209",
+          "n210"
+        ],
+        [
+          "n210",
+          "n211"
+        ],
+        [
+          "n212",
+          "n213"
+        ],
+        [
+          "n217",
+          "n218"
+        ],
+        [
+          "n217",
+          "n220"
+        ],
+        [
+          "n218",
+          "n219"
+        ],
+        [
+          "n220",
+          "n221"
+        ],
+        [
+          "n222",
+          "n223"
+        ],
+        [
+          "n222",
+          "n225"
+        ],
+        [
+          "n223",
+          "n224"
+        ],
+        [
+          "n225",
+          "n226"
+        ],
+        [
+          "n227",
+          "n228"
+        ],
+        [
+          "n227",
+          "n230"
+        ],
+        [
+          "n228",
+          "n229"
+        ],
+        [
+          "n230",
+          "n231"
         ]
       ],
-      "notes": [],
+      "notes": [
+        {
+          "id": "m18",
+          "x": 280,
+          "y": -80,
+          "text": "Cleric",
+          "size": "m"
+        },
+        {
+          "id": "m19",
+          "x": 280,
+          "y": 60,
+          "text": "Diviner",
+          "size": "m"
+        },
+        {
+          "id": "m20",
+          "x": 80,
+          "y": 120,
+          "text": "Sorcerer",
+          "size": "m"
+        },
+        {
+          "id": "m21",
+          "x": -120,
+          "y": 60,
+          "text": "Trickster",
+          "size": "m"
+        },
+        {
+          "id": "m22",
+          "x": -100,
+          "y": -80,
+          "text": "Rogue",
+          "size": "m"
+        },
+        {
+          "id": "m23",
+          "x": 80,
+          "y": -220,
+          "text": "Crusader",
+          "size": "m"
+        },
+        {
+          "id": "m26",
+          "x": -120,
+          "y": 200,
+          "text": "Warlock",
+          "size": "m"
+        },
+        {
+          "id": "m27",
+          "x": 280,
+          "y": 200,
+          "text": "Necromancer",
+          "size": "m"
+        },
+        {
+          "id": "m30",
+          "x": -140,
+          "y": -300,
+          "text": "Mercenary",
+          "size": "m"
+        },
+        {
+          "id": "m31",
+          "x": 282,
+          "y": -295,
+          "text": "Paladin",
+          "size": "m"
+        },
+        {
+          "id": "m55",
+          "x": -640,
+          "y": -1120,
+          "text": "Mercenary",
+          "size": "l"
+        },
+        {
+          "id": "m73",
+          "x": -1020,
+          "y": -500,
+          "text": "Rogue",
+          "size": "l"
+        },
+        {
+          "id": "m91",
+          "x": -980,
+          "y": 540,
+          "text": "Trickster",
+          "size": "l"
+        },
+        {
+          "id": "m109",
+          "x": 60,
+          "y": -1200,
+          "text": "Crusader",
+          "size": "l"
+        },
+        {
+          "id": "m127",
+          "x": 760,
+          "y": -1120,
+          "text": "Paladin",
+          "size": "l"
+        },
+        {
+          "id": "m145",
+          "x": 1140,
+          "y": -500,
+          "text": "Cleric",
+          "size": "l"
+        },
+        {
+          "id": "m163",
+          "x": 1100,
+          "y": 540,
+          "text": "Diviner",
+          "size": "l"
+        },
+        {
+          "id": "m181",
+          "x": 60,
+          "y": 1120,
+          "text": "Sorcerer",
+          "size": "l"
+        },
+        {
+          "id": "m198",
+          "x": 760,
+          "y": 1040,
+          "text": "Necromancer",
+          "size": "l"
+        },
+        {
+          "id": "m216",
+          "x": -640,
+          "y": 1040,
+          "text": "Warlock",
+          "size": "l"
+        },
+        {
+          "id": "m232",
+          "x": -880,
+          "y": -1120,
+          "text": "Full tree draft: first pass, every value is a placeholder to tune",
+          "size": "l"
+        },
+        {
+          "id": "m233",
+          "x": -880,
+          "y": -1060,
+          "text": "25 points from Friendship. Own keystone ~8 from a start, a neighbor's ~15. Dashed rings = kitty starts. Root Access (center) = generalist.",
+          "size": "s"
+        }
+      ],
       "placements": []
     }
   ]
